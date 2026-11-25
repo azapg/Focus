@@ -29,6 +29,7 @@ const panel = document.getElementById('panel');
 const judgeSheet = document.getElementById('dockPauseJudge');
 panel.style.setProperty('--maxh', `${Math.min(innerHeight, screen.availHeight) - 66}px`);
 let earnedCredit = 0;
+let habitDue = 0, habitOverdue = 0, liveFocusState = null;
 const habitOverlays = ["habitQuick", "habitEditor", "habitFloat"].map((id) => document.getElementById(id));
 let panelOpen = false, range = 'today', panelTimer, panelOpening = 0;
 const nudgeButton = document.getElementById('habitNudge');
@@ -204,6 +205,7 @@ function render() {
     drain.style.width = '0';
     if (w.dataset.state === 'paused') setState(inside ? 'hover' : 'idle');
   }
+  syncPillTone();
   syncRatingPrompt();
 }
 function apply(v) {
@@ -248,10 +250,43 @@ function publishPauseLimit() {
   }).catch(e => log(`publish pause limit: ${e}`));
 }
 
+function limitState() {
+  const limitMin = FocusLimits.get().dnsLimitMin + earnedCredit;
+  const offMin = today.offMs / Stats.MIN;
+  const leftMin = limitMin - offMin;
+  const frac = limitMin > 0 ? offMin / limitMin : 0;
+  const over = offMin > limitMin + 0.5;
+  const reached = over || leftMin < 1;
+  return { limitMin, offMin, leftMin, frac, over, reached };
+}
+
+function syncPillTone() {
+  const { frac, reached } = limitState();
+  const tone = reached || habitOverdue > 0 || liveFocusState === 'unfocused' || view.dns_configured === false
+    ? 'bad'
+    : frac >= 0.75 || paused() || view.scoped_until != null || habitDue > 0 || liveFocusState === 'drifting'
+      ? 'warn'
+      : 'ok';
+  if (w.dataset.tone !== tone) w.dataset.tone = tone;
+  const focus = liveFocusState === 'drifting' || liveFocusState === 'unfocused' ? liveFocusState : '';
+  if ((w.dataset.focus || '') !== focus) {
+    if (focus) w.dataset.focus = focus;
+    else delete w.dataset.focus;
+  }
+}
+
 function updateAllowance() {
   const { offMs } = today;
-  const leftMin = FocusLimits.get().dnsLimitMin + earnedCredit - offMs / Stats.MIN;
-  aOff.textContent = `${Stats.fmt(offMs)} off · ${leftMin < 1 ? 'limit reached' : `${Stats.fmt(leftMin * Stats.MIN)} left`}`;
+  const { limitMin, offMin, leftMin, frac, over, reached } = limitState();
+  const tail = over
+    ? `${Stats.fmt((offMin - limitMin) * Stats.MIN)} over`
+    : leftMin < 1
+      ? 'limit reached'
+      : `${Stats.fmt(leftMin * Stats.MIN)} left`;
+  aOff.textContent = `${Stats.fmt(offMs)} off · ${tail}`;
+  aOff.classList.toggle('bad', reached);
+  aOff.classList.toggle('warn', !reached && frac >= 0.75);
+  syncPillTone();
   syncChips();
   if (w.dataset.state === 'hover') setState('hover');
 }
@@ -276,6 +311,7 @@ const amb = w.querySelector('.amb');
 async function refreshPanel() {
   try {
     await DevicePanel.render(invoke, range);
+    refreshToday().catch(() => {});
     document.getElementById('pDate').textContent = range === 'today'
       ? new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'Last 7 days';
     reportHit();
@@ -482,7 +518,11 @@ const overlayObserver = new ResizeObserver(reportHit);
 let portalFrame;
 new MutationObserver(() => { cancelAnimationFrame(portalFrame); portalFrame = requestAnimationFrame(reportHit); }).observe(document.body, { childList: true, subtree: true });
 DevicePanel.init(invoke, (nextRange) => { if (nextRange) setRange(nextRange); if (panelOpen) refreshPanel(); }, reportHit);
-const habits = mountHabits(invoke, (credit, due) => {
+const habits = mountHabits(invoke, (credit, due, overdue) => {
+  if (due !== undefined) {
+    habitDue = due;
+    habitOverdue = overdue || 0;
+  }
   if (due === 0) nudgeText = null;
   const changed = credit !== earnedCredit;
   earnedCredit = credit;
@@ -499,9 +539,15 @@ document.getElementById('habitTrigger').addEventListener('click', () => {
 });
 T.event.listen('habits', e => habits.refresh(e.payload));
 T.event.listen('habits-updated', () => habits.load());
+T.event.listen('focus-state-transition', e => {
+  liveFocusState = e.payload?.to ?? null;
+  syncPillTone();
+  if (w.dataset.state === 'hover') setState('hover');
+});
 T.event.listen('habits-nudge', e => {
   nudgeText = e.payload;
   nudgeButton.textContent = nudgeText || '';
+  nudgeButton.classList.toggle('locked', Boolean(nudgeText && /locked/i.test(nudgeText)));
   reportHit();
 });
 function dismissNudge() {

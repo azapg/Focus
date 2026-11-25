@@ -459,15 +459,15 @@ public final class ActivityClassifier {
     fine("learning", "Learning", FG_LEARN, 0xFFA1A1AA);
     fine("reading", "Reading", FG_LEARN, 0xFF8F8F98);
     fine("messaging", "Messaging", FG_CONNECT, 0xFF71717A);
-    fine("social", "Social feeds", FG_DRIFT, 0xFF7C7C85);
-    fine("video", "Videos", FG_DRIFT, 0xFF7C7C85);
-    fine("tv", "TV & streams", FG_DRIFT, 0xFF7C7C85);
-    fine("music", "Music", FG_DRIFT, 0xFF63636C);
-    fine("games", "Games", FG_DRIFT, 0xFF7C7C85);
-    fine("news", "News", FG_DRIFT, 0xFF52525B);
-    fine("shopping", "Shopping", FG_DRIFT, 0xFF52525B);
-    fine("web", "Web", FG_DRIFT, 0xFF52525B);
-    fine("adult", "Adult", FG_DRIFT, 0xFF52525B);
+    fine("social", "Social feeds", FG_DRIFT, 0xFFF59E0B);
+    fine("video", "Videos", FG_DRIFT, 0xFFE58E26);
+    fine("tv", "TV & streams", FG_DRIFT, 0xFFD97706);
+    fine("music", "Music", FG_NEUTRAL, 0xFF63636C);
+    fine("games", "Games", FG_DRIFT, 0xFFEA580C);
+    fine("news", "News", FG_DRIFT, 0xFF71717A);
+    fine("shopping", "Shopping", FG_DRIFT, 0xFF71717A);
+    fine("web", "Web", FG_NEUTRAL, 0xFF52525B);
+    fine("adult", "Adult", FG_DRIFT, 0xFFEF4444);
     fine("errands", "Errands", FG_NEUTRAL, 0xFF52525B);
     fine("unsorted", "Not sure", FG_NEUTRAL, 0xFF3F3F46);
   }

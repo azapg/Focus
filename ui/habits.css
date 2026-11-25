@@ -12,7 +12,8 @@
 }
 .habit-heading { color: #a1a1aa; min-height: 25px; margin-bottom: 5px; }
 .habit-heading b { padding-left: 4px; color: #fafafa; font-weight: 500; }
-.habit-heading .habit-attention, .habit-action.habit-attention, .habit-hold b { color: #e09f3e; }
+.habit-heading .habit-attention, .habit-action.habit-attention, .habit-hold b.habit-attention { color: #f59e0b; }
+.habit-heading .habit-breach, .habit-action.habit-breach, .habit-hold b.habit-breach { color: #f87171; }
 .habit-action, .habit-settings-row, .habit-done-row {
   color: #d4d4d8; background: transparent; border: 0; border-radius: 6px;
   font: inherit; padding: 4px 8px; cursor: pointer;
@@ -24,9 +25,9 @@
 }
 .habit-hold::before {
   content: ''; position: absolute; inset: 0; transform: scaleX(0); transform-origin: left;
-  background: #c27a124d; transition: transform 160ms ease-out; pointer-events: none;
+  background: rgba(250, 250, 250, 0.14); transition: transform 160ms ease-out; pointer-events: none;
 }
-.habit-hold.holding { transform: scale(.988); border-color: #c27a1261; }
+.habit-hold.holding { transform: scale(.988); border-color: #52525b; }
 .habit-hold.holding::before { transform: scaleX(1); transition: transform 650ms linear; }
 .habit-hold.leaving { opacity: 0; transform: translateX(18px) scale(.97); pointer-events: none; }
 .habit-hold.leaving::before { transform: scaleX(1); background: #fafafa38; }
@@ -53,7 +54,8 @@
 .habit-history i { width: 8px; height: 8px; border: 1px solid #52525b; border-radius: 50%; }
 .habit-history .done { background: #d4d4d8; }
 .habit-history .off { border-color: #27272a; }
-.habit-history .due { border-color: #e09f3e; }
+.habit-history .due { border-color: #f59e0b; }
+.habit-history .miss { border-color: #ef4444; }
 #habitQuick, #habitFloat, #habitEditor {
   position: absolute; z-index: 15; left: 50%; transform: translateX(-50%); width: min(360px, calc(100% - 22px));
 }
@@ -76,7 +78,11 @@
 .habit-credit { padding: 7px 13px; border-top: 1px solid #19191c; color: #a1a1aa; font-size: 11.5px; }
 #habitNudge {
   position: absolute; z-index: 16; top: 8px; left: 50%; transform: translateX(-50%);
-  min-height: 36px; padding: 0 15px; border: 1px solid #8d6030; border-radius: 18px;
-  background: #100d09; color: #e09f3e; font: 500 12px var(--ui);
+  min-height: 36px; padding: 0 15px; border: 1px solid rgba(245, 158, 11, 0.42); border-radius: 18px;
+  background: #060607; color: #f59e0b; font: 500 12px var(--ui);
   cursor: pointer; touch-action: none;
+}
+#habitNudge.locked {
+  border-color: rgba(239, 68, 68, 0.55);
+  color: #f87171;
 }

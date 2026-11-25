@@ -18,10 +18,12 @@ function timeInput(time) {
 
 function checkoff({ habit, overdue, grace, streak }, compact) {
   const status = overdue ? 'Overdue' : grace ? 'Missed last time' : 'Due';
+  const tone = overdue || grace ? 'habit-breach' : 'habit-attention';
+  const state = overdue ? 'overdue' : grace ? 'missed' : 'due';
   const unit = habit.interval === 1 && !habit.weekdays ? 'd' : '×';
-  return `<div class="habit-hold" data-habit-row>
+  return `<div class="habit-hold" data-habit-row data-habit-state="${state}">
     <button type="button" class="habit-hold-target" data-habit-hold="${escapeHtml(habit.id)}" aria-label="Hold to complete ${escapeHtml(habit.name)}">
-      <span><strong>${escapeHtml(habit.name)}</strong><small><b>${status}</b>${compact ? '' : ` · ${escapeHtml(cadence(habit))}`}</small></span>
+      <span><strong>${escapeHtml(habit.name)}</strong><small><b class="${tone}">${status}</b>${compact ? '' : ` · ${escapeHtml(cadence(habit))}`}</small></span>
       <span class="habit-reward">+${habit.reward}m</span>
     </button>
     ${compact ? '' : `<button type="button" class="habit-action habit-streak" aria-label="Streak for ${escapeHtml(habit.name)} ${streak}" data-habit-detail="${escapeHtml(habit.id)}">${streak}${unit}</button>`}
@@ -100,13 +102,17 @@ export function mountHabits(invoke, onChange) {
     }
     const rows = state.rows;
     const due = rows.filter((r) => r.due);
+    const overdue = due.filter((r) => r.overdue || r.grace);
     const done = rows.filter((r) => r.completion);
-    trigger.textContent = due.length ? `${due.length} due` : rows.length ? 'Done' : 'Habits';
-    trigger.classList.toggle('habit-attention', !!due.length);
-    quick.innerHTML = `<div class="habit-heading"><span>Habits</span><b class="${due.length ? 'habit-attention' : ''}">${due.length ? `${due.length} due` : 'Done'}</b></div>
+    const headTone = overdue.length ? 'habit-breach' : due.length ? 'habit-attention' : '';
+    const dueLabel = overdue.length ? `${overdue.length} overdue` : `${due.length} due`;
+    trigger.textContent = due.length ? dueLabel : rows.length ? 'Done' : 'Habits';
+    trigger.classList.toggle('habit-attention', Boolean(due.length && !overdue.length));
+    trigger.classList.toggle('habit-breach', Boolean(overdue.length));
+    quick.innerHTML = `<div class="habit-heading"><span>Habits</span><b class="${headTone}">${due.length ? dueLabel : 'Done'}</b></div>
       ${due.length ? due.map((row) => checkoff(row, true)).join('') : `<div class="habit-quiet">${rows.length ? 'All habits done today.' : 'No habits'}</div>`}`;
     if (sectionSlot) sectionSlot.innerHTML = `<section class="habit-section">
-      <div class="habit-heading"><span>Habits <b class="${due.length ? 'habit-attention' : ''}">${due.length ? `${due.length} due` : `${done.length}/${rows.length}`}</b></span>
+      <div class="habit-heading"><span>Habits <b class="${headTone}">${due.length ? dueLabel : `${done.length}/${rows.length}`}</b></span>
       <button class="habit-action" data-habit-new>New</button></div>
       ${due.length ? due.map((row) => checkoff(row, false) + (row.habit.id === expanded ? detail(row) : '')).join('') : rows.length ? '<div class="habit-quiet">All habits done today.</div>' : ''}
       ${done.length ? `<div class="habit-done"><button class="habit-action" type="button" data-habit-done aria-expanded="${showDone}">Done · ${done.length}</button>
@@ -123,7 +129,7 @@ export function mountHabits(invoke, onChange) {
       <div class="habit-cap"><span>Lock feeds after a nudge${lockSetup ? `<small>${lockSetup}</small>` : ''}</span>
         <button type="button" class="habit-action" data-habit-feed-lock aria-pressed="${lockFeeds}">${lockFeeds ? 'On' : 'Off'}</button></div>
     </section>`;
-    onChange(state.credit, due.length);
+    onChange(state.credit, due.length, overdue.length);
   }
 
   function setQuick(open) {

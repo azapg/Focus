@@ -39,9 +39,11 @@ public final class Theme {
   public static final int TOGGLE_OFF = 0xFF1C1C20;
   public static final int KNOB_ON = 0xFFD4D4D8;
   public static final int KNOB_OFF = 0xFF71717A;
-  public static final int WARN = 0xFF84848D; // Historical activity stays neutral
+  public static final int WARN = 0xFFF59E0B; // Orange for slips, drift, and approaching limits
+  public static final int BAD = 0xFFEF4444; // Red for rings, bars, and hard breaches
+  public static final int BAD_TEXT = 0xFFF87171; // Red text on pure OLED black
   public static final int GREEN = 0xFF8A8A8A; // Keep monochrome on OLED
-  /** Neutral emphasis for errors and notes (never amber, never red). */
+  /** Neutral emphasis for non-breach notes. */
   public static final int ATTN = 0xFFD4D4D8;
   public static final int SUB = 0xFFA1A1AA;
   public static final int SEL_BORDER = 0xFF3A3A3F;
@@ -394,7 +396,7 @@ public final class Theme {
     }
   }
 
-  /** Circular DNS-off soft limit ring (grey arc on dark track). */
+  /** Circular DNS-off soft limit ring (neutral within limit, orange near limit, red at/over limit). */
   public static final class DnsRingView extends View {
     private float fraction;
     private final Paint trackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -410,11 +412,16 @@ public final class Theme {
       fillPaint.setStyle(Paint.Style.STROKE);
       fillPaint.setStrokeWidth(stroke);
       fillPaint.setStrokeCap(Paint.Cap.ROUND);
-      fillPaint.setColor(WARN);
+      fillPaint.setColor(0xFF71717A);
     }
 
     public void setFraction(float f) {
+      setFraction(f, f >= 1f ? BAD : f >= 0.75f ? WARN : 0xFF71717A);
+    }
+
+    public void setFraction(float f, int color) {
       this.fraction = Math.max(0f, Math.min(1f, f));
+      fillPaint.setColor(color);
       invalidate();
     }
 

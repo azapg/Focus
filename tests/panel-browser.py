@@ -273,8 +273,73 @@ async def main(output=None):
       )
     assert await page.evaluate("window.__calls.filter(c => c.c === 'judge_pause').length") == 1
     assert not any(c['c'] in ['pause', 'resume', 'lock'] for c in await page.evaluate('window.__calls'))
+
+    # Color-means-bad signals: verify surgical monochrome -> orange (slip) -> red (breach) transitions.
+    await page.keyboard.press('Escape')
+    await page.evaluate("""async () => {
+      const day = new Date('2026-02-12T14:00:00Z'); day.setHours(0, 0, 0, 0);
+      const base = day.getTime(), m = 60000;
+      const web = (minute, dur, label, url, title) => ({
+        s: base + minute * m, e: base + (minute + dur) * m, app: 'Chrome', label, source: 'chromium_extension',
+        browser: { url, title, visibility: 'page', audible: false, tab_id: 1, window_id: 1, browser_pid: 123, host_pid: 456 },
+      });
+      // 1. Over-limit breach day: 72m DNS off vs 60m default limit + overdue habit + heavy Twitch + low rating.
+      window.__testHistory = {
+        now: base + 14 * 60 * m,
+        spans: [
+          { s: base + 480 * m, e: base + 660 * m, app: 'VS Code', label: 'VS Code', source: 'window_title' },
+          web(660, 72, 'twitch.tv', 'https://twitch.tv/demo_channel', 'demo_channel - Twitch'),
+          web(732, 22, 'x.com', 'https://x.com/home', 'Home / X'),
+          web(-1440 * 2 + 540, 75, 'twitch.tv', 'https://twitch.tv/demo_channel', 'demo_channel - Twitch'),
+        ],
+        peeks: [],
+        pauses: [
+          { t: base + 660 * m, end: base + 702 * m, minutes: 30, reason: 'quick break', check_in: 'bored', rating: 2 },
+          { t: base + 702 * m, end: base + 732 * m, minutes: 30, reason: 'check messages', check_in: 'bored', rating: 1 },
+          { t: base - 1440 * 2 * m + 540 * m, end: base - 1440 * 2 * m + 615 * m, minutes: 75, reason: 'weekend stream' },
+        ],
+      };
+      window.__handlers.habits({ payload: {
+        rows: [{
+          habit: { id: 'walk', name: '20m walk outside', interval: 1, weekdays: 0, time: 720, reward: 10 },
+          due: true, overdue: true, grace: false, streak: 3, completion: null,
+          week: ['done', 'done', 'miss', 'done', 'done', 'done', 'due'],
+        }],
+        credit: 0, cap: 45,
+      } });
+      window.__handlers['focus-state-transition']({ payload: { to: 'unfocused' } });
+      await new Promise(r => setTimeout(r, 80));
+      document.querySelector('.w .amb').click();
+    }""")
+    await page.locator('#panel.open').wait_for()
+    await page.wait_for_timeout(300)
+
+    # DNS-off ring, pill allowance, idle notch, overdue habit, heavy Twitch, low rating all turn red.
+    assert await page.locator('.dl-ring.bad').count() == 1
+    assert await page.locator('.dl-ring.bad .ring-svg .fill').evaluate("e => getComputedStyle(e).stroke") == 'rgb(239, 68, 68)'
+    assert await page.locator('.dl-ring.bad .ring-txt b').evaluate("e => getComputedStyle(e).color") == 'rgb(248, 113, 113)'
+    assert '12m over' in await page.locator('.w .a-off.bad').inner_text()
+    assert await page.locator('.w').get_attribute('data-tone') == 'bad'
+    assert await page.locator('.w').get_attribute('data-focus') == 'unfocused'
+    assert await page.locator('#habitSection .habit-breach').count() >= 2
+    assert await page.locator('.hero-drift.bad').count() == 1
+    assert await page.locator('details.st', has=page.locator('summary', has_text='Twitch')).locator('.n.dns-bad').count() == 1
+    assert await page.locator('details.st', has=page.locator('summary', has_text='X')).locator('.n.waste-warn').count() == 1
+    assert await page.locator('.pz-sum .tone-bad').count() >= 2
+    assert await page.locator('.d-pz-row.bad').count() >= 1
+    # Check-in hours stay neutral white, never warning orange.
+    checkin_color = await page.locator('.pz-check-hours b').first.evaluate("e => getComputedStyle(e).color")
+    assert checkin_color == 'rgb(250, 250, 250)', f'expected neutral check-in hour, got {checkin_color}'
+    # Week chart marks over-limit day red with a red dot.
+    await page.locator('[data-r=week]').click()
+    await page.wait_for_timeout(150)
+    assert await page.locator('.wk-off.bad').count() >= 1
+    assert await page.locator('.wk-dot').count() >= 1
+    await page.locator('[data-r=today]').click()
+    await page.wait_for_timeout(150)
+
     assert not errors, errors
-    print('PASS: v8 OLED desktop (thin bar, clickable legend, bento cards, searchable Explorer, Week stacked bars, openable pauses, XSS escaping, Esc) verified.')
+    print('PASS: v8 OLED desktop (thin bar, clickable legend, bento cards, searchable Explorer, Week stacked bars, openable pauses, XSS escaping, Esc, surgical orange/red signals) verified.')
 
 if __name__ == "__main__":
   asyncio.run(main())

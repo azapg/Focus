@@ -28,6 +28,7 @@ final class HabitDashboard {
     LinearLayout screen = column(activity);
     LinearLayout summary = row(activity);
     long due = rows.stream().filter(s -> s.due).count();
+    long overdue = rows.stream().filter(s -> s.due && (s.overdue || s.grace)).count();
     long done = rows.stream().filter(s -> s.completion != null).count();
     summary.addView(text(activity, "Habits", 16, WHITE), new LinearLayout.LayoutParams(0, -2, 1));
     summary.addView(text(activity, allowance() + " left · +" + ledger.credit(Habits.day(now)) + "m earned", 15, GREY));
@@ -37,7 +38,8 @@ final class HabitDashboard {
     columns.setGravity(Gravity.TOP);
     LinearLayout list = card();
     LinearLayout usage = card();
-    list.addView(text(activity, due > 0 ? due + " due" : done + "/" + rows.size(), 14, due > 0 ? ORANGE : GREY));
+    String statusText = overdue > 0 ? overdue + " overdue" : due > 0 ? due + " due" : done + "/" + rows.size();
+    list.addView(text(activity, statusText, 14, overdue > 0 ? RED : due > 0 ? ORANGE : GREY));
     for (Habits.Status row : rows) {
       if (!row.due) continue;
       Ui.gap(list, 6);
