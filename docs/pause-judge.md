@@ -45,9 +45,10 @@ and notes you add to ratings stay on your devices.
 Windows records decisions and applications in `pauses.jsonl`. Android records
 Ask stages, decision actions, and manual overrides in its own app data without
 request text in those diagnostic events.
-Scoped access stays separate from DNS-off time. On Android, choose **Full pause**
-in the Ask sheet to see the durations your pause policy allows. A reason, wait,
-return plan, and three-second hold still apply. On Windows, a failed request
+Scoped access stays separate from DNS-off time. On Android, every request goes
+through the Ask agent with the keyboard opened immediately. Full pauses are
+offered only when the agent proposes one, or as a one-minute emergency hold
+when both the laptop and Gateway are unreachable. On Windows, a failed request
 offers a one-minute pause with its existing checks. Windows keeps the Ask pill
 after you remove a saved Gateway key.
 

@@ -11,7 +11,6 @@ import android.graphics.Bitmap;
 import android.os.Build;
 import android.os.SystemClock;
 import android.view.MotionEvent;
-import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Button;
 import android.widget.EditText;
 import java.io.File;
@@ -463,30 +462,30 @@ public final class PhoneAskChecks {
       check(decision.is("full_pause") && decision.minutes == 5 && dns.deadline() == 0,
           "Gateway proposal must keep the five-minute cap and await approval");
       instrumentation.runOnMainSync(() -> {
-        try { show.invoke(sheet); } catch (Exception error) { throw new AssertionError(error); }
+        try {
+          Field judgeField = JudgeSheetDialog.class.getDeclaredField("judge");
+          judgeField.setAccessible(true);
+          judgeField.set(sheet, new PhonePauseJudge(context, (model, request) -> {
+            throw new IOException("Offline");
+          }));
+          show.invoke(sheet);
+        } catch (Exception error) { throw new AssertionError(error); }
       });
       instrumentation.waitForIdleSync();
       screenshot(instrumentation, context, "ask-before-answer.png");
-      Button fullPause = field(sheet, "secondary", Button.class);
-      instrumentation.runOnMainSync(() -> {
-        check(fullPause.isShown() && fullPause.isEnabled(), "Manual pause must be reachable before Ask");
-        fullPause.performClick();
-      });
-      await(() -> selectFiveMinutes(instrumentation), 5000);
       EditText reason = field(sheet, "request", EditText.class);
-      EditText plan = field(sheet, "afterPlan", EditText.class);
+      Button askButton = field(sheet, "ask", Button.class);
       Button hold = field(sheet, "primary", Button.class);
       instrumentation.runOnMainSync(() -> {
+        check(reason.isFocused(), "Ask input must focus immediately so keyboard opens");
+        check(!hold.isShown(), "Hold button must stay hidden before Ask");
         reason.setText("Check a club message");
-        plan.setText("Return to the essay");
-        check(!hold.isEnabled(), "Manual pause must wait");
+        askButton.performClick();
       });
+      await(() -> hold.isShown(), 12_000);
       await(() -> hold.isEnabled(), 22_000);
-      screenshot(instrumentation, context, "ask-manual-hold.png");
+      screenshot(instrumentation, context, "ask-offline-hold.png");
       instrumentation.runOnMainSync(() -> {
-        plan.setText("");
-        check(!hold.isEnabled(), "Manual pause must require a plan");
-        plan.setText("Return to the essay");
         touch(hold, MotionEvent.ACTION_DOWN);
         touch(hold, MotionEvent.ACTION_UP);
       });
@@ -494,8 +493,8 @@ public final class PhoneAskChecks {
       check(dns.deadline() == 0, "Releasing early must not apply the pause");
       instrumentation.runOnMainSync(() -> touch(hold, MotionEvent.ACTION_DOWN));
       await(() -> dns.deadline() > 0, 5000);
-      check(dns.remainingMs() > 4 * 60_000 && dns.remainingMs() <= 5 * 60_000,
-          "Manual pause should use the chosen five minutes without laptop or Gateway");
+      check(dns.remainingMs() > 30_000 && dns.remainingMs() <= 60_000,
+          "Offline fallback pause should grant 1 minute after a 3-second hold");
       NotificationManager nm = context.getSystemService(NotificationManager.class);
       Notification phonePause = checkTimer(nm, "Phone DNS off", "Turn on now");
       DeviceHub.PairedDevice laptop = new DeviceHub.PairedDevice("test-overlapping-laptop", "laptop",
@@ -581,15 +580,6 @@ public final class PhoneAskChecks {
     MotionEvent event = MotionEvent.obtain(now, now, action, 3, 3, 0);
     hold.dispatchTouchEvent(event);
     event.recycle();
-  }
-
-  private static boolean selectFiveMinutes(Instrumentation instrumentation) {
-    AccessibilityNodeInfo window = instrumentation.getUiAutomation().getRootInActiveWindow();
-    if (window == null) return false;
-    for (AccessibilityNodeInfo match : window.findAccessibilityNodeInfosByText("5 min")) {
-      if (match.getText() != null && "5 min".contentEquals(match.getText()) && match.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
-    }
-    return false;
   }
 
   private static void screenshot(Instrumentation instrumentation, Context context, String name) throws IOException {
