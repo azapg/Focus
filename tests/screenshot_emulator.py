@@ -92,7 +92,7 @@ def capture(scenario, sdk, image, work, output):
         "ANDROID_HOME": str(sdk), "ANDROID_USER_HOME": str(home),
         "ANDROID_EMULATOR_HOME": str(home), "ANDROID_AVD_HOME": str(home / "avd"),
         "ANDROID_ADB_SERVER_PORT": "5037", "ADB_USB": "0",
-        "JAVA_TOOL_OPTIONS": f"-XX:ActiveProcessorCount=2 -Djava.io.tmpdir={work}",
+        "JAVA_TOOL_OPTIONS": f'-XX:ActiveProcessorCount=2 "-Djava.io.tmpdir={work}"',
     }
     accelerated = os.access("/dev/kvm", os.R_OK | os.W_OK)
     if not accelerated:
@@ -173,8 +173,10 @@ def capture_views(scenario, adb, apks, output):
         raise RuntimeError(f"Focus view did not appear: {label}")
 
     def tap(label):
-        node = next(node for node in dump() if node.get("package") == package
-                    and label in node.get("text", "") and node.get("clickable") == "true")
+        node = next((node for node in dump() if node.get("package") == package
+                     and label in node.get("text", "") and node.get("clickable") == "true"), None)
+        if node is None:
+            raise RuntimeError(f"Focus control did not appear: {label}")
         left, top, right, bottom = map(int, re.findall(r"\d+", node.get("bounds")))
         shell("input", "tap", str((left + right) // 2), str((top + bottom) // 2))
 
