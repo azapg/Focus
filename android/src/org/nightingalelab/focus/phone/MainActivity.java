@@ -60,8 +60,10 @@ public final class MainActivity extends Activity {
   private LinearLayout scopedDock;
   private LinearLayout scopedLogos;
   private TextView scopedClock;
+  private TextView scopedMeta;
   private Button scopedEnd;
   private List<String> scopedServices = Collections.emptyList();
+  private boolean askSheetOpen;
   private TextView todayTabBtn;
   private TextView weekTabBtn;
   private LinearLayout searchBar;
@@ -156,18 +158,25 @@ public final class MainActivity extends Activity {
     scopedDock = Theme.row(this);
     scopedDock.setGravity(Gravity.CENTER_VERTICAL);
     JudgeSheetDialog.styleCapsule(this, scopedDock);
+    scopedDock.setElevation(Theme.dp(this, 10));
     scopedLogos = Theme.row(this);
     scopedDock.addView(scopedLogos);
-    scopedClock = Theme.text(this, "", 14, Theme.FG, true);
-    scopedClock.setPadding(Theme.dp(this, 6), 0, Theme.dp(this, 8), 0);
-    scopedDock.addView(scopedClock, new LinearLayout.LayoutParams(0, -2, 1));
+    scopedClock = Theme.text(this, "", 13.5f, Theme.FG, true);
+    scopedClock.setPadding(Theme.dp(this, 8), 0, Theme.dp(this, 6), 0);
+    scopedDock.addView(scopedClock);
+    scopedMeta = Theme.text(this, "", 12f, Theme.MUTED, false);
+    scopedMeta.setSingleLine(true);
+    scopedMeta.setEllipsize(TextUtils.TruncateAt.END);
+    scopedMeta.setPadding(0, 0, Theme.dp(this, 8), 0);
+    scopedDock.addView(scopedMeta, new LinearLayout.LayoutParams(0, -2, 1));
     scopedEnd = new Button(this);
     scopedEnd.setAllCaps(false);
     scopedEnd.setText("End");
-    scopedEnd.setTextSize(13);
-    scopedEnd.setTextColor(Theme.FG);
-    scopedEnd.setBackground(Theme.roundRect(this, Theme.DARK_ACTIVE, Theme.LINE, 999));
-    scopedDock.addView(scopedEnd, new LinearLayout.LayoutParams(Theme.dp(this, 62), Theme.dp(this, 38)));
+    scopedEnd.setTextSize(12.5f);
+    scopedEnd.setTextColor(0xFFE4E4E7);
+    scopedEnd.setStateListAnimator(null);
+    scopedEnd.setBackground(Theme.roundRect(this, Theme.ASK_SECONDARY_FILL, Theme.ASK_SECONDARY_BORDER, 999));
+    scopedDock.addView(scopedEnd, new LinearLayout.LayoutParams(Theme.dp(this, 58), Theme.dp(this, 36)));
     bottomDock.addView(scopedDock, new LinearLayout.LayoutParams(
         Math.min(Theme.dp(this, 360), getResources().getDisplayMetrics().widthPixels - Theme.dp(this, 36)),
         Theme.dp(this, 46)));
@@ -454,6 +463,9 @@ public final class MainActivity extends Activity {
     if (!access.services.equals(scopedServices)) {
       scopedServices = access.services;
       JudgeSheetDialog.setServiceLogos(this, scopedLogos, scopedServices);
+      scopedMeta.setText(scopedServices.size() == 1
+          ? JudgeSheetDialog.serviceName(scopedServices.get(0))
+          : scopedServices.size() + " apps");
     }
     scopedClock.setText(FocusStats.fmtClock(access.remaining()));
     scopedEnd.setOnClickListener(v -> {
@@ -478,12 +490,17 @@ public final class MainActivity extends Activity {
     }
     if (scoped) return;
     if (active != null) {
-      pauseButton.setText("Turn on " + active.label + " · " + FocusStats.fmtClock(active.remainingMs));
+      String label = "Phone".equals(active.label)
+          ? "\u25cf Turn on \u00b7 " + FocusStats.fmtClock(active.remainingMs)
+          : "\u25cf Turn on " + active.label + " \u00b7 " + FocusStats.fmtClock(active.remainingMs);
+      pauseButton.setText(label);
       pauseButton.setTextColor(Theme.WARN);
+      pauseButton.setBackground(Theme.roundRect(this, Theme.ASK_DOCK_WARN_FILL, Theme.ASK_BORDER_WARN, 999));
       pauseButton.setOnClickListener(v -> active.resume.run());
     } else {
       pauseButton.setText("Ask");
       pauseButton.setTextColor(Theme.FG);
+      pauseButton.setBackground(Theme.obsidianGlass(this, 999));
       pauseButton.setOnClickListener(v -> openPauseSheet());
     }
   }
@@ -524,7 +541,7 @@ public final class MainActivity extends Activity {
         Theme.dp(this, 18),
         Theme.dp(this, isStats ? 104 : isAllApps ? 96 : 28));
 
-    bottomDock.setVisibility(isStats ? View.VISIBLE : View.GONE);
+    bottomDock.setVisibility(isStats ? (askSheetOpen ? View.INVISIBLE : View.VISIBLE) : View.GONE);
     searchBar.setVisibility(isAllApps ? View.VISIBLE : View.GONE);
     edgeScrim.setVisibility((isStats || isAllApps) ? View.VISIBLE : View.GONE);
 
@@ -1610,13 +1627,23 @@ public final class MainActivity extends Activity {
   // =========================================================================
 
   private void openPauseSheet() {
-    JudgeSheetDialog.show(this, this::render);
+    askSheetOpen = true;
+    bottomDock.setVisibility(View.INVISIBLE);
+    JudgeSheetDialog.show(this, this::render, () -> {
+      askSheetOpen = false;
+      if (page == Page.TODAY || page == Page.WEEK) bottomDock.setVisibility(View.VISIBLE);
+    });
   }
 
   private void openRemotePauseSheet(DeviceHub.PairedDevice device) {
     JSONObject remoteDns = device.snapshot == null ? null : device.snapshot.optJSONObject("dns");
     if ("laptop".equals(device.kind) && remoteDns != null && remoteDns.optBoolean("pause_assistant")) {
-      JudgeSheetDialog.show(this, device, this::render);
+      askSheetOpen = true;
+      bottomDock.setVisibility(View.INVISIBLE);
+      JudgeSheetDialog.show(this, device, this::render, () -> {
+        askSheetOpen = false;
+        if (page == Page.TODAY || page == Page.WEEK) bottomDock.setVisibility(View.VISIBLE);
+      });
       return;
     }
     long now = System.currentTimeMillis();
