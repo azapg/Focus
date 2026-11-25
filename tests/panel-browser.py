@@ -30,6 +30,10 @@ MOCK = r'''(() => {
       row(-1440 * 3 + 1430, 18, 'VS Code'),
       row(-1440 * 4 + 900, 32, 'www.youtube.com', 'https://www.youtube.com/watch?v=demo', 'How to germinate marigolds - YouTube', true),
       row(690, 14, 'newtool.example', 'https://newtool.example/workspace', 'Design sandbox'),
+      row(710, 25, 'x.com', 'https://x.com/home', 'Home / X'),
+      row(735, 5, 'x.com', 'https://x.com/seed_library', 'Seed Library (@seed_library) / X'),
+      row(740, 3, 'x.com', 'https://x.com/search?q=seed%20swap', 'Search / X'),
+      row(743, 12, 'x.com', 'https://x.com/messages', 'Messages / X'),
     ],
     peeks: [base + 640 * m, base + 670 * m],
     pauses: [
@@ -79,7 +83,7 @@ async def main(output=None):
     await page.wait_for_timeout(650)
 
     # One-sentence hero: total screen time and building share; thin category bar + clickable legend.
-    assert await page.locator('[data-total]').inner_text() == '2h 44m'
+    assert await page.locator('[data-total]').inner_text() == '3h 29m'
     assert await page.locator('[data-build-pct]').inner_text() == '1h 52m building'  # Notion 52m + VS Code 42m + GitHub 18m
     assert await page.locator('.thin-bar .thin-seg').count() >= 2
     assert await page.locator('.cat-leg button[data-dcat]').count() >= 2
@@ -91,43 +95,53 @@ async def main(output=None):
     assert await page.get_by_text('2 peeks · 1 DNS pause', exact=True).is_visible()
 
     # Screen time shows only icon, name, and time at rest; at least 5 rows inside the bento card.
-    assert await page.locator('#pApps details[data-fit]:not([hidden])').count() >= 5
+    assert await page.locator('#pApps [data-fit]:not([hidden])').count() >= 5
     assert await page.locator('#pApps .st-cat').count() == 0
     # Time turns amber only when an app was mostly used with DNS off (YouTube: 10m of 26m is not mostly).
-    yt_time = page.locator('details.st', has=page.locator('summary', has_text='YouTube')).locator('.n').first
-    vscode_time = page.locator('details.st', has=page.locator('summary', has_text='VS Code')).locator('.n').first
+    yt_time = page.locator('.st-row', has=page.locator('.st-name', has_text='YouTube')).locator('.n').first
+    vscode_time = page.locator('.st-row', has=page.locator('.st-name', has_text='VS Code')).locator('.n').first
     assert int(await yt_time.get_attribute('data-dns-off')) == 600000
     assert 'dns-off' not in (await yt_time.get_attribute('class'))
     assert int(await vscode_time.get_attribute('data-dns-off')) == 0
     # Websites carry a small globe; desktop programs don't.
-    assert await page.locator('details.st', has=page.locator('summary', has_text='GitHub')).locator('[data-src=web]').count() == 1
-    assert await page.locator('details.st', has=page.locator('summary', has_text='VS Code')).locator('.src-ico').count() == 0
+    assert await page.locator('.st-row', has=page.locator('.st-name', has_text='GitHub')).locator('[data-src=web]').count() == 1
+    assert await page.locator('.st-row', has=page.locator('.st-name', has_text='VS Code')).locator('.src-ico').count() == 0
 
-    # Notion is normalized (no app.notion.com) and expands into category meta + page titles without raw URLs.
-    notion = page.locator('#pApps details.st').filter(has=page.locator('summary', has_text='Notion'))
+    # Apps without place observations remain plain rows.
+    notion = page.locator('#pApps .st-row').filter(has=page.get_by_text('Notion', exact=True))
     assert await notion.count() == 1
+    assert await notion.get_attribute('data-app-detail') is None
     assert 'app.notion.com' not in await page.locator('#pApps').inner_text()
-    await notion.locator('summary').click()
-    assert 'Writing' in await notion.locator('.st-meta').inner_text()
-    notion_pages = await notion.locator('.cat-pages').inner_text()
-    assert 'Seed Library' in notion_pages and 'Greenhouse Notes' in notion_pages
-    assert 'https://' not in notion_pages
 
+    assert '25m Drift' in await page.locator('.clean-score').inner_text()
     await capture_panel(page, output, 'browser-sites.png')
+    x_row = page.locator('#pApps [data-app-detail="X"]')
+    await x_row.click()
+    details = page.locator('#explorerView')
+    assert await page.locator('#statsMain').is_hidden()
+    assert 'Activity details cover 33m of 45m.' in await details.inner_text()
+    assert await details.get_by_role('progressbar').get_attribute('value') == '1500000'
+    assert 'Seed Library @seed_library' in await details.inner_text()
+    assert 'seed swap' in await details.inner_text()
+    assert 'Posts visible' not in await details.inner_text()
+    await page.evaluate("Panel.render((c,a)=>window.__TAURI__.core.invoke(c,a),'today')")
+    assert await details.get_by_role('heading', name='Home feed').is_visible()
+    await capture_panel(page, output, 'app-activity-x.png')
+    await page.locator('[data-app-detail-back]').click()
+    assert await x_row.is_visible()
 
-    # "See all" opens the searchable Explorer view with All / Building / Drifting / DNS off filters.
     await page.locator('[data-see-all]').click()
-    await page.locator('#explorerView').wait_for(state='visible')
-    assert await page.locator('#explorerView details.st').count() == 6
+    await details.wait_for(state='visible')
+    assert await details.locator('.st-row').count() == 7
     await capture_panel(page, output, 'panel-explorer.png')
     await page.locator('#expSearchIn').fill('notion')
-    assert await page.locator('#explorerView details.st').count() == 1
+    assert await details.locator('.st-row').count() == 1
+    await page.locator('#expSearchIn').fill('X')
+    await details.locator('[data-app-detail="X"]').click()
+    await page.keyboard.press('Escape')
+    assert await page.locator('#expSearchIn').input_value() == 'X'
     await page.locator('[data-exp-back]').click()
     await page.locator('#statsMain').wait_for(state='visible')
-
-    # Refresh preserves expanded Notion details.
-    await page.evaluate("Panel.render((c,a)=>window.__TAURI__.core.invoke(c,a),'today')")
-    assert await notion.get_attribute('open') is not None, 'refresh collapsed page details'
 
     # Pause audit flags 10m of unmentioned YouTube during a Discord pause as drift.
     pauses_txt = await page.locator('#pPauses').inner_text()
@@ -156,11 +170,17 @@ async def main(output=None):
     await page.wait_for_timeout(150)
     assert await page.locator('#pTimelineSec').is_hidden()
 
-    # Captured title/label markup remains plain text (no XSS).
-    await page.evaluate("window.__testHistory.spans[0].browser.title='<img src=x onerror=window.__injected=true>';window.__testHistory.spans[0].label='__proto__'")
+    # Captured profile names and search terms remain plain text.
+    await page.evaluate("""() => {
+      window.__testHistory.spans.find(s => s.browser?.url.includes('/seed_library')).browser.title =
+        '<img src=x onerror=window.__injected=true> (@seed_library) / X';
+    }""")
     await page.evaluate("Panel.render((c,a)=>window.__TAURI__.core.invoke(c,a),'today')")
-    assert await page.locator('.cat-pages img,.cat-pages script').count() == 0
+    await x_row.click()
+    assert '<img src=x' in await details.inner_text()
+    assert await details.locator('.app-detail-row img,.app-detail-row script').count() == 0
     assert await page.evaluate('window.__injected') is None
+    await page.locator('[data-app-detail-back]').click()
 
     dock_bounds = await page.locator('.w').bounding_box()
     stats_bounds = await page.locator('#panel').bounding_box()
@@ -290,6 +310,7 @@ async def main(output=None):
           { s: base + 480 * m, e: base + 660 * m, app: 'VS Code', label: 'VS Code', source: 'window_title' },
           web(660, 72, 'twitch.tv', 'https://twitch.tv/demo_channel', 'demo_channel - Twitch'),
           web(732, 22, 'x.com', 'https://x.com/home', 'Home / X'),
+          web(754, 12, 'youtube.com', 'https://youtube.com/shorts/fixture', 'Shorts - YouTube'),
           web(-1440 * 2 + 540, 75, 'twitch.tv', 'https://twitch.tv/demo_channel', 'demo_channel - Twitch'),
         ],
         peeks: [],
@@ -323,8 +344,8 @@ async def main(output=None):
     assert await page.locator('.w').get_attribute('data-focus') == 'unfocused'
     assert await page.locator('#habitSection .habit-breach').count() >= 2
     assert await page.locator('.hero-drift.bad').count() == 1
-    assert await page.locator('details.st', has=page.locator('summary', has_text='Twitch')).locator('.n.dns-bad').count() == 1
-    assert await page.locator('details.st', has=page.locator('summary', has_text='X')).locator('.n.waste-warn').count() == 1
+    assert await page.locator('.st-row', has=page.locator('.st-name', has_text='Twitch')).locator('.n.dns-bad').count() == 1
+    assert await page.locator('.st-row', has=page.locator('.st-name', has_text='X')).locator('.n.waste-warn').count() == 1
     assert await page.locator('.pz-sum .tone-bad').count() >= 2
     assert await page.locator('.d-pz-row.bad').count() >= 1
     # Check-in hours stay neutral white, never warning orange.

@@ -31,6 +31,7 @@ const Panel = (() => {
   let catFilter = null;
   let selectedDayIdx = null; // null or 0..6 on Week
   let explorerOpen = false;
+  let detailApp = null;
   let expFilter = 'all'; // all | create | drift | off
   let expSearch = '';
   let openPause = null;
@@ -119,10 +120,14 @@ const Panel = (() => {
       return;
     }
     const building = fine.groups.create || 0;
-    const drift = fine.groups.drift || 0;
+    const { clean, drift, unverified } = fine.score;
+    const verified = clean + drift;
     const heavyDrift = drift / days >= 90 * Stats.MIN
       || (total >= 30 * Stats.MIN && drift / total >= 0.35)
       || (overLimit && drift >= 30 * Stats.MIN);
+    const cleanScore = !verified ? 'Clean score unavailable' : unverified
+      ? `${Math.floor(clean / verified * 100)}% of verified time clean`
+      : `${Math.floor(clean / verified * 100)}% clean`;
     const topCats = fine.categories.slice(0, TOP_CATS);
     const restCats = fine.categories.slice(TOP_CATS);
     const major = fine.categories.filter((c) => c.ms / total >= 0.03);
@@ -142,8 +147,9 @@ const Panel = (() => {
     statsEl.innerHTML = `
       <div class="hero-line">
         <span class="hero-total v" data-total>${Stats.fmt(total)}</span>
-        <span class="hero-sent">on screens, <b data-build-pct>${Stats.fmt(building)} building</b>${drift >= 60e3 ? `, <span class="hero-drift${heavyDrift ? ' bad' : ''}">${Stats.fmt(drift)} drifting</span>` : ''}.</span>
+        <span class="hero-sent">on screens, <b data-build-pct>${Stats.fmt(building)} building</b>.</span>
       </div>
+      <p class="clean-score"><b>${cleanScore}</b>${drift ? ` · <span class="hero-drift${heavyDrift ? ' bad' : ''}">${Stats.fmt(drift)} Drift</span>` : ''}${unverified ? ` · ${Stats.fmt(unverified)} unverified` : ''}</p>
       <div class="thin-bar">
         ${major.map((c) => {
           const share = Math.round((c.ms / total) * 100);
@@ -161,15 +167,15 @@ const Panel = (() => {
       ${restCats.length && showMoreCats ? `<div class="cat-leg rest">${restCats.map(legBtn).join('')}</div>` : ''}`;
   }
 
-  function renderAppRow(a, multiDevice, openSet, showOffOnly = false, { days = 1, overLimit = false } = {}) {
+  function renderAppRow(a, multiDevice, showOffOnly = false, { days = 1, overLimit = false } = {}) {
     const devNames = multiDevice ? a.devices.map((d) => d.name) : [];
     const dev = devNames.filter((n, i, all) => all.length > 1 || n !== 'Laptop').join(' + ');
-    const pages = a.items.filter((p) => p.ms >= 30e3 && p.title !== a.app);
     const mostlyOff = showOffOnly || (a.off >= 60e3 && a.off >= a.ms * 0.5);
+    const warningMs = a.app === 'X' ? a.driftMs : a.ms;
     const wasteWarn = (a.category === 'social' || a.category === 'tv' || a.category === 'games' || a.category === 'adult')
-      ? a.ms / days >= 10 * Stats.MIN
+      ? warningMs / days >= 10 * Stats.MIN
       : a.category === 'video' && a.ms / days >= 30 * Stats.MIN;
-    const heavyWaste = WASTE_CATS.has(a.category) && a.ms / days >= 60 * Stats.MIN;
+    const heavyWaste = WASTE_CATS.has(a.category) && warningMs / days >= 60 * Stats.MIN;
     const isBad = (mostlyOff && overLimit) || (overLimit && a.off >= 15 * Stats.MIN && WASTE_CATS.has(a.category)) || heavyWaste || a.category === 'adult';
     const offBad = overLimit && a.off >= 60e3;
     const offText = a.off >= 30e3 ? `${Stats.fmt(a.off)} with DNS off` : '';
@@ -179,25 +185,43 @@ const Panel = (() => {
       dev ? `<span class='k'>· ${esc(esc(dev))}</span>` : '',
       offText ? `<span class='tip-off${offBad ? ' bad' : ''}'>· ${esc(offText)}</span>` : '',
     ].filter(Boolean).join(' ');
-    const detailMeta = `
-      <div class="st-meta">
-        <span><i style="background:${dotColor}"></i>${esc(a.categoryLabel)}</span>
-        ${dev ? `<span class="st-meta-sep">·</span><span>${esc(dev)}</span>` : ''}
-        ${offText ? `<span class="st-meta-sep">·</span><span class="st-meta-off${offBad ? ' bad' : ''}">${esc(offText)}</span>` : ''}
-      </div>`;
-    const pagesHtml = pages.length >= 2
-      ? `<div class="cat-pages">${pages.slice(0, 6).map((p) =>
-          `<div class="cat-page"><span class="cat-page-title">${esc(p.title)}</span><span class="n">${Stats.fmt(p.ms)}</span></div>`
-        ).join('')}</div>`
-      : '';
     const timeCls = ['n', mostlyOff ? 'dns-off' : '', !mostlyOff && wasteWarn ? 'waste-warn' : '', isBad ? 'dns-bad' : ''].filter(Boolean).join(' ');
-    return `<details class="site st d-app-item" data-fit data-site="${esc(a.app)}"${openSet.has(a.app) ? ' open' : ''}>
-      <summary class="st-row d-app-row" data-tip="${tipParts}">
-        <span class="st-left">${appIcon(a.app)}<span class="st-name">${esc(a.app)}</span>${srcIcon(a, multiDevice)}</span>
+    const tag = a.details ? 'button' : 'div';
+    return `<${tag} class="st-row d-app-item${a.details ? ' app-detail-button' : ''}" data-fit data-tip="${tipParts}"${a.details ? ` type="button" data-app-detail="${esc(a.app)}"` : ''}>
+      <span class="st-left">${appIcon(a.app)}<span class="st-name">${esc(a.app)}</span>${srcIcon(a, multiDevice)}</span>
+      <span class="st-right">
         <span class="${timeCls}" data-dns-off="${Math.round(a.off)}">${Stats.fmt(showOffOnly ? a.off : a.ms)}</span>
-      </summary>
-      <div class="st-detail">${detailMeta}${pagesHtml}</div>
-    </details>`;
+        ${a.details ? '<span aria-hidden="true">›</span>' : ''}
+      </span>
+    </${tag}>`;
+  }
+
+  function renderAppDetail(app, multiDay, expanded) {
+    const { coveredMs, homeMs, profile, search } = app.details;
+    const list = (title, entries) => {
+      if (!entries.size) return '';
+      const sorted = [...entries.values()].sort((a, b) => b.visits - a.visits || a.label.localeCompare(b.label));
+      const row = ({ label, handle, visits }) => `<div class="app-detail-row">
+        ${handle ? `<span class="app-ico letter" aria-hidden="true">${esc(Array.from((label || handle).replace(/^@/, '')).slice(0, 2).join('').toUpperCase())}</span>` : ''}
+        <span>${esc(label)}${handle && handle !== label ? ` <small>${esc(handle)}</small>` : ''}</span>
+        ${visits > 1 ? `<small>${visits} visits</small>` : ''}
+      </div>`;
+      return `<section class="bento-card app-detail-card">
+        <h3>${title}</h3>${sorted.slice(0, multiDay ? 3 : sorted.length).map(row).join('')}
+        ${multiDay && sorted.length > 3 ? `<details class="app-detail-more" data-activity-list="${title}"${expanded.has(title) ? ' open' : ''}><summary>${sorted.length - 3} more</summary>${sorted.slice(3).map(row).join('')}</details>` : ''}
+      </section>`;
+    };
+    return `
+      <div class="exp-head"><button type="button" class="exp-back" data-app-detail-back>‹ Screen time</button></div>
+      <div class="app-detail-content">
+        <header class="app-detail-head"><h2>${appIcon(app.app)}${esc(app.app)}</h2><b>${Stats.fmt(app.ms)}</b></header>
+        ${coveredMs < app.ms ? `<p>Activity details cover ${Stats.fmt(coveredMs)} of ${Stats.fmt(app.ms)}.</p>` : ''}
+        ${homeMs ? `<section class="bento-card app-detail-card">
+          <div class="app-detail-head"><h3>Home feed</h3><b>${Stats.fmt(homeMs)}</b></div>
+          <progress aria-label="Home feed share of screen time" value="${homeMs}" max="${app.ms}"></progress>
+        </section>` : ''}
+        <div class="app-detail-lists">${list('Profiles opened', profile)}${list('Search results opened', search)}</div>
+      </div>`;
   }
 
   function renderScreenTime(fine, multiDevice, ctx = {}) {
@@ -216,9 +240,8 @@ const Panel = (() => {
       if (footEl) footEl.hidden = true;
       return;
     }
-    const open = new Set([...appsEl.querySelectorAll('details[open]')].map((d) => d.dataset.site));
     const shown = list.slice(0, 12);
-    appsEl.innerHTML = shown.map((a) => renderAppRow(a, multiDevice, open, false, ctx)).join('');
+    appsEl.innerHTML = shown.map((a) => renderAppRow(a, multiDevice, false, ctx)).join('');
     if (footEl) {
       if (allList.length > TOP_APPS) {
         footEl.hidden = false;
@@ -234,6 +257,17 @@ const Panel = (() => {
     const expEl = $('explorerView');
     const statsMain = $('statsMain');
     if (!expEl || !statsMain) return;
+    const activeApp = detailApp && fine.apps.find((app) => app.app === detailApp && app.details);
+    if (activeApp) {
+      expEl.hidden = false;
+      statsMain.hidden = true;
+      const expanded = new Set([...expEl.querySelectorAll('[data-activity-list][open]')].map((list) => list.dataset.activityList));
+      const backFocused = document.activeElement?.matches('[data-app-detail-back]');
+      expEl.innerHTML = renderAppDetail(activeApp, range === 'week' && selectedDay == null, expanded);
+      if (backFocused) expEl.querySelector('[data-app-detail-back]').focus({ preventScroll: true });
+      return;
+    }
+    detailApp = null;
     expEl.hidden = !explorerOpen;
     statsMain.hidden = explorerOpen;
     if (!explorerOpen) return;
@@ -242,14 +276,13 @@ const Panel = (() => {
     const q = expSearch.trim().toLowerCase();
     let list = allList.filter((a) => {
       if (expFilter === 'create' && a.group !== 'create') return false;
-      if (expFilter === 'drift' && a.group !== 'drift') return false;
+      if (expFilter === 'drift' && !a.driftMs) return false;
       if (expFilter === 'off' && a.off < 30e3) return false;
       if (q && !a.app.toLowerCase().includes(q) && !a.categoryLabel.toLowerCase().includes(q)) return false;
       return true;
     });
     if (expFilter === 'off') list = [...list].sort((a, b) => b.off - a.off);
 
-    const open = new Set([...expEl.querySelectorAll('details[open]')].map((d) => d.dataset.site));
     const scopeText = selectedDay != null ? wday(selectedDay) : range === 'week' ? 'This week' : 'Today';
     const wasFocused = document.activeElement?.id === 'expSearchIn';
     const caret = wasFocused ? document.activeElement.selectionStart : null;
@@ -269,14 +302,14 @@ const Panel = (() => {
         <div class="exp-chips">
           <button type="button" class="exp-chip${expFilter === 'all' ? ' on' : ''}" data-ef="all">All (${allList.length})</button>
           <button type="button" class="exp-chip${expFilter === 'create' ? ' on' : ''}" data-ef="create">Building</button>
-          <button type="button" class="exp-chip${expFilter === 'drift' ? ' on' : ''}" data-ef="drift">Drifting</button>
+          <button type="button" class="exp-chip${expFilter === 'drift' ? ' on' : ''}" data-ef="drift">Drift</button>
           <button type="button" class="exp-chip${expFilter === 'off' ? ' on' : ''}" data-ef="off">DNS off</button>
         </div>
       </div>
       <div class="exp-list">
         <div class="bento-card">
           ${list.length
-            ? list.map((a) => renderAppRow(a, multiDevice, open, expFilter === 'off', ctx)).join('')
+            ? list.map((a) => renderAppRow(a, multiDevice, expFilter === 'off', ctx)).join('')
             : `<div class="bento-empty" style="text-align:center;padding:24px">No apps matching "${esc(expSearch)}".</div>`}
         </div>
       </div>`;
@@ -295,9 +328,9 @@ const Panel = (() => {
     }
   }
 
-  // Fit Screen time rows to the height of the Pauses card (at least 5 rows, never hiding an open row).
+  // Fit Screen time rows to the height of the Pauses card (at least 5 rows).
   function fitScreenTime() {
-    if (explorerOpen) return;
+    if (explorerOpen || detailApp) return;
     const appsCard = $('pAppsCard'), pausesCard = $('pPausesCard'), appsEl = $('pApps');
     if (!appsCard || !pausesCard || !appsEl) return;
     const grid = appsCard.parentElement;
@@ -308,7 +341,6 @@ const Panel = (() => {
     let visible = rows.length;
     for (let i = rows.length - 1; i >= 0 && visible > TOP_APPS; i--) {
       if (appsCard.getBoundingClientRect().height <= target + 1) break;
-      if (rows[i].open) continue;
       rows[i].hidden = true;
       visible--;
     }
@@ -321,7 +353,18 @@ const Panel = (() => {
     listenersBound = true;
 
     document.addEventListener('click', (e) => {
-      if (e.target.closest('[data-fine-more]')) {
+      const appRow = e.target.closest('[data-app-detail]');
+      if (appRow) {
+        detailApp = appRow.dataset.appDetail;
+        if (lastRenderArgs) renderFromSnapshot(lastRenderArgs);
+        $('explorerView')?.querySelector('[data-app-detail-back]')?.focus();
+      } else if (e.target.closest('[data-app-detail-back]')) {
+        const previous = detailApp;
+        detailApp = null;
+        if (lastRenderArgs) renderFromSnapshot(lastRenderArgs);
+        const origin = explorerOpen ? $('explorerView') : $('pApps');
+        [...origin.querySelectorAll('[data-app-detail]')].find((row) => row.dataset.appDetail === previous)?.focus();
+      } else if (e.target.closest('[data-fine-more]')) {
         showMoreCats = !showMoreCats;
         if (lastRenderArgs) renderFromSnapshot(lastRenderArgs);
       } else if (e.target.closest('[data-dcat]')) {
@@ -583,6 +626,7 @@ const Panel = (() => {
 
     if (!sources.length) {
       explorerOpen = false;
+      detailApp = null;
       const expEl = $('explorerView'), statsMain = $('statsMain');
       if (expEl) expEl.hidden = true;
       if (statsMain) statsMain.hidden = false;
@@ -667,8 +711,9 @@ const Panel = (() => {
   }
 
   function exitExplorer() {
-    if (!explorerOpen) return false;
-    explorerOpen = false;
+    if (!explorerOpen && !detailApp) return false;
+    if (detailApp) detailApp = null;
+    else explorerOpen = false;
     if (lastRenderArgs) renderFromSnapshot(lastRenderArgs);
     return true;
   }
