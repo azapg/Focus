@@ -483,7 +483,7 @@ public final class Theme {
   public static final class IconView extends View {
     public enum Kind {
       PHONE, TV, LAPTOP, GEAR, BACK, CHEVRON, PLUS, UPDATE_CIRCLE, CLOSE,
-      GLOBE, SEARCH, UPDOWN, CARET_RIGHT, CARET_DOWN
+      GLOBE, SEARCH, UPDOWN, CARET_RIGHT, CARET_DOWN, FLAME
     }
 
     private final Kind kind;
@@ -507,6 +507,19 @@ public final class Theme {
       canvas.save();
       canvas.scale(s, s);
       switch (kind) {
+        case FLAME: {
+          Path flame = new Path();
+          flame.moveTo(12, 22);
+          flame.cubicTo(6, 22, 4, 18, 5, 14);
+          flame.cubicTo(6, 11, 8, 10, 8, 7);
+          flame.cubicTo(10, 8, 11, 10, 11, 11);
+          flame.cubicTo(13, 8, 14, 6, 13, 2);
+          flame.cubicTo(18, 6, 20, 11, 20, 15);
+          flame.cubicTo(20, 19, 17, 22, 12, 22);
+          flame.close();
+          canvas.drawPath(flame, paint);
+          break;
+        }
         case PHONE:
           canvas.drawRoundRect(7, 2.5f, 17, 21.5f, 2.5f, 2.5f, paint);
           canvas.drawLine(11, 18.5f, 13, 18.5f, paint);

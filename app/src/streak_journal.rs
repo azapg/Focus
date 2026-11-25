@@ -357,6 +357,32 @@ pub fn configure(
     })
 }
 
+pub fn local_day_start(
+    zone: &impl chrono::TimeZone,
+    date: chrono::NaiveDate,
+) -> Result<u64, String> {
+    let midnight = date.and_hms_opt(0, 0, 0).ok_or("Invalid local midnight")?;
+    // On a midnight offset change, use the first instant that belongs to the date.
+    for minute in 0..1_440 {
+        let local = midnight + chrono::Duration::minutes(minute);
+        if let Some(instant) = zone.from_local_datetime(&local).earliest() {
+            return u64::try_from(instant.timestamp_millis())
+                .map_err(|_| "Invalid profile day start".into());
+        }
+    }
+    Err("Profile date has no local time".into())
+}
+
+pub fn authority_cursor(store: &Store) -> Option<(Profile, i32, u64)> {
+    let ledger = store.read();
+    let journal = ledger.streak_journal.as_ref()?;
+    Some((
+        journal.profile.clone(),
+        journal.streak.next_day(),
+        journal.streak.next_start_ms(),
+    ))
+}
+
 pub fn streak_view(store: &Store, local_device: &str, today: i32) -> Option<StreakView> {
     let ledger = store.read();
     let journal = ledger.streak_journal.as_ref()?;
@@ -582,6 +608,14 @@ mod tests {
             confirmed_drift: false,
             verified_focus: vec![focus],
         }
+    }
+
+    #[test]
+    fn local_day_boundary_uses_calendar_midnight_and_the_profile_zone() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap();
+        let zone = chrono::FixedOffset::west_opt(3 * 3600).unwrap();
+        let utc = local_day_start(&chrono::Utc, date).unwrap();
+        assert_eq!(local_day_start(&zone, date).unwrap(), utc + 3 * 3600 * 1000);
     }
 
     #[test]

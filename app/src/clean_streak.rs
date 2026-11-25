@@ -77,6 +77,10 @@ impl Streak {
         self.count
     }
 
+    pub fn next_start_ms(&self) -> u64 {
+        self.next_start_ms
+    }
+
     pub fn next_day(&self) -> i32 {
         self.next_day
     }

@@ -223,6 +223,12 @@ impl Tracker {
         self.coverage_enabled.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
+    pub fn disable_coverage(&self) {
+        if self.coverage_enabled.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            *self.coverage.lock().unwrap() = Coverage::default();
+        }
+    }
+
     /// Explicit intervals observed by the local tracker. Missing samples and
     /// unverified foreground routes stay gaps, even when other spans exist.
     pub fn coverage_intervals(&self, from: u64, to: u64) -> Vec<(u64, u64)> {
@@ -298,6 +304,9 @@ impl Tracker {
                         }
                     }
                 }
+            } else if let Some(subscription) = &subscription {
+                subscription.reports.try_iter().for_each(drop);
+                sleep = SleepCoverage::default();
             }
             let (sample, idle_ms, verified) = sample(now, &self.data_dir);
             if self.coverage_enabled.load(std::sync::atomic::Ordering::Relaxed) {

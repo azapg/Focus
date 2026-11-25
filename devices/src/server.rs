@@ -818,9 +818,25 @@ fn dispatch(
         };
     }
     if method == "POST" && req_path == "/v1/command" {
-        let Ok(input) = serde_json::from_slice::<Value>(body) else {
+        let Ok(mut input) = serde_json::from_slice::<Value>(body) else {
             return (400, json!({"error": "Invalid command JSON"}));
         };
+        if matches!(input["action"].as_str(), Some("streak_view" | "streak_buy_freeze")) {
+            let Some(token) = auth_header.strip_prefix("Bearer ") else {
+                return (401, json!({"error": "An enrolled phone is required"}));
+            };
+            let token_hash = transport::fingerprint(token.as_bytes());
+            let st = state.lock().unwrap();
+            let peer = st.identity.peer_tokens.iter().find_map(|(id, credential)| {
+                let candidate = secrets::unprotect(credential).ok()?;
+                (transport::fingerprint(candidate.as_bytes()) == token_hash).then(|| id.clone())
+            });
+            let Some(peer) = peer else {
+                return (403, json!({"error": "An enrolled phone is required"}));
+            };
+            input["_streak_peer"] = json!(peer);
+            input["_streak_authority"] = json!(st.identity.device_id);
+        }
         trace.correlation = input["correlation_id"].as_str().filter(|id| events::valid_id(id)).map(str::to_owned);
         match command_fn(input) {
             Ok(Some(result)) => return (200, result),
@@ -951,6 +967,8 @@ mod tests {
                     Ok(None)
                 } else if cmd["action"] == "judge_pause" {
                     Ok(Some(json!({"id": "decision", "decision": {"action": "deny"}})))
+                } else if cmd["action"] == "streak_buy_freeze" {
+                    Ok(Some(json!({"peer": cmd["_streak_peer"], "authority": cmd["_streak_authority"]})))
                 } else {
                     Err("unsupported".into())
                 }
@@ -1006,6 +1024,19 @@ mod tests {
         .unwrap();
         assert_eq!(st["status"], "approved");
         let token = st["token"].as_str().unwrap().to_owned();
+
+        let freeze = json!({
+            "action": "streak_buy_freeze", "request_id": "fixture",
+            "_streak_peer": "spoofed-peer", "_streak_authority": "spoofed-authority",
+        });
+        assert!(transport::request(&addr, Some(&pin), Some(&token), "/v1/command", Some(&freeze)).is_err());
+        let link = server.reciprocal_for_peer("fixture-phone", addr.parse().unwrap()).unwrap();
+        let peer_token = link["token"].as_str().unwrap();
+        let (authorized, _) = transport::request(
+            &addr, Some(&pin), Some(peer_token), "/v1/command", Some(&freeze),
+        ).unwrap();
+        assert_eq!(authorized["peer"], "fixture-phone");
+        assert_eq!(authorized["authority"], server.device_id());
 
         // Snapshot + Command
         let (snap, _) = transport::request(&addr, Some(&pin), Some(&token), "/v1/snapshot", None).unwrap();

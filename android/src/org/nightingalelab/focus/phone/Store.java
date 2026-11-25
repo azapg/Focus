@@ -27,7 +27,8 @@ public final class Store extends SQLiteOpenHelper {
   private String currentBrowserDomain = "";
   public static volatile long heartbeat;
   private volatile long habitObservedFrom;
-  private boolean streakCoverageEnabled;
+  private long streakCoverageStartedAt;
+  private String streakAuthority = "";
 
   public long habitObservedFrom() { return habitObservedFrom; }
 
@@ -81,15 +82,32 @@ public final class Store extends SQLiteOpenHelper {
     db.execSQL("CREATE INDEX streak_coverage_end ON streak_coverage(e)");
   }
 
-  synchronized void enableStreakCoverage() {
-    if (!streakCoverageEnabled) {
-      streakCoverageEnabled = true;
-      clearTimeline(); // Start attestation with the first sample after enrollment.
+  synchronized void loadStreakCoverageOptIn() {
+    String authority = StreakAuthority.trialAuthority(context);
+    long previous = policyPrefs.getLong("streak_trial_since", 0);
+    String previousAuthority = policyPrefs.getString("streak_trial_authority", "");
+    long next = authority.isEmpty() ? 0
+        : (authority.equals(previousAuthority) && previous > 0 ? previous : System.currentTimeMillis());
+    if (next != previous || !authority.equals(previousAuthority)) {
+      policyPrefs.edit().putLong("streak_trial_since", next)
+          .putString("streak_trial_authority", authority).apply();
+    }
+    streakAuthority = authority;
+    if (next != streakCoverageStartedAt) {
+      streakCoverageStartedAt = next;
+      clearTimeline();
     }
   }
 
+  synchronized String streakAuthority() { return streakAuthority; }
+
+  synchronized boolean reportsStreakTo(String authority) {
+    return !streakAuthority.isEmpty() && streakAuthority.equals(authority);
+  }
+
   synchronized List<long[]> streakCoverage(long from, long to) {
-    if (!streakCoverageEnabled || to <= from) return Collections.emptyList();
+    from = Math.max(from, streakCoverageStartedAt);
+    if (streakCoverageStartedAt == 0 || to <= from) return Collections.emptyList();
     SQLiteDatabase db = getWritableDatabase();
     backfillScreenOff(db, from, to);
     List<long[]> result = new ArrayList<>();
@@ -104,7 +122,7 @@ public final class Store extends SQLiteOpenHelper {
   }
 
   synchronized JSONObject streakCoverageSnapshot(long now) throws JSONException {
-    if (!streakCoverageEnabled || !usageAllowed()) return null;
+    if (streakCoverageStartedAt == 0 || !usageAllowed()) return null;
     long start = now - 3 * 86_400_000L;
     JSONArray spans = new JSONArray();
     long left = -1;
@@ -271,7 +289,7 @@ public final class Store extends SQLiteOpenHelper {
     if (um != null && !um.isUserUnlocked()) {
       foreground = "";
       health("user_locked");
-      if (streakCoverageEnabled) clearTimeline();
+      if (streakCoverageStartedAt != 0) clearTimeline();
       return;
     }
     long sampledElapsed = SystemClock.elapsedRealtime();
@@ -299,7 +317,7 @@ public final class Store extends SQLiteOpenHelper {
     UsageStatsManager usm = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
     UsageEvents events = usm == null ? null : usm.queryEvents(Math.max(0, t.cursor - 60_000), now);
     if (events == null) {
-      if (streakCoverageEnabled) clearTimeline();
+      if (streakCoverageStartedAt != 0) clearTimeline();
       health("usage_unavailable");
       foreground = "";
       return;
@@ -358,7 +376,7 @@ public final class Store extends SQLiteOpenHelper {
       v.put("interactive", t.interactive ? 1 : 0);
       v.put("boot", boot);
       db.insertWithOnConflict("tracker", null, v, SQLiteDatabase.CONFLICT_REPLACE);
-      if (streakCoverageEnabled && continuous) {
+      if (streakCoverageStartedAt != 0 && continuous) {
         recordStreakCoverage(db, checkpoint, now);
       }
       db.delete("spans", "e<?", new String[] {String.valueOf(now - 90 * 86_400_000L)});
