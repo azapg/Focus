@@ -175,6 +175,38 @@ pub fn streak_buy_freeze(
     })
 }
 
+/// Finalize with the wallet reward adapter. The authority provides the
+/// resolved day and its verified device reports, never a UI-supplied duration.
+pub fn finalize_with_focus_rewards(
+    store: &Store,
+    local_device: &str,
+    input: &DayEvidence,
+    now_ms: u64,
+    rate: &crate::habits::focus_rewards::FocusRewardRate,
+) -> Result<Result<FinalizedDay, FinalizeError>, String> {
+    use crate::habits::focus_rewards::{award_finalized_day, FinalizedFocusDay};
+    let date = chrono::NaiveDate::from_ymd_opt(1970, 1, 1)
+        .and_then(|epoch| epoch.checked_add_signed(chrono::Duration::days(i64::from(input.day))))
+        .ok_or("Invalid streak profile date")?
+        .to_string();
+    finalize_day(store, local_device, input, now_ms, |ledger, day| {
+        award_finalized_day(
+            ledger,
+            &FinalizedFocusDay {
+                date,
+                day: day.day,
+                day_start_ms: input.start_ms,
+                day_end_ms: input.end_ms,
+                complete: true,
+                union_focus_ms: day.eligible_focus_ms,
+                at_ms: now_ms,
+            },
+            rate,
+        )?;
+        Ok(())
+    })
+}
+
 /// A rejected or failed award aborts the same transaction as day closure and
 /// freeze consumption. The trusted detector callback writes milestone receipts.
 pub fn finalize_day(
@@ -400,11 +432,18 @@ mod tests {
             (input.start_ms, input.start_ms + 100),
         )];
         input.devices[0].confirmed_drift = true;
+        input.devices[0].verified_focus = vec![(input.start_ms, input.start_ms + 60 * 60 * 1_000)];
         assert_eq!(
-            finalize_day(&store, "desk", &input, input.end_ms, |_, _| Ok(()))
-                .unwrap()
-                .unwrap()
-                .status,
+            finalize_with_focus_rewards(
+                &store,
+                "desk",
+                &input,
+                input.end_ms,
+                &crate::habits::focus_rewards::FocusRewardRate::default()
+            )
+            .unwrap()
+            .unwrap()
+            .status,
             DayStatus::Frozen
         );
         let store = Store::new(&path);
@@ -416,7 +455,7 @@ mod tests {
             streak_buy_freeze(&store, "desk", "test", DAY + 1, input.end_ms).unwrap(),
             FreezePurchase::AlreadyBought
         );
-        assert_eq!(store.read().balance(), 40);
+        assert_eq!(store.read().balance(), 50);
         std::fs::remove_dir_all(&path).unwrap();
     }
 }
