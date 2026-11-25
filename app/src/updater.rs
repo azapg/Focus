@@ -186,7 +186,13 @@ pub struct Updater {
 
 impl Updater {
     pub fn open(dir: &Path, dry: bool) -> Self {
-        let config = load_config(dir);
+        let mut config = load_config(dir);
+        if migrate_feed(&mut config, DEFAULT_REPO, option_env!("FOCUS_PREVIOUS_FEED_SHA256").unwrap_or("")) {
+            // Use the migrated configuration immediately and retry persistence on the next launch.
+            if let Err(error) = save_config(dir, &config) {
+                eprintln!("Focus updater: {error}");
+            }
+        }
         let state = UpdateState {
             status: "idle".into(),
             current_build_id: CURRENT_BUILD_ID.into(),
@@ -635,6 +641,21 @@ enum CheckOutcome {
 enum InstallOutcome {
     DryRunVerified,
     RestartScheduled,
+}
+
+fn migrate_feed(config: &mut UpdaterConfig, destination: &str, previous_hash: &str) -> bool {
+    if previous_hash.is_empty() || destination.is_empty() || config.tag != DEFAULT_TAG
+        || config.repo.eq_ignore_ascii_case(destination) {
+        return false;
+    }
+    let digest = format!("{:x}", Sha256::digest(config.repo.to_ascii_lowercase().as_bytes()));
+    if digest != previous_hash {
+        return false;
+    }
+    config.repo = destination.to_owned();
+    config.token_dpapi = None;
+    config.dismissed_sha = None;
+    true
 }
 
 fn config_path(dir: &Path) -> PathBuf {
@@ -1275,6 +1296,19 @@ mod tests {
         assert_eq!(fs::read(old_binary_path(&target)).unwrap(), b"old-version");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn migration_preserves_user_feeds_and_retires_only_the_previous_nightly() {
+        let old = "example/previous";
+        let hash = format!("{:x}", Sha256::digest(old.as_bytes()));
+        let mut cfg = UpdaterConfig { repo: old.to_uppercase(), enabled: false, tag: "custom".into(),
+            token_dpapi: Some("test".into()), ..Default::default() };
+        assert!(!migrate_feed(&mut cfg, "example/current", &hash));
+        cfg.tag = DEFAULT_TAG.into();
+        assert!(migrate_feed(&mut cfg, "example/current", &hash));
+        assert!(!cfg.enabled && cfg.token_dpapi.is_none());
+        assert!(!migrate_feed(&mut cfg, "example/current", &hash));
     }
 
     #[test]

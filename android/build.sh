@@ -160,6 +160,7 @@ public final class BuildInfo {{
   public static final long VERSION_CODE = {int(os.environ["VERSION_CODE"])}L;
   public static final String VERSION_NAME = {jstr(os.environ["VERSION_NAME"])};
   public static final String DEFAULT_REPO = {jstr(os.environ.get("FOCUS_UPDATER_REPO", "").strip())};
+  public static final String PREVIOUS_FEED_SHA256 = {jstr(os.environ.get("FOCUS_PREVIOUS_FEED_SHA256", ""))};
   public static final String DEFAULT_TAG = "nightly";
 }}
 """, encoding="utf-8")

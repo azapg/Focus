@@ -195,8 +195,9 @@ jobs:
     name: Publish nightly release
     env:
       FOCUS_UPDATER_REPO: ${{ github.repository }}
+      FOCUS_PREVIOUS_FEED_SHA256: ${{ vars.FOCUS_PREVIOUS_FEED_SHA256 }}
     needs: [plan, checks, android-checks]
-    if: needs.plan.outputs.release == 'true'
+    if: needs.plan.outputs.release == 'true' && vars.NIGHTLY_PUBLISH_ENABLED == 'true'
     runs-on: windows-latest
     permissions:
       contents: write
@@ -341,7 +342,7 @@ jobs:
   android-nightly:
     name: Publish Android nightly APK
     needs: [plan, android-checks, nightly-release]
-    if: needs.plan.outputs.release == 'true'
+    if: needs.plan.outputs.release == 'true' && vars.NIGHTLY_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -373,6 +374,7 @@ jobs:
       - name: Build and sign Android nightly APK
         env:
           FOCUS_UPDATER_REPO: ${{ github.repository }}
+          FOCUS_PREVIOUS_FEED_SHA256: ${{ vars.FOCUS_PREVIOUS_FEED_SHA256 }}
           NOTES_FILE: ${{ github.workspace }}/notes.json
           FOCUS_ANDROID_KEYSTORE_BASE64: ${{ secrets.FOCUS_ANDROID_KEYSTORE_BASE64 }}
           FOCUS_ANDROID_KEYSTORE_PASS: ${{ secrets.FOCUS_ANDROID_KEYSTORE_PASS }}

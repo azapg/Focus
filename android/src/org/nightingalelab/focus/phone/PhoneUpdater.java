@@ -117,8 +117,29 @@ public final class PhoneUpdater {
   private PhoneUpdater(Context c) {
     this.context = c;
     this.prefs = c.getSharedPreferences("focus_updater", Context.MODE_PRIVATE);
+    migrateNightlyFeed();
     this.lastCheckedAt = prefs.getLong("last_checked_at", 0L);
     restoreCachedManifest();
+  }
+
+  private void migrateNightlyFeed() {
+    String previousHash = BuildInfo.PREVIOUS_FEED_SHA256;
+    if (previousHash.isEmpty() || BuildInfo.DEFAULT_REPO.isEmpty()
+        || prefs.getString("migrated_feed", "").equals(previousHash)
+        || !BuildInfo.DEFAULT_TAG.equals(prefs.getString("tag", BuildInfo.DEFAULT_TAG))) return;
+    String saved = prefs.getString("repo", "");
+    if (!saved.isEmpty()) {
+      try {
+        byte[] repo = saved.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8);
+        if (!previousHash.equals(UpdateManifest.sha256Hex(new ByteArrayInputStream(repo)))) return;
+      } catch (IOException e) {
+        throw new IllegalStateException(e);
+      }
+    }
+    // Older installations normally used the built-in feed and saved only a token.
+    prefs.edit().putString("repo", BuildInfo.DEFAULT_REPO).putString("migrated_feed", previousHash)
+        .remove("github_token").remove("cached_manifest").remove("cached_apk_url")
+        .remove("dismissed_sha").remove("notified_sha").apply();
   }
 
   private void restoreCachedManifest() {
