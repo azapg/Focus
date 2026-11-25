@@ -1,7 +1,8 @@
 use crate::device_commands::{sync_habits, Devices, LaptopHost};
 use crate::{now_ms, Core, Tracker};
 use focus_dns::habits::{
-    away_minutes, local_clock, CreditCap, DesktopLimit, Habit, Ledger, Revision, Screen,
+    away_minutes, local_clock, CreditCap, DesktopLimit, Habit, Ledger, Purchase, Revision, Screen,
+    TIME_OFF_PRICE_PER_MINUTE, WALLET_SYNC_VERSION,
 };
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -41,8 +42,13 @@ pub fn live_screen(tracker: &Tracker, now: u64) -> Screen {
 }
 
 pub fn exchange(core: &Core, input: Value) -> Result<Value, String> {
+    let wallet = input["wallet_sync"] == WALLET_SYNC_VERSION;
     if let Some(payload) = input.get("habits").filter(|v| !v.is_null()) {
-        let ledger = serde_json::from_value(payload.clone()).map_err(|_| "Invalid habits")?;
+        let mut ledger: Ledger =
+            serde_json::from_value(payload.clone()).map_err(|_| "Invalid habits")?;
+        if !wallet {
+            ledger.discard_wallet();
+        }
         core.habits.update(|local| {
             local.merge(ledger);
             Ok(())
@@ -53,13 +59,17 @@ pub fn exchange(core: &Core, input: Value) -> Result<Value, String> {
             serde_json::from_value(raw.clone()).map_err(|_| "Invalid screen observations")?;
         core.habits.merge_screens(screens);
     }
-    Ok(match input["after"].as_str() {
+    let mut response = match input["after"].as_str() {
         Some(after) => {
-            let (page, next) = core.habits.read().page(after);
+            let (page, next) = core.habits.read().page(after, wallet);
             json!({ "habits": page, "next": next })
         }
         None => json!({}),
-    })
+    };
+    if wallet {
+        response["wallet_sync"] = json!(WALLET_SYNC_VERSION);
+    }
+    Ok(response)
 }
 
 fn known_screens(
@@ -163,9 +173,76 @@ pub fn habits_view(core: State<'_, Arc<Core>>) -> Value {
 
 fn view(ledger: &Ledger, now: u64) -> Value {
     let (day, minute) = local_clock(now);
-    json!({ "rows": ledger.status(day, minute), "credit": ledger.credit(day),
+    json!({ "rows": ledger.status(day, minute), "credit": ledger.extra_pause_minutes(day),
         "cap": ledger.cap_on(day), "pending_cap": ledger.cap.as_ref()
             .filter(|cap| cap.effective > day).map(|cap| cap.minutes) })
+}
+
+#[tauri::command]
+pub fn wallet_view(core: State<'_, Arc<Core>>, devices: State<'_, Arc<Devices>>) -> Value {
+    let day = local_clock(now_ms()).0;
+    let ledger = core.habits.read();
+    let peers = devices
+        .0
+        .as_ref()
+        .map(|manager| manager.list())
+        .unwrap_or_default();
+    let needs_upgrade: Vec<_> = peers
+        .iter()
+        .filter(|peer| {
+            peer.snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot["wallet_sync"] != WALLET_SYNC_VERSION)
+        })
+        .map(|peer| &peer.id)
+        .collect();
+    json!({
+        "balance": ledger.balance(),
+        "active": ledger.wallet_active(day),
+        "start_day": ledger.wallet_start,
+        "day": day,
+        "time_off_bought": ledger.time_off_bought(day),
+        "time_off_limit": ledger.cap_on(day),
+        "time_off_price_per_minute": TIME_OFF_PRICE_PER_MINUTE,
+        "needs_upgrade": needs_upgrade
+    })
+}
+
+#[tauri::command]
+pub fn wallet_buy_time(
+    request_id: String,
+    minutes: u16,
+    app: AppHandle,
+    core: State<'_, Arc<Core>>,
+    devices: State<'_, Arc<Devices>>,
+    tracker: State<'_, Arc<Tracker>>,
+    host: State<'_, Arc<LaptopHost>>,
+) -> Result<Purchase, String> {
+    let outcome = core.habits.update(|ledger| {
+        let now = now_ms();
+        ledger.buy_time_off(&request_id, minutes, now, local_clock(now).0)
+    })?;
+    if outcome == Purchase::Bought {
+        let _ = app.emit("habits-updated", ());
+        let _ = app.emit("wallet-updated", ());
+        std::thread::spawn({
+            let (core, devices, tracker, host) = (
+                core.inner().clone(),
+                devices.inner().clone(),
+                tracker.inner().clone(),
+                host.inner().clone(),
+            );
+            move || {
+                if let Ok(manager) = &devices.0 {
+                    for peer in manager.list() {
+                        let _ = sync_habits(manager, &peer, &core, &tracker, host.server());
+                    }
+                    let _ = app.emit("wallet-updated", ());
+                }
+            }
+        });
+    }
+    Ok(outcome)
 }
 
 #[derive(Deserialize)]
@@ -285,6 +362,7 @@ pub fn habits_change(
     })?;
     let state = view(&core.habits.read(), now);
     let _ = app.emit("habits", &state);
+    let _ = app.emit("wallet-updated", ());
     let (core, devices, tracker, host) = (
         core.inner().clone(),
         devices.inner().clone(),
@@ -297,6 +375,7 @@ pub fn habits_change(
                 let _ = sync_habits(manager, &peer, &core, &tracker, host.server());
             }
             let _ = app.emit("habits", view(&core.habits.read(), now_ms()));
+            let _ = app.emit("wallet-updated", ());
             let _ = app.emit("devices", manager.list());
         }
     });

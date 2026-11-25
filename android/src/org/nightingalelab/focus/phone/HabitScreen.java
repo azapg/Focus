@@ -28,7 +28,7 @@ final class HabitScreen {
 
   static PausePolicy.Config pauseAllowance(Context context, long now) {
     PausePolicy.Config config = Store.get(context).policyConfig();
-    config.dailyLimitMinutes += HabitStore.get(context).read().credit(Habits.day(now));
+    config.dailyLimitMinutes += HabitStore.get(context).read().wallet.extraPauseMinutes(Habits.day(now));
     return config;
   }
 

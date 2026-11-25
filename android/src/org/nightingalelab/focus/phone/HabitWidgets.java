@@ -75,7 +75,9 @@ public final class HabitWidgets {
     if (allowance.length > 0) {
       RemoteViews views = base(context, R.layout.widget_habit_compact, "Allowance");
       int base = Store.get(context).policyConfig().dailyLimitMinutes;
-      long limitMs = (base + credit) * 60_000L;
+      int day = Habits.day(now);
+      int extra = habits.wallet.extraPauseMinutes(day);
+      long limitMs = (base + (long) extra) * 60_000L;
       long offMs = HabitScreen.offToday(context, now);
       long left = limitMs - offMs;
       int valueColor = left <= 0 ? RED : limitMs > 0 && offMs * 4 >= limitMs * 3 ? ORANGE : WHITE;
@@ -84,7 +86,7 @@ public final class HabitWidgets {
       label(views, R.id.hab_widget_meta, "Today", GREY);
       label(views, R.id.hab_widget_name, headline, valueColor);
       views.setTextViewTextSize(R.id.hab_widget_name, android.util.TypedValue.COMPLEX_UNIT_SP, 23);
-      label(views, R.id.hab_widget_caption, base + "m + " + credit + "m earned", GREY);
+      label(views, R.id.hab_widget_caption, base + "m + " + extra + (habits.wallet.active(day) ? "m bought" : "m earned"), GREY);
       manager.updateAppWidget(allowance, views);
     }
   }

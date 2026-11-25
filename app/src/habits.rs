@@ -4,6 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod wallet;
+pub use wallet::{
+    Purchase, WalletEntry, SYNC_VERSION as WALLET_SYNC_VERSION, TIME_OFF_PRICE_PER_MINUTE,
+};
+
 const EPOCH_DAY: i32 = 719_163;
 const WINDOW_MS: u64 = 30 * 60_000;
 const CHECKOFF_MS: u64 = 30_000;
@@ -168,6 +173,12 @@ pub struct Event {
     pub reward: u16,
     pub away: Option<u16>,
     pub undo: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub wallet_reward: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Event {
@@ -213,6 +224,10 @@ pub struct Ledger {
     pub cap: Option<CreditCap>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub cap_edits: BTreeMap<String, CreditCap>,
+    #[serde(deserialize_with = "wallet::decode_start", skip_serializing_if = "Option::is_none")]
+    pub wallet_start: Option<i32>,
+    #[serde(deserialize_with = "wallet::decode_entries", skip_serializing_if = "BTreeMap::is_empty")]
+    wallet_entries: BTreeMap<String, WalletEntry>,
 }
 
 #[derive(Serialize)]
@@ -227,9 +242,10 @@ pub struct HabitStatus<'a> {
 }
 
 impl Ledger {
-    pub fn page(&self, after: &str) -> (Self, Option<String>) {
+    pub fn page(&self, after: &str, wallet: bool) -> (Self, Option<String>) {
         let mut result = Self {
             cap: self.cap.clone(),
+            wallet_start: self.wallet_start.filter(|_| wallet),
             ..Self::default()
         };
         let mut cursor = None;
@@ -240,6 +256,7 @@ impl Ledger {
             .map(|id| ("c:", id))
             .chain(self.definitions.keys().map(|id| ("d:", id)))
             .chain(self.events.keys().map(|id| ("e:", id)))
+            .chain(self.wallet_entries.keys().filter(|_| wallet).map(|id| ("w:", id)))
         {
             let key = format!("{prefix}{id}");
             if key.as_str() <= after {
@@ -259,8 +276,13 @@ impl Ledger {
                         .definitions
                         .insert(id.clone(), self.definitions[id].clone());
                 }
+                "e:" => {
+                    let mut event = self.events[id].clone();
+                    event.wallet_reward &= wallet;
+                    result.events.insert(id.clone(), event);
+                }
                 _ => {
-                    result.events.insert(id.clone(), self.events[id].clone());
+                    result.wallet_entries.insert(id.clone(), self.wallet_entries[id].clone());
                 }
             }
             count += 1;
@@ -269,7 +291,17 @@ impl Ledger {
         (result, None)
     }
 
+    pub fn discard_wallet(&mut self) {
+        self.wallet_start = None;
+        self.wallet_entries.clear();
+        for event in self.events.values_mut() {
+            event.wallet_reward = false;
+        }
+    }
+
     pub fn merge(&mut self, incoming: Self) {
+        self.merge_wallet_start(incoming.wallet_start);
+        self.merge_wallet_entries(incoming.wallet_entries);
         for (id, mut habit) in incoming.definitions {
             if id != habit.id || !habit.valid() {
                 continue;
@@ -292,7 +324,14 @@ impl Ledger {
         }
         for (id, event) in incoming.events {
             if id == event.id && event.valid() {
-                self.events.entry(id).or_insert(event);
+                self.events.entry(id).and_modify(|old| {
+                    // Old peers can relay the completion without the wallet flag.
+                    let mut without_flag = event.clone();
+                    without_flag.wallet_reward = false;
+                    if *old == without_flag {
+                        old.wallet_reward = event.wallet_reward;
+                    }
+                }).or_insert(event);
             }
         }
         for cap in incoming.cap_edits.into_values().chain(incoming.cap) {
@@ -466,6 +505,7 @@ impl Ledger {
             reward: row.habit.reward,
             away,
             undo: None,
+            wallet_reward: self.wallet_active(day),
         };
         self.events.insert(event.id.clone(), event.clone());
         Some(event)
@@ -484,6 +524,7 @@ impl Ledger {
             reward: 0,
             away: None,
             undo: Some(target.into()),
+            wallet_reward: false,
         };
         self.events.insert(event.id.clone(), event);
     }
