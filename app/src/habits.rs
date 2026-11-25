@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+pub mod focus_rewards;
 mod wallet;
 pub use wallet::{
     Purchase, WalletEntry, SYNC_VERSION as WALLET_SYNC_VERSION, TIME_OFF_PRICE_PER_MINUTE,

@@ -375,6 +375,17 @@ async def main(output=None):
     assert await page.locator('.w').get_attribute('data-tone') == 'focus'
     assert await page.locator('.w .a-on.focus-ice').count() == 1
 
+    # Wallet focus coins stay hidden while dormant and appear as plain text once active.
+    assert await page.locator('[data-focus-coins]').count() == 0
+    await page.evaluate("""async () => {
+      const orig = window.__TAURI__.core.invoke;
+      window.__TAURI__.core.invoke = async (c, a) => c === 'wallet_view'
+        ? { active: true, balance: 15, focus_coins_today: 15, focus_coins_week: 40 }
+        : orig(c, a);
+      await Panel.render((c, a) => window.__TAURI__.core.invoke(c, a), 'today');
+    }""")
+    assert await page.locator('[data-focus-coins]').inner_text() == '· +15 coins'
+
     assert not errors, errors
     print('PASS: v8 OLED desktop (thin bar, clickable legend, bento cards, searchable Explorer, Week stacked bars, openable pauses, XSS escaping, Esc, surgical orange/red signals, Ice deep focus) verified.')
 

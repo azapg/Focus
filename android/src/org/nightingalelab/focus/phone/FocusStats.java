@@ -241,6 +241,36 @@ public final class FocusStats {
     return kind + "|" + name;
   }
 
+  /** Pure cross-device unioned single-app focus duration in [dayStartMs, dayEndMs), excluding pauses & waste. */
+  public static long unionFocusMs(
+      List<InsightsEngine.SpanRecord> spans,
+      List<InsightsEngine.PauseRecord> pauses,
+      List<ActivityClassifier.UserRule> rules,
+      long dayStartMs,
+      long dayEndMs,
+      long now) {
+    if (dayEndMs <= dayStartMs || spans == null || spans.isEmpty()) return 0L;
+    Map<String, List<long[]>> offByDevice = new HashMap<>();
+    if (pauses != null) {
+      for (InsightsEngine.PauseRecord p : pauses) {
+        long end = effectiveEnd(p, now);
+        if (end <= p.started) continue;
+        offByDevice.computeIfAbsent(devKey(p.deviceKind, p.deviceName), k -> new ArrayList<>())
+            .add(new long[] {p.started, end});
+      }
+      for (List<long[]> list : offByDevice.values()) merge(list);
+    }
+    List<ClassifiedSpan> classified = new ArrayList<>();
+    for (InsightsEngine.SpanRecord sp : spans) {
+      if (sp.e <= sp.s) continue;
+      ActivityClassifier.Result c = ActivityClassifier.classify(sp.app, sp.label, sp.domain, rules);
+      if (c.noise) continue;
+      String dev = deviceLabel(sp.deviceKind, sp.deviceName);
+      classified.add(new ClassifiedSpan(sp, c, ActivityClassifier.fineCategory(c, sp.deviceKind), dev));
+    }
+    return detectFocusRuns(classified, offByDevice, dayStartMs, dayEndMs, now, null).unionMs;
+  }
+
   /** DNS-off used today across every device: what the shared daily limit counts. */
   public static long dnsOffToday(List<InsightsEngine.PauseRecord> pauses, long now, TimeZone tz) {
     long todayStart = InsightsEngine.dayStart(now, tz);

@@ -911,6 +911,12 @@ public final class MainActivity extends Activity {
       sb.append(FocusStats.fmt(v.focusMs)).append(" deep focus");
       sb.setSpan(new ForegroundColorSpan(Theme.ICE), fStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
       sb.setSpan(new StyleSpan(Typeface.BOLD), fStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      long coins = focusCoinsForView(v);
+      if (coins > 0) {
+        int cStart = sb.length();
+        sb.append(" · +").append(coins).append(coins == 1 ? " coin" : " coins");
+        sb.setSpan(new ForegroundColorSpan(Theme.ICE_SOFT), cStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      }
     }
     if (v.driftMs >= 30_000L) {
       sb.append(", ");
@@ -923,6 +929,15 @@ public final class MainActivity extends Activity {
     }
     sb.append(".");
     return Theme.text(this, sb, 13f, Theme.MUTED, false);
+  }
+
+  private long focusCoinsForView(FocusStats.View v) {
+    org.nightingalelab.focus.habits.Wallet wallet = HabitStore.get(this).read().wallet;
+    int todayDay = Habits.day(lastNow);
+    if (!wallet.active(todayDay)) return 0L;
+    int fromDay = Habits.day(v.from);
+    int toDay = v.singleDay ? fromDay : todayDay;
+    return org.nightingalelab.focus.habits.FocusRewards.coinsInRange(wallet, fromDay, toDay);
   }
 
   private TextView buildFocusLogLine(List<FocusStats.FocusRun> runs) {

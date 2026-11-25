@@ -35,6 +35,7 @@ const Panel = (() => {
   let expSearch = '';
   let openPause = null;
   let lastRange = 'today';
+  let walletView = null;
 
   const TOP_APPS = 5;
   const TOP_PAUSES = 3;
@@ -155,6 +156,14 @@ const Panel = (() => {
     const maxLogRuns = 5;
     const shownRuns = (focus.runs || []).slice(0, maxLogRuns);
     const extraRuns = Math.max(0, (focus.runs || []).length - shownRuns.length);
+    const focusCoins = !lastRenderArgs?.scoped && walletView?.active
+      ? (range === 'week' && selectedDay == null
+          ? Number(walletView.focus_coins_week || 0)
+          : selectedDay == null
+            ? Number(walletView.focus_coins_today || 0)
+            : 0)
+      : 0;
+    const focusCoinsText = focusCoins > 0 ? `+${focusCoins} ${focusCoins === 1 ? 'coin' : 'coins'}` : '';
     const focusLogHtml = shownRuns.length
       ? `<div class="focus-log" data-focus-log>
           <span class="focus-log-lbl">Long runs</span>
@@ -165,7 +174,7 @@ const Panel = (() => {
     statsEl.innerHTML = `
       <div class="hero-line">
         <span class="hero-total v" data-total>${Stats.fmt(total)}</span>
-        <span class="hero-sent">on screens, <b data-build-pct>${Stats.fmt(building)} building</b>${focusMs >= 60e3 ? `, <span class="hero-focus" data-deep-focus>${Stats.fmt(focusMs)} deep focus</span>` : ''}${drift >= 60e3 ? `, <span class="hero-drift${heavyDrift ? ' bad' : ''}">${Stats.fmt(drift)} drifting</span>` : ''}.</span>
+        <span class="hero-sent">on screens, <b data-build-pct>${Stats.fmt(building)} building</b>${focusMs >= 60e3 ? `, <span class="hero-focus" data-deep-focus>${Stats.fmt(focusMs)} deep focus</span>${focusCoinsText ? ` <span class="hero-focus-coins" data-focus-coins>· ${esc(focusCoinsText)}</span>` : ''}` : ''}${drift >= 60e3 ? `, <span class="hero-drift${heavyDrift ? ' bad' : ''}">${Stats.fmt(drift)} drifting</span>` : ''}.</span>
       </div>
       <div class="thin-bar">
         ${major.map((c) => {
@@ -673,6 +682,10 @@ const Panel = (() => {
   async function renderSources(invoke, range, sources, allSources = null, scoped = false) {
     await ensureRules(invoke);
     await ensureFineData(invoke);
+    try {
+      const wv = await invoke('wallet_view');
+      walletView = wv && typeof wv === 'object' ? wv : null;
+    } catch { walletView = null; }
     const now = Date.now();
     const today = Stats.dayStart(now);
     const days = Array.from({ length: 7 }, (_, i) => {

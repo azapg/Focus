@@ -204,6 +204,8 @@ pub fn wallet_view(core: State<'_, Arc<Core>>, devices: State<'_, Arc<Devices>>)
         "time_off_bought": ledger.time_off_bought(day),
         "time_off_limit": ledger.cap_on(day),
         "time_off_price_per_minute": TIME_OFF_PRICE_PER_MINUTE,
+        "focus_coins_today": crate::habits::focus_rewards::focus_coins_for_day(&ledger, day),
+        "focus_coins_week": crate::habits::focus_rewards::focus_coins_in_range(&ledger, day - 6, day),
         "needs_upgrade": needs_upgrade
     })
 }

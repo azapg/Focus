@@ -2067,6 +2067,9 @@ body:has(#dockPauseJudge:not([hidden]):not(:has(.dock-peek))) .w { visibility: h
   color: var(--d-ice);
   font-weight: 600;
 }
+.hero-focus-coins {
+  color: var(--d-ice-soft);
+}
 .focus-log {
   margin-top: 9px;
   padding-top: 7px;
