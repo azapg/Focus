@@ -29,7 +29,7 @@ const panel = document.getElementById('panel');
 const judgeSheet = document.getElementById('dockPauseJudge');
 panel.style.setProperty('--maxh', `${Math.min(innerHeight, screen.availHeight) - 66}px`);
 let earnedCredit = 0;
-let habitDue = 0, habitOverdue = 0, liveFocusState = null;
+let habitDue = 0, habitOverdue = 0, liveFocusState = null, activeDeepFocus = false;
 const habitOverlays = ["habitQuick", "habitEditor", "habitFloat"].map((id) => document.getElementById(id));
 let panelOpen = false, range = 'today', panelTimer, panelOpening = 0;
 const nudgeButton = document.getElementById('habitNudge');
@@ -228,17 +228,30 @@ const aOn = w.querySelector('.a-on'), aOff = w.querySelector('.a-off');
 // The soft DNS-off limit is shared by every device, so today's total includes paired phones and TVs.
 let pairedDevices = [];
 let today = { offMs: 0, pauses: 0 };
+let widgetRules = null;
 async function refreshToday() {
   const from = Stats.dayStart(Date.now());
   const h = await invoke('history', { from, to: from + Stats.DAY });
+  if (!widgetRules) {
+    try {
+      const r = await invoke('activity_rules_load');
+      if (r && Array.isArray(r.rules)) widgetRules = r;
+    } catch { /* rules.json is optional */ }
+  }
   const s = Stats.summarize(h, from, from + Stats.DAY);
   let offMs = s.off, pauses = (h.pauses || []).filter((p) => p.t >= from).length;
+  let allSources = [];
   try {
+    allSources = DeviceStats.sources(h, pairedDevices, []);
     for (const src of DeviceStats.sources(null, pairedDevices, [])) {
       offMs += Stats.summarize(src.history, from, from + Stats.DAY).off;
       pauses += (src.history.pauses || []).filter((p) => p.t >= from).length;
     }
   } catch { /* device snapshots are optional */ }
+  try {
+    const focusSources = allSources.length ? allSources : [{ id: 'laptop', name: 'Laptop', kind: 'windows', history: h }];
+    activeDeepFocus = Boolean(ActivityClassifier.detectFocusSessions(focusSources, from, from + Stats.DAY, { userRules: widgetRules }).activeRun);
+  } catch { activeDeepFocus = false; }
   today = { offMs, pauses };
   aOn.textContent = Stats.fmt(s.active);
   updateAllowance();
@@ -266,8 +279,11 @@ function syncPillTone() {
     ? 'bad'
     : frac >= 0.75 || paused() || view.scoped_until != null || habitDue > 0 || liveFocusState === 'drifting'
       ? 'warn'
-      : 'ok';
+      : activeDeepFocus
+        ? 'focus'
+        : 'ok';
   if (w.dataset.tone !== tone) w.dataset.tone = tone;
+  aOn.classList.toggle('focus-ice', tone === 'focus');
   const focus = liveFocusState === 'drifting' || liveFocusState === 'unfocused' ? liveFocusState : '';
   if ((w.dataset.focus || '') !== focus) {
     if (focus) w.dataset.focus = focus;
@@ -416,11 +432,13 @@ document.addEventListener('keydown', (event) => {
 });
 w.querySelector('.lockb').onclick = () => { log('lock clicked'); closePanel(); setState('idle'); invoke('lock'); };
 
-// Hover tooltips for anything with data-tip.
+// Hover tooltips for anything with data-tip (hidden once a details row is clicked/expanded).
 const tip = document.getElementById('tip');
+const hideTip = () => { tip.style.opacity = 0; };
+document.addEventListener('pointerdown', hideTip, true);
 document.addEventListener('mousemove', (e) => {
   const el = e.target.closest('[data-tip]');
-  if (!el) { tip.style.opacity = 0; return; }
+  if (!el || el.closest('details[open]')) { hideTip(); return; }
   tip.innerHTML = el.dataset.tip;
   tip.style.left = Math.max(4, Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 4)) + 'px';
   tip.style.top = (e.clientY + 14) + 'px'; tip.style.opacity = 1;

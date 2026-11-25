@@ -58,6 +58,8 @@ public final class Theme {
   public static final int WARN = 0xFFF59E0B; // Orange for slips, drift, and approaching limits
   public static final int BAD = 0xFFEF4444; // Red for rings, bars, and hard breaches
   public static final int BAD_TEXT = 0xFFF87171; // Red text on pure OLED black
+  public static final int ICE = 0xFFCBE2FF; // Ice blue-white for earned long single-app focus
+  public static final int ICE_SOFT = 0xFF9BB8DC; // Muted ice for secondary focus text
   public static final int GREEN = 0xFF8A8A8A; // Keep monochrome on OLED
   /** Neutral emphasis for non-breach notes. */
   public static final int ATTN = 0xFFD4D4D8;

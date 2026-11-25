@@ -308,3 +308,88 @@ test('fine category palette keeps productive and neutral work monochrome and col
     assert.equal(isGray(byId[id].color), false, `${id} should carry a warning/breach color (${byId[id].color})`);
   }
 });
+
+test('classifies NotebookLM, notes, Kindle, and Anki into eligible learning/reading/writing categories', () => {
+  const cases = [
+    [{ app: 'Chrome', label: 'notebooklm.google.com', source: 'chromium_extension', browser: { url: 'https://notebooklm.google.com/notebook/abc', title: 'Quantum Notes - NotebookLM' } }, 'windows', 'NotebookLM', 'learning'],
+    [{ app: 'Chrome', label: 'keep.google.com', source: 'chromium_extension', browser: { url: 'https://keep.google.com/', title: 'Google Keep' } }, 'windows', 'Google Keep', 'writing'],
+    [{ app: 'OneNote', label: 'OneNote' }, 'windows', 'OneNote', 'writing'],
+    [{ app: 'com.amazon.kindle', label: 'Kindle' }, 'phone', 'Kindle', 'reading'],
+    [{ app: 'com.ichi2.anki', label: 'Anki' }, 'phone', 'Anki', 'learning'],
+  ];
+  for (const [span, kind, app, category] of cases) {
+    const out = ActivityClassifier.classifySpan(span, kind);
+    assert.equal(out.app, app);
+    assert.equal(out.category, category);
+  }
+});
+
+test('detectFocusSessions rewards unbroken single-app runs (25m build/write, 15m read/learn) and rejects waste and pauses', () => {
+  const m = 60_000, s = 1_000;
+  const lap = (start, end, app, url, title) => ({
+    s: start, e: end, app: url ? 'Chrome' : app, label: url ? new URL(url).hostname : app,
+    source: url ? 'chromium_extension' : 'window_title',
+    ...(url ? { browser: { url, title, visibility: 'page' } } : {}),
+  });
+
+  const sources = [
+    {
+      id: 'laptop', name: 'Laptop', kind: 'windows',
+      history: {
+        now: 180 * m,
+        spans: [
+          // 1. T3 Code: 15m + 30s glance to Terminal + 15m -> 30m unbroken focus (Terminal 30s not counted).
+          lap(0, 15 * m, 'T3 Code'),
+          lap(15 * m, 15 * m + 30 * s, 'Terminal'),
+          lap(15 * m + 30 * s, 30 * m + 30 * s, 'T3 Code'),
+          // 2. 20m Notion interrupted by 10s of X -> breaks immediately (20m < 25m, not rewarded).
+          lap(35 * m, 55 * m, 'Notion'),
+          lap(55 * m, 55 * m + 10 * s, 'Chrome', 'https://x.com/home', 'Home / X'),
+          lap(55 * m + 10 * s, 65 * m + 10 * s, 'Notion'),
+          // 3. 60m continuous YouTube -> never eligible.
+          lap(70 * m, 130 * m, 'Chrome', 'https://www.youtube.com/watch?v=demo', 'Demo - YouTube'),
+          // 4. 40m T3 Code split in the middle by a 5m DNS-off pause -> 18m + 17m, neither hits 25m.
+          lap(135 * m, 175 * m, 'T3 Code'),
+        ],
+        pauses: [
+          { t: 153 * m, end: 158 * m, minutes: 5, reason: 'quick check' },
+        ],
+      },
+    },
+    {
+      id: 'phone', name: 'Phone', kind: 'phone',
+      history: {
+        now: 180 * m,
+        spans: [
+          // 5. Duolingo 16m on phone overlapping Laptop T3 Code [10m..26m] -> qualifies (15m min for learning), union deduplicates overlap!
+          { s: 10 * m, e: 26 * m, app: 'com.duolingo', label: 'Duolingo' },
+          // 6. Readest 14m -> under 15m threshold, stays unrewarded.
+          { s: 40 * m, e: 54 * m, app: 'com.bilingify.readest', label: 'Readest' },
+          // 7. Active NotebookLM 18m right up to now -> qualifies and marks activeRun.
+          { s: 162 * m, e: 180 * m, app: 'site:notebooklm.google.com', domain: 'notebooklm.google.com', label: 'NotebookLM' },
+        ],
+        pauses: [],
+      },
+    },
+  ];
+
+  const fine = ActivityClassifier.summarizeFine(sources, 0, 180 * m);
+  assert.equal(fine.focus.runs.length, 3, 'T3 Code 30m, NotebookLM 18m, Duolingo 16m qualify');
+  assert.deepEqual(fine.focus.runs.map((r) => [r.app, r.ms]), [
+    ['T3 Code', 30 * m],
+    ['NotebookLM', 18 * m],
+    ['Duolingo', 16 * m],
+  ]);
+  assert.equal(fine.focus.totalMs, 64 * m);
+  // Union of [0..15m], [15m30s..30m30s], [10m..26m], [162m..180m] = 30.5m + 18m = 48.5m (no double counting).
+  assert.equal(fine.focus.unionMs, 48.5 * m);
+  assert.equal(fine.focus.activeRun?.app, 'NotebookLM');
+
+  const byApp = Object.fromEntries(fine.apps.map((a) => [a.app, a]));
+  assert.equal(byApp['T3 Code'].focusMs, 30 * m);
+  assert.equal(byApp['YouTube'].focusMs, 0);
+  assert.equal(byApp['Notion'].focusMs, 0);
+  assert.equal(byApp['Readest'].focusMs, 0);
+  assert.equal(byApp['Duolingo'].focusMs, 16 * m);
+  assert.equal(byApp['NotebookLM'].focusMs, 18 * m);
+});
