@@ -914,7 +914,7 @@ public final class MainActivity extends Activity {
       long coins = focusCoinsForView(v);
       if (coins > 0) {
         int cStart = sb.length();
-        sb.append(" · +").append(coins).append(coins == 1 ? " coin" : " coins");
+        sb.append(" · +").append(Long.toString(coins)).append(coins == 1 ? " coin" : " coins");
         sb.setSpan(new ForegroundColorSpan(Theme.ICE_SOFT), cStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
       }
     }
