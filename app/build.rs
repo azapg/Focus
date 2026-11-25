@@ -30,7 +30,7 @@ fn main() {
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| {
-            "dc8d2fc1600cf9ecbf92395031ae3e36ef227bccfb4f1c74aac90f29aa037187".into()
+            "41295ba8a207db60efaba6b5bb38d66f116af7c251e3f43b5ca35d324cfd7957".into()
         });
 
     println!("cargo:rustc-env=FOCUS_BUILD_ID={build}");
