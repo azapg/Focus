@@ -10,6 +10,36 @@ public final class UsageTimeline {
     void add(long start, long end, String pkg, String domain);
   }
 
+  /** Pairs explicit Android screen events without filling an open or rebooted interval. */
+  public static final class ScreenOff {
+    private long last = -1;
+    private long off = -1;
+
+    public void event(long when, int type, java.util.function.BiConsumer<Long, Long> interval) {
+      if (when < last) {
+        off = -1;
+        return;
+      }
+      last = when;
+      switch (type) {
+        case 16: // SCREEN_NON_INTERACTIVE
+          // A repeated off could follow a missing on. Use only the later off boundary.
+          off = when;
+          break;
+        case 15: // SCREEN_INTERACTIVE
+          if (off >= 0 && when > off) interval.accept(off, when);
+          off = -1;
+          break;
+        case 26: // DEVICE_SHUTDOWN
+        case 27: // DEVICE_STARTUP
+          off = -1;
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
   public long cursor;
   public String pkg = "", cls = "", domain = "";
   public boolean interactive;

@@ -392,6 +392,8 @@ public final class LanController {
             .put("status", dns.status())
             .put("pause_until", deadline == 0 ? 0 : now + Math.max(0, deadline - SystemClock.elapsedRealtime())));
     result.put("apps", new JSONArray());
+    JSONObject coverage = store.streakCoverageSnapshot(now);
+    if (coverage != null) result.put("streak_coverage", coverage);
     return result;
   }
 }

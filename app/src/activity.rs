@@ -88,6 +88,82 @@ impl Coverage {
     }
 }
 
+#[cfg(any(windows, test))]
+#[derive(Default)]
+struct SleepCoverage {
+    suspended: Option<(u64, u64)>,
+}
+
+#[cfg(any(windows, test))]
+impl SleepCoverage {
+    fn transition(&mut self, sleeping: bool, wall_ms: u64, tick_ms: u64) -> Option<(u64, u64)> {
+        if sleeping {
+            self.suspended = Some((wall_ms, tick_ms));
+            return None;
+        }
+        let (start, start_tick) = self.suspended.take()?;
+        let wall_gap = wall_ms.checked_sub(start)?;
+        let tick_gap = tick_ms.checked_sub(start_tick)?;
+        (wall_gap > 0 && wall_gap.abs_diff(tick_gap) <= 5_000).then_some((start, wall_ms))
+    }
+}
+
+#[cfg(windows)]
+mod power_events {
+    use std::{ffi::c_void, sync::{mpsc, OnceLock}};
+    use windows_sys::Win32::{
+        System::{Power::{PowerRegisterSuspendResumeNotification, PowerUnregisterSuspendResumeNotification, DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS}, SystemInformation::GetTickCount64},
+        UI::WindowsAndMessaging::{DEVICE_NOTIFY_CALLBACK, PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND},
+    };
+
+    type Event = (bool, u64, u64);
+    static REPORTER: OnceLock<mpsc::Sender<Event>> = OnceLock::new();
+
+    pub struct Subscription {
+        handle: *mut c_void,
+        pub reports: mpsc::Receiver<Event>,
+    }
+
+    unsafe extern "system" fn callback(_: *const c_void, event: u32, _: *const c_void) -> u32 {
+        let sleeping = match event {
+            PBT_APMSUSPEND => true,
+            PBT_APMRESUMEAUTOMATIC => false,
+            _ => return 0,
+        };
+        if let Some(reporter) = REPORTER.get() {
+            let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
+            let _ = reporter.send((sleeping, now, unsafe { GetTickCount64() }));
+        }
+        0
+    }
+
+    impl Subscription {
+        pub fn register() -> Option<Self> {
+            let (sender, reports) = mpsc::channel();
+            REPORTER.set(sender).ok()?;
+            let mut params = DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
+                Callback: Some(callback),
+                Context: std::ptr::null_mut(),
+            };
+            let mut handle = std::ptr::null_mut();
+            let code = unsafe {
+                PowerRegisterSuspendResumeNotification(
+                    DEVICE_NOTIFY_CALLBACK, (&mut params as *mut DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS).cast(), &mut handle,
+                )
+            };
+            (code == 0).then_some(Self { handle, reports })
+        }
+    }
+
+    impl Drop for Subscription {
+        fn drop(&mut self) {
+            if !self.handle.is_null() {
+                unsafe { PowerUnregisterSuspendResumeNotification(self.handle as isize); }
+            }
+        }
+    }
+}
+
 fn day_of(ms: u64) -> NaiveDate {
     Local.timestamp_millis_opt(ms as i64).unwrap().date_naive()
 }
@@ -161,6 +237,9 @@ impl Tracker {
             }
             day = day.succ_opt().unwrap();
         }
+        if let Ok(text) = fs::read_to_string(self.dir.join("suspend.coverage.jsonl")) {
+            intervals.extend(text.lines().filter_map(|line| serde_json::from_str::<(u64, u64)>(line).ok()));
+        }
         intervals.extend(coverage.interval);
         intervals.into_iter().filter_map(|(start, end)| {
             let start = start.max(from);
@@ -188,6 +267,8 @@ impl Tracker {
         let live = self.data_dir.join("browser");
         let _ = fs::create_dir_all(&live);
         let mut resources = telemetry::Sampler::new(&self.data_dir, telemetry::Component::Desktop);
+        #[cfg(windows)]
+        let (mut subscribed, mut subscription, mut sleep) = (false, None, SleepCoverage::default());
         loop {
             thread::sleep(Duration::from_millis(TICK_MS));
             telemetry::ACTIVITY_TICK.count(1);
@@ -197,6 +278,26 @@ impl Tracker {
             if focus_browser_host::atomic_write(&live.join("app-seen"), seen.as_bytes()).is_ok() {
                 telemetry::ACTIVITY_WRITE.count(1);
                 telemetry::ACTIVITY_WRITE_BYTES.count(seen.len() as u64);
+            }
+            #[cfg(windows)]
+            if self.coverage_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+                if !subscribed {
+                    subscribed = true;
+                    subscription = power_events::Subscription::register();
+                }
+                if let Some(subscription) = &subscription {
+                    for (sleeping, wall, ticks) in subscription.reports.try_iter() {
+                        if sleeping {
+                            self.record_coverage(wall, true);
+                        }
+                        if let Some((start, end)) = sleep.transition(sleeping, wall, ticks) {
+                            let _ = OpenOptions::new().create(true).append(true)
+                                .open(self.dir.join("suspend.coverage.jsonl"))
+                                .and_then(|mut file| writeln!(file, "[{start},{end}]"));
+                            self.record_coverage(end, true);
+                        }
+                    }
+                }
             }
             let (sample, idle_ms, verified) = sample(now, &self.data_dir);
             if self.coverage_enabled.load(std::sync::atomic::Ordering::Relaxed) {
@@ -392,6 +493,17 @@ mod tests {
     use super::*;
     fn label(exe: &str, title: &str) -> String {
         classify(exe, title).1
+    }
+
+    #[test]
+    fn sleep_coverage_requires_paired_boundaries_and_a_stable_clock() {
+        let mut sleep = SleepCoverage::default();
+        assert_eq!(sleep.transition(false, 200, 100), None);
+        assert_eq!(sleep.transition(true, 300, 200), None);
+        assert_eq!(sleep.transition(false, 60_300, 60_200), Some((300, 60_300)));
+        assert_eq!(sleep.transition(false, 60_301, 60_201), None);
+        sleep.transition(true, 61_300, 61_200);
+        assert_eq!(sleep.transition(false, 90_300, 62_200), None);
     }
 
     #[test]

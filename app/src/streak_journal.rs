@@ -99,6 +99,107 @@ pub fn desktop_evidence(
     })
 }
 
+/// Consume a phone snapshot already received through the paired, pinned
+/// connection. The expected ID and receipt time come from that connection.
+pub fn paired_phone_evidence(
+    expected_device: &str,
+    snapshot: &serde_json::Value,
+    extractor: &mut crate::focus_extract::FocusExtractor,
+    start_ms: u64,
+    end_ms: u64,
+    received_at_ms: u64,
+) -> Result<Option<DeviceEvidence>, String> {
+    if snapshot["device_id"].as_str() != Some(expected_device) || snapshot["kind"] != "phone" {
+        return Err("Streak reporter does not match the paired phone".into());
+    }
+    let Some(covered) = parse_peer_coverage(snapshot, start_ms, end_ms)? else {
+        return Ok(None);
+    };
+    let extracted =
+        extractor.extract_peer_snapshot(expected_device, "phone", snapshot, start_ms, end_ms)?;
+    let mut cuts: Vec<_> = extracted
+        .stream
+        .spans
+        .iter()
+        .filter(|span| span.category.is_waste())
+        .map(|span| (span.start_ms, span.end_ms))
+        .collect();
+    for span in snapshot["spans"].as_array().into_iter().flatten() {
+        let app = span["app"].as_str().unwrap_or_default();
+        let domain = span["domain"].as_str().unwrap_or_default();
+        let unresolved = matches!(
+            app,
+            "com.whatsapp"
+                | "com.whatsapp.w4b"
+                | "com.google.android.youtube"
+                | "com.twitter.android"
+        ) || matches!(
+            domain,
+            "x.com" | "twitter.com" | "youtube.com" | "youtu.be" | "web.whatsapp.com"
+        );
+        if unresolved {
+            if let (Some(start), Some(end)) = (span["s"].as_u64(), span["e"].as_u64()) {
+                if end > start {
+                    cuts.push((start, end));
+                }
+            }
+        }
+    }
+    // The phone presently exposes no verified native X/YouTube/WhatsApp places.
+    // A browser domain and generic app facts cannot spend a profile freeze.
+    if extracted.unverified_browser_ms > 0 {
+        cuts.push((start_ms, end_ms));
+    }
+    cuts.sort_unstable();
+    Ok(Some(DeviceEvidence {
+        device: extracted.device_id,
+        received_at_ms,
+        covered: subtract_intervals(covered, &cuts),
+        has_verified_activity: extracted.verified_active_ms > 0,
+        confirmed_drift: false,
+        verified_focus: extracted.verified_focus_intervals,
+    }))
+}
+
+fn parse_peer_coverage(
+    snapshot: &serde_json::Value,
+    from: u64,
+    to: u64,
+) -> Result<Option<Vec<(u64, u64)>>, String> {
+    let payload = &snapshot["streak_coverage"];
+    if payload.is_null() {
+        return Ok(None);
+    }
+    if payload["version"] != 1 {
+        return Err("Unsupported streak coverage payload".into());
+    }
+    let intervals = payload["intervals"]
+        .as_array()
+        .filter(|items| items.len() <= 1024)
+        .ok_or("Invalid streak coverage interval list")?;
+    let snapshot_now = snapshot["now"]
+        .as_u64()
+        .ok_or("Missing snapshot timestamp")?;
+    let mut result = Vec::new();
+    for interval in intervals {
+        let pair = interval
+            .as_array()
+            .filter(|pair| pair.len() == 2)
+            .ok_or("Invalid streak coverage interval")?;
+        let start = pair[0].as_u64().ok_or("Invalid streak coverage start")?;
+        let end = pair[1]
+            .as_u64()
+            .filter(|end| *end > start && *end <= snapshot_now)
+            .ok_or("Invalid streak coverage end")?;
+        let left = start.max(from);
+        let right = end.min(to);
+        if left < right {
+            result.push((left, right));
+        }
+    }
+    Ok(Some(result))
+}
+
 fn subtract_intervals(mut intervals: Vec<(u64, u64)>, cuts: &[(u64, u64)]) -> Vec<(u64, u64)> {
     intervals.sort_unstable();
     let mut next_cut = 0;
@@ -481,6 +582,23 @@ mod tests {
             confirmed_drift: false,
             verified_focus: vec![focus],
         }
+    }
+
+    #[test]
+    fn phone_coverage_requires_explicit_bounded_intervals() {
+        use serde_json::json;
+        assert_eq!(
+            parse_peer_coverage(&json!({"now": 100}), 10, 80).unwrap(),
+            None
+        );
+        let snapshot = json!({"now": 100, "streak_coverage": {"version": 1, "intervals": [[5, 30], [40, 92]]}});
+        assert_eq!(
+            parse_peer_coverage(&snapshot, 10, 80).unwrap(),
+            Some(vec![(10, 30), (40, 80)])
+        );
+        let invalid =
+            json!({"now": 100, "streak_coverage": {"version": 1, "intervals": [[50, 101]]}});
+        assert!(parse_peer_coverage(&invalid, 10, 80).is_err());
     }
 
     #[test]

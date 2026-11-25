@@ -89,8 +89,11 @@ public final class Store extends SQLiteOpenHelper {
   }
 
   synchronized List<long[]> streakCoverage(long from, long to) {
+    if (!streakCoverageEnabled || to <= from) return Collections.emptyList();
+    SQLiteDatabase db = getWritableDatabase();
+    backfillScreenOff(db, from, to);
     List<long[]> result = new ArrayList<>();
-    try (Cursor rows = getReadableDatabase().rawQuery(
+    try (Cursor rows = db.rawQuery(
         "SELECT s,e FROM streak_coverage WHERE e>? AND s<? ORDER BY s",
         new String[] {String.valueOf(from), String.valueOf(to)})) {
       while (rows.moveToNext()) {
@@ -98,6 +101,59 @@ public final class Store extends SQLiteOpenHelper {
       }
     }
     return result;
+  }
+
+  synchronized JSONObject streakCoverageSnapshot(long now) throws JSONException {
+    if (!streakCoverageEnabled || !usageAllowed()) return null;
+    long start = now - 3 * 86_400_000L;
+    JSONArray spans = new JSONArray();
+    long left = -1;
+    long right = -1;
+    int maxIntervals = 1024;
+    for (long[] observed : streakCoverage(start, now)) {
+      if (left >= 0 && observed[0] <= right) {
+        right = Math.max(right, observed[1]);
+      } else {
+        if (left >= 0) spans.put(new JSONArray().put(left).put(right));
+        if (spans.length() >= maxIntervals) break;
+        left = observed[0];
+        right = observed[1];
+      }
+    }
+    if (left >= 0 && spans.length() < maxIntervals) {
+      spans.put(new JSONArray().put(left).put(right));
+    }
+    return new JSONObject().put("version", 1).put("intervals", spans);
+  }
+
+  private void backfillScreenOff(SQLiteDatabase db, long from, long to) {
+    if (!usageAllowed()) return;
+    UsageStatsManager usage = context.getSystemService(UsageStatsManager.class);
+    if (usage == null) return;
+    long margin = 36L * 60 * 60 * 1_000;
+    long until = Math.min(System.currentTimeMillis(), to + margin);
+    if (until <= from || until - from > 4 * margin) return;
+    UsageEvents events = usage.queryEvents(Math.max(0, from - margin), until);
+    if (events == null) return;
+    UsageTimeline.ScreenOff screen = new UsageTimeline.ScreenOff();
+    UsageEvents.Event event = new UsageEvents.Event();
+    db.beginTransaction();
+    try {
+      while (events.hasNextEvent()) {
+        events.getNextEvent(event);
+        screen.event(event.getTimeStamp(), event.getEventType(), (off, on) -> {
+          long start = Math.max(off, from);
+          long end = Math.min(on, to);
+          if (end > start) {
+            db.execSQL("INSERT INTO streak_coverage(s,e) VALUES(?,?) "
+                + "ON CONFLICT(s) DO UPDATE SET e=max(e,excluded.e)", new Object[] {start, end});
+          }
+        });
+      }
+      db.setTransactionSuccessful();
+    } finally {
+      db.endTransaction();
+    }
   }
 
   private static void recordStreakCoverage(SQLiteDatabase db, long from, long to) {
