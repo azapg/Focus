@@ -6,6 +6,11 @@ on:
     # Every 6 hours, off the busy top of the hour. The plan job skips it when main is already published.
     - cron: "17 */6 * * *"
   workflow_dispatch:
+    inputs:
+      stage_only:
+        description: Build signed rehearsal artifacts without updating the nightly release
+        type: boolean
+        default: false
 
 concurrency:
   group: nightly-${{ github.ref }}
@@ -197,7 +202,9 @@ jobs:
       FOCUS_UPDATER_REPO: ${{ github.repository }}
       FOCUS_PREVIOUS_FEED_SHA256: ${{ vars.FOCUS_PREVIOUS_FEED_SHA256 }}
     needs: [plan, checks, android-checks]
-    if: needs.plan.outputs.release == 'true' && vars.NIGHTLY_PUBLISH_ENABLED == 'true'
+    if: |
+      (needs.plan.outputs.release == 'true' && vars.NIGHTLY_PUBLISH_ENABLED == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.stage_only && github.ref_type == 'branch')
     runs-on: windows-latest
     permissions:
       contents: write
@@ -292,7 +299,17 @@ jobs:
             --app release-stage/FocusDNS.exe `
             --bridge release-stage/focus-browser-host.exe
 
+      - name: Keep signed desktop rehearsal artifacts
+        if: inputs.stage_only
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-rehearsal
+          path: release-stage/
+          retention-days: 5
+          if-no-files-found: error
+
       - name: Publish rolling nightly GitHub Release
+        if: ${{ !inputs.stage_only }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -342,7 +359,9 @@ jobs:
   android-nightly:
     name: Publish Android nightly APK
     needs: [plan, android-checks, nightly-release]
-    if: needs.plan.outputs.release == 'true' && vars.NIGHTLY_PUBLISH_ENABLED == 'true'
+    if: |
+      (needs.plan.outputs.release == 'true' && vars.NIGHTLY_PUBLISH_ENABLED == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.stage_only && github.ref_type == 'branch')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -366,7 +385,19 @@ jobs:
       - name: Install Android NDK
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358"'
 
+      - name: Get rehearsal release notes
+        if: inputs.stage_only
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-rehearsal
+          path: rehearsal
+
+      - name: Copy rehearsal release notes
+        if: inputs.stage_only
+        run: cp rehearsal/notes.json notes.json
+
       - name: Fetch release notes
+        if: ${{ !inputs.stage_only }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release download nightly -p notes.json -O "$GITHUB_WORKSPACE/notes.json" --clobber || echo "no notes yet"
@@ -388,7 +419,19 @@ jobs:
       - name: Verify Android nightly APK before publishing
         run: python3 android/check-release-apk.py android/build/focus-phone.apk
 
+      - name: Keep signed Android rehearsal artifacts
+        if: inputs.stage_only
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-rehearsal
+          path: |
+            android/build/focus-phone.apk
+            android/build/android-nightly.json
+          retention-days: 5
+          if-no-files-found: error
+
       - name: Upload Android APK and manifest to nightly release
+        if: ${{ !inputs.stage_only }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
