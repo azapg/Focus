@@ -238,7 +238,7 @@ mod tests {
             .expect("launch the restricted Peek worker");
         focus_browser_host::write_frame(
             &mut worker.input,
-            &json!({ "url": "https://x.com/explore" }),
+            &json!({ "url": "https://x.com/explore", "profile": "a1b2c3" }),
         )
         .unwrap();
         let read = |worker: &mut process::Worker| -> Option<Value> {
