@@ -27,6 +27,7 @@ public final class Store extends SQLiteOpenHelper {
   private String currentBrowserDomain = "";
   public static volatile long heartbeat;
   private volatile long habitObservedFrom;
+  private boolean streakCoverageEnabled;
 
   public long habitObservedFrom() { return habitObservedFrom; }
 
@@ -36,7 +37,7 @@ public final class Store extends SQLiteOpenHelper {
   }
 
   private Store(Context c) {
-    super(c, "focus_phone.db", null, 3);
+    super(c, "focus_phone.db", null, 4);
     context = c;
     policyPrefs = c.getSharedPreferences("focus_policy", Context.MODE_PRIVATE);
     setWriteAheadLoggingEnabled(true);
@@ -52,12 +53,14 @@ public final class Store extends SQLiteOpenHelper {
     db.execSQL("CREATE TABLE user_rules(match_type TEXT NOT NULL,value TEXT NOT NULL,app TEXT NOT NULL,category TEXT NOT NULL,PRIMARY KEY(match_type,value))");
     db.execSQL("CREATE TABLE diagnostics(at INTEGER NOT NULL,kind TEXT NOT NULL)");
     createPeekHistory(db);
+    createStreakCoverage(db);
   }
 
   @Override
   public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
     if (oldVersion < 2) addPauseFeedbackColumns(db);
     if (oldVersion < 3) createPeekHistory(db);
+    if (oldVersion < 4) createStreakCoverage(db);
   }
 
   @Override
@@ -71,6 +74,47 @@ public final class Store extends SQLiteOpenHelper {
     db.execSQL("ALTER TABLE pauses ADD COLUMN rating INTEGER");
     db.execSQL("ALTER TABLE pauses ADD COLUMN rating_note TEXT");
     db.execSQL("ALTER TABLE pauses ADD COLUMN rated_at INTEGER");
+  }
+
+  private static void createStreakCoverage(SQLiteDatabase db) {
+    db.execSQL("CREATE TABLE streak_coverage(s INTEGER PRIMARY KEY,e INTEGER NOT NULL,CHECK(e>s))");
+    db.execSQL("CREATE INDEX streak_coverage_end ON streak_coverage(e)");
+  }
+
+  synchronized void enableStreakCoverage() {
+    if (!streakCoverageEnabled) {
+      streakCoverageEnabled = true;
+      clearTimeline(); // Start attestation with the first sample after enrollment.
+    }
+  }
+
+  synchronized List<long[]> streakCoverage(long from, long to) {
+    List<long[]> result = new ArrayList<>();
+    try (Cursor rows = getReadableDatabase().rawQuery(
+        "SELECT s,e FROM streak_coverage WHERE e>? AND s<? ORDER BY s",
+        new String[] {String.valueOf(from), String.valueOf(to)})) {
+      while (rows.moveToNext()) {
+        result.add(new long[] {Math.max(from, rows.getLong(0)), Math.min(to, rows.getLong(1))});
+      }
+    }
+    return result;
+  }
+
+  private static void recordStreakCoverage(SQLiteDatabase db, long from, long to) {
+    if (to <= from) return;
+    try (Cursor last = db.rawQuery("SELECT s,e FROM streak_coverage ORDER BY s DESC LIMIT 1", null)) {
+      if (last.moveToFirst() && last.getLong(1) == from && to - last.getLong(0) <= 60_000) {
+        ContentValues end = new ContentValues();
+        end.put("e", to);
+        db.update("streak_coverage", end, "s=?", new String[] {String.valueOf(last.getLong(0))});
+        return;
+      }
+    }
+    ContentValues interval = new ContentValues();
+    interval.put("s", from);
+    interval.put("e", to);
+    db.insertWithOnConflict("streak_coverage", null, interval, SQLiteDatabase.CONFLICT_IGNORE);
+    db.delete("streak_coverage", "e<?", new String[] {String.valueOf(to - 90 * 86_400_000L)});
   }
 
   private static void createPeekHistory(SQLiteDatabase db) {
@@ -171,6 +215,7 @@ public final class Store extends SQLiteOpenHelper {
     if (um != null && !um.isUserUnlocked()) {
       foreground = "";
       health("user_locked");
+      if (streakCoverageEnabled) clearTimeline();
       return;
     }
     long sampledElapsed = SystemClock.elapsedRealtime();
@@ -178,9 +223,14 @@ public final class Store extends SQLiteOpenHelper {
     int boot = boot();
     SQLiteDatabase db = getWritableDatabase();
     UsageTimeline t;
+    boolean continuous = false;
     try (Cursor r = db.rawQuery("SELECT cursor,pkg,cls,domain,interactive,boot FROM tracker WHERE id=1", null)) {
       boolean has = r.moveToFirst();
       if (has && r.getInt(5) == boot && r.getLong(0) <= now && now - r.getLong(0) <= 30_000) {
+        long elapsedGap = sampledElapsed - heartbeat;
+        long wallGap = now - r.getLong(0);
+        continuous = boot >= 0 && heartbeat > 0 && elapsedGap >= 0 && elapsedGap <= 30_000
+            && Math.abs(wallGap - elapsedGap) <= 1_000;
         t = new UsageTimeline(r.getLong(0), r.getInt(4) != 0);
         t.pkg = r.getString(1);
         t.cls = r.getString(2);
@@ -193,6 +243,7 @@ public final class Store extends SQLiteOpenHelper {
     UsageStatsManager usm = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
     UsageEvents events = usm == null ? null : usm.queryEvents(Math.max(0, t.cursor - 60_000), now);
     if (events == null) {
+      if (streakCoverageEnabled) clearTimeline();
       health("usage_unavailable");
       foreground = "";
       return;
@@ -251,6 +302,9 @@ public final class Store extends SQLiteOpenHelper {
       v.put("interactive", t.interactive ? 1 : 0);
       v.put("boot", boot);
       db.insertWithOnConflict("tracker", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+      if (streakCoverageEnabled && continuous) {
+        recordStreakCoverage(db, checkpoint, now);
+      }
       db.delete("spans", "e<?", new String[] {String.valueOf(now - 90 * 86_400_000L)});
       db.setTransactionSuccessful();
     } finally {

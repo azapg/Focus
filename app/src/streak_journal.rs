@@ -48,6 +48,169 @@ pub struct DayEvidence {
     pub devices: Vec<DeviceEvidence>,
 }
 
+/// Native desktop observation. Strict Drift is derived only from verified
+/// routes with an explicit streak rule, independently of the reward detector.
+pub fn desktop_evidence(
+    device: &str,
+    tracker: &crate::activity::Tracker,
+    extractor: &mut crate::focus_extract::FocusExtractor,
+    pauses: &[crate::pause_history::PauseRec],
+    start_ms: u64,
+    end_ms: u64,
+    received_at_ms: u64,
+) -> Result<DeviceEvidence, String> {
+    let spans = tracker.spans(start_ms, end_ms);
+    let extracted = extractor.extract_desktop_spans(device, &spans, pauses, start_ms, end_ms)?;
+    let mut confirmed_drift = false;
+    let mut classified = BTreeSet::new();
+    let mut cuts = Vec::new();
+    for span in &spans {
+        let bounds = (span.s.max(start_ms), span.e.min(end_ms));
+        if bounds.1 > bounds.0 {
+            if let Some(drift) = strict_browser_disposition(span) {
+                classified.insert(bounds);
+                confirmed_drift |= drift;
+            } else if needs_verified_place(span) {
+                cuts.push(bounds);
+            }
+        }
+    }
+
+    // Coverage samples record the tracker’s visibility. Unresolved Waste
+    // activity still leaves a gap in streak classification.
+    cuts.extend(
+        extracted
+            .stream
+            .spans
+            .iter()
+            .filter(|span| span.category.is_waste())
+            .map(|span| (span.start_ms, span.end_ms))
+            .filter(|bounds| !classified.contains(bounds)),
+    );
+    cuts.sort_unstable();
+    let covered = subtract_intervals(tracker.coverage_intervals(start_ms, end_ms), &cuts);
+    Ok(DeviceEvidence {
+        device: extracted.device_id,
+        received_at_ms,
+        covered,
+        has_verified_activity: extracted.verified_active_ms > 0,
+        confirmed_drift,
+        verified_focus: extracted.verified_focus_intervals,
+    })
+}
+
+fn subtract_intervals(mut intervals: Vec<(u64, u64)>, cuts: &[(u64, u64)]) -> Vec<(u64, u64)> {
+    intervals.sort_unstable();
+    let mut next_cut = 0;
+    let mut result = Vec::new();
+    let mut previous_end = 0;
+    for (start, end) in intervals {
+        let mut start = start.max(previous_end);
+        previous_end = previous_end.max(end);
+        if start >= end {
+            continue;
+        }
+        while next_cut < cuts.len() {
+            let (left, right) = cuts[next_cut];
+            if left >= end {
+                break;
+            }
+            if left > start {
+                result.push((start, left));
+            }
+            start = start.max(right);
+            if start >= end {
+                break;
+            }
+            next_cut += 1;
+        }
+        if start < end {
+            result.push((start, end));
+        }
+    }
+    result
+}
+
+fn needs_verified_place(span: &crate::activity::Span) -> bool {
+    if ["X", "WhatsApp", "WhatsApp Business", "YouTube"]
+        .iter()
+        .any(|app| span.app.eq_ignore_ascii_case(app))
+    {
+        return true;
+    }
+    span.browser
+        .as_ref()
+        .and_then(|context| context.url.as_deref())
+        .and_then(|url| url::Url::parse(url).ok())
+        .is_some_and(|url| {
+            matches!(
+                url.host_str(),
+                Some(
+                    "x.com"
+                        | "www.x.com"
+                        | "twitter.com"
+                        | "www.twitter.com"
+                        | "youtube.com"
+                        | "www.youtube.com"
+                        | "m.youtube.com"
+                        | "youtu.be"
+                        | "web.whatsapp.com"
+                )
+            )
+        })
+}
+
+/// Some(true) is confirmed Drift; Some(false) is an explicitly clean place.
+/// None means the browser route cannot settle streak classification.
+fn strict_browser_disposition(span: &crate::activity::Span) -> Option<bool> {
+    if span.source != "chromium_extension" {
+        return None;
+    }
+    let context = span.browser.as_ref()?;
+    let url = url::Url::parse(context.url.as_deref()?).ok()?;
+    if !matches!(url.scheme(), "https" | "http") {
+        return None;
+    }
+    let path = url.path().trim_end_matches('/');
+    match url.host_str()? {
+        "x.com" | "www.x.com" | "twitter.com" | "www.twitter.com" => {
+            if path == "/home" {
+                return Some(true);
+            }
+            if path == "/search"
+                && url.query_pairs().any(|(key, value)| {
+                    key == "q" && !value.trim().is_empty() && value != "REDACTED"
+                })
+            {
+                return Some(false);
+            }
+            let handle = path.strip_prefix('/')?;
+            if !handle.is_empty()
+                && handle
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            {
+                let title = context.title.as_deref()?.trim().to_ascii_lowercase();
+                let suffix = format!("(@{})", handle.to_ascii_lowercase());
+                let title = title
+                    .strip_suffix(" / x")
+                    .or_else(|| title.strip_suffix(" / twitter"))
+                    .unwrap_or(&title);
+                if title.ends_with(&suffix) {
+                    return Some(false);
+                }
+            }
+            None
+        }
+        "youtube.com" | "www.youtube.com" | "m.youtube.com"
+            if path == "/shorts" || path.starts_with("/shorts/") =>
+        {
+            Some(true)
+        }
+        _ => None,
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreakView {
@@ -318,6 +481,47 @@ mod tests {
             confirmed_drift: false,
             verified_focus: vec![focus],
         }
+    }
+
+    #[test]
+    fn strict_route_rules_ignore_generic_video_and_coarse_social_labels() {
+        use crate::activity::{BrowserContext, Span};
+        let mut span = Span {
+            s: 0,
+            e: 1,
+            app: "Chrome".into(),
+            label: "X".into(),
+            source: "chromium_extension".into(),
+            browser: Some(BrowserContext {
+                url: None,
+                title: None,
+                visibility: "page".into(),
+                audible: false,
+                habit_feed: false,
+                tab_id: None,
+                window_id: None,
+                browser_pid: 1,
+                host_pid: 2,
+            }),
+        };
+        for (url, expected) in [
+            ("https://x.com/home", Some(true)),
+            ("https://x.com/search?q=fictional", Some(false)),
+            ("https://x.com/search?q=REDACTED", None),
+            ("https://youtube.com/shorts/example", Some(true)),
+            ("https://youtube.com/watch?v=example", None),
+            ("https://youtube.com.example.invalid/shorts/example", None),
+        ] {
+            span.browser.as_mut().unwrap().url = Some(url.into());
+            assert_eq!(strict_browser_disposition(&span), expected, "{url}");
+        }
+        span.browser.as_mut().unwrap().url = Some("https://x.com/home".into());
+        span.source = "window_title".into();
+        assert_eq!(strict_browser_disposition(&span), None);
+        assert_eq!(
+            subtract_intervals(vec![(0, 10), (12, 20)], &[(5, 14)]),
+            vec![(0, 5), (14, 20)]
+        );
     }
 
     #[test]
