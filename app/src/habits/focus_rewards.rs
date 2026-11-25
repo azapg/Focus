@@ -296,6 +296,69 @@ fn process_event(
     process_event(ev, cur, pending, qualified);
 }
 
+/// Pure single-device qualifying focus intervals clipped to `[day_start_ms, day_end_ms)`.
+/// Subtracts this device's pauses, enforces unbroken single-app focus thresholds,
+/// breaks runs on waste/pauses/idle gaps, and preserves unknown gaps untouched.
+pub fn verified_focus_intervals(
+    stream: &FocusDeviceStream,
+    day_start_ms: u64,
+    day_end_ms: u64,
+) -> Vec<(u64, u64)> {
+    if day_end_ms <= day_start_ms {
+        return Vec::new();
+    }
+    let clipped_pauses: Vec<(u64, u64)> = stream
+        .pauses
+        .iter()
+        .map(|&(s, e)| (s.max(day_start_ms), e.min(day_end_ms)))
+        .filter(|(s, e)| e > s)
+        .collect();
+    let offs = merge_intervals(&clipped_pauses);
+    let mut events: Vec<FocusEvent> = Vec::new();
+    for &(px, py) in &offs {
+        events.push(FocusEvent {
+            s: px,
+            e: py,
+            app: String::new(),
+            min_ms: 0,
+            waste: false,
+            is_break: true,
+        });
+    }
+    for span in &stream.spans {
+        let a = span.start_ms.max(day_start_ms);
+        let b = span.end_ms.min(day_end_ms);
+        if b <= a {
+            continue;
+        }
+        let min_ms = span.category.min_run_ms();
+        let waste = span.category.is_waste();
+        for (pa, pb) in subtract_intervals(a, b, &offs) {
+            events.push(FocusEvent {
+                s: pa,
+                e: pb,
+                app: span.app.clone(),
+                min_ms,
+                waste,
+                is_break: false,
+            });
+        }
+    }
+    events.sort_by(|x, y| x.s.cmp(&y.s).then_with(|| y.is_break.cmp(&x.is_break)));
+    let mut qualified: Vec<(u64, u64)> = Vec::new();
+    let mut cur: Option<OpenRun> = None;
+    let mut pending: Vec<FocusEvent> = Vec::new();
+    for ev in &events {
+        process_event(ev, &mut cur, &mut pending, &mut qualified);
+    }
+    if let Some(run) = cur {
+        if run.ms >= run.min_ms {
+            qualified.extend(run.intervals);
+        }
+    }
+    merge_intervals(&qualified)
+}
+
 /// Pure single-app qualifying focus projection across devices for `[day_start_ms, day_end_ms)`.
 /// Excludes DNS-off pauses and wasting/Drift spans, then unions qualifying intervals across devices.
 pub fn union_focus_ms(streams: &[FocusDeviceStream], day_start_ms: u64, day_end_ms: u64) -> u64 {
@@ -304,54 +367,7 @@ pub fn union_focus_ms(streams: &[FocusDeviceStream], day_start_ms: u64, day_end_
     }
     let mut all_qualified: Vec<(u64, u64)> = Vec::new();
     for stream in streams {
-        let clipped_pauses: Vec<(u64, u64)> = stream
-            .pauses
-            .iter()
-            .map(|&(s, e)| (s.max(day_start_ms), e.min(day_end_ms)))
-            .filter(|(s, e)| e > s)
-            .collect();
-        let offs = merge_intervals(&clipped_pauses);
-        let mut events: Vec<FocusEvent> = Vec::new();
-        for &(px, py) in &offs {
-            events.push(FocusEvent {
-                s: px,
-                e: py,
-                app: String::new(),
-                min_ms: 0,
-                waste: false,
-                is_break: true,
-            });
-        }
-        for span in &stream.spans {
-            let a = span.start_ms.max(day_start_ms);
-            let b = span.end_ms.min(day_end_ms);
-            if b <= a {
-                continue;
-            }
-            let min_ms = span.category.min_run_ms();
-            let waste = span.category.is_waste();
-            for (pa, pb) in subtract_intervals(a, b, &offs) {
-                events.push(FocusEvent {
-                    s: pa,
-                    e: pb,
-                    app: span.app.clone(),
-                    min_ms,
-                    waste,
-                    is_break: false,
-                });
-            }
-        }
-        events.sort_by(|x, y| x.s.cmp(&y.s).then_with(|| y.is_break.cmp(&x.is_break)));
-        let mut cur: Option<OpenRun> = None;
-        let mut pending: Vec<FocusEvent> = Vec::new();
-        for ev in &events {
-            process_event(ev, &mut cur, &mut pending, &mut all_qualified);
-        }
-        if let Some(run) = cur {
-            if run.ms >= run.min_ms {
-                all_qualified.extend(run.intervals);
-            }
-        }
+        all_qualified.extend(verified_focus_intervals(stream, day_start_ms, day_end_ms));
     }
     merge_intervals(&all_qualified)
         .into_iter()
@@ -508,6 +524,11 @@ mod tests {
             ],
             pauses: vec![],
         };
+
+        let laptop_ivs = verified_focus_intervals(&laptop, 0, 200 * MIN);
+        assert_eq!(laptop_ivs, vec![(0, 15 * MIN), (15 * MIN + 30 * SEC, 30 * MIN + 30 * SEC)]);
+        let phone_ivs = verified_focus_intervals(&phone, 0, 200 * MIN);
+        assert_eq!(phone_ivs, vec![(10 * MIN, 26 * MIN), (162 * MIN, 180 * MIN)]);
 
         let union = union_focus_ms(&[laptop, phone], 0, 200 * MIN);
         // Union of [0..15m], [15m30s..30m30s], [10m..26m], [162m..180m] = 30.5m + 18m = 48.5m

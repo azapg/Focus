@@ -236,73 +236,61 @@ public final class FocusRewards {
     }
   }
 
-  /** Pure single-app focus projection across devices within [dayStartMs, dayEndMs). */
-  public static long unionFocusMs(List<DeviceStream> streams, long dayStartMs, long dayEndMs) {
-    if (dayEndMs <= dayStartMs || streams == null || streams.isEmpty()) return 0L;
-    List<long[]> allQualified = new ArrayList<>();
-    for (DeviceStream stream : streams) {
-      List<long[]> clippedPauses = new ArrayList<>();
-      for (long[] p : stream.pauses) {
-        if (p == null || p.length < 2) continue;
-        long a = Math.max(p[0], dayStartMs), b = Math.min(p[1], dayEndMs);
-        if (b > a) clippedPauses.add(new long[] {a, b});
+  /** Pure single-device qualifying focus intervals clipped to [dayStartMs, dayEndMs), minus pauses. */
+  public static List<long[]> verifiedFocusIntervals(
+      DeviceStream stream, long dayStartMs, long dayEndMs) {
+    if (dayEndMs <= dayStartMs || stream == null) return Collections.emptyList();
+    List<long[]> clippedPauses = new ArrayList<>();
+    for (long[] p : stream.pauses) {
+      if (p == null || p.length < 2) continue;
+      long a = Math.max(p[0], dayStartMs), b = Math.min(p[1], dayEndMs);
+      if (b > a) clippedPauses.add(new long[] {a, b});
+    }
+    List<long[]> offs = mergeIntervals(clippedPauses);
+    List<Event> events = new ArrayList<>();
+    for (long[] p : offs) events.add(new Event(p[0], p[1], "", 0L, false, true));
+    for (Span sp : stream.spans) {
+      long a = Math.max(sp.startMs, dayStartMs), b = Math.min(sp.endMs, dayEndMs);
+      if (b <= a) continue;
+      for (long[] piece : subtractIntervals(a, b, offs)) {
+        events.add(new Event(piece[0], piece[1], sp.app, sp.category.minRunMs, sp.category.waste, false));
       }
-      List<long[]> offs = mergeIntervals(clippedPauses);
-      List<Event> events = new ArrayList<>();
-      for (long[] p : offs) events.add(new Event(p[0], p[1], "", 0L, false, true));
-      for (Span sp : stream.spans) {
-        long a = Math.max(sp.startMs, dayStartMs), b = Math.min(sp.endMs, dayEndMs);
-        if (b <= a) continue;
-        for (long[] piece : subtractIntervals(a, b, offs)) {
-          events.add(new Event(piece[0], piece[1], sp.app, sp.category.minRunMs, sp.category.waste, false));
-        }
+    }
+    events.sort((x, y) -> {
+      int c = Long.compare(x.s, y.s);
+      return c != 0 ? c : Boolean.compare(y.isBreak, x.isBreak);
+    });
+    final List<long[]> qualified = new ArrayList<>();
+    final OpenRun[] cur = new OpenRun[1];
+    final List<Event> pending = new ArrayList<>();
+    final class Runner {
+      void emit(OpenRun r) {
+        if (r != null && r.ms >= r.minMs) qualified.addAll(r.intervals);
       }
-      events.sort((x, y) -> {
-        int c = Long.compare(x.s, y.s);
-        return c != 0 ? c : Boolean.compare(y.isBreak, x.isBreak);
-      });
-      final OpenRun[] cur = new OpenRun[1];
-      final List<Event> pending = new ArrayList<>();
-      final class Runner {
-        void emit(OpenRun r) {
-          if (r != null && r.ms >= r.minMs) allQualified.addAll(r.intervals);
-        }
 
-        void process(Event ev) {
-          if (ev.isBreak || ev.waste) {
-            emit(cur[0]);
-            cur[0] = null;
-            pending.clear();
-            return;
-          }
-          if (cur[0] == null) {
-            cur[0] = ev.minMs > 0 ? new OpenRun(ev) : null;
-            pending.clear();
-            return;
-          }
-          long gap = ev.s - cur[0].end;
-          if (ev.app.equals(cur[0].app) && ev.minMs > 0) {
-            boolean ok = pending.isEmpty() ? gap <= FOCUS_AWAY_MS : gap <= FOCUS_GLANCE_MS;
-            if (ok) {
-              long addS = Math.max(ev.s, cur[0].end);
-              if (ev.e > addS) {
-                cur[0].ms += ev.e - addS;
-                cur[0].end = ev.e;
-                cur[0].intervals.add(new long[] {addS, ev.e});
-              }
-              pending.clear();
-              return;
+      void process(Event ev) {
+        if (ev.isBreak || ev.waste) {
+          emit(cur[0]);
+          cur[0] = null;
+          pending.clear();
+          return;
+        }
+        if (cur[0] == null) {
+          cur[0] = ev.minMs > 0 ? new OpenRun(ev) : null;
+          pending.clear();
+          return;
+        }
+        long gap = ev.s - cur[0].end;
+        if (ev.app.equals(cur[0].app) && ev.minMs > 0) {
+          boolean ok = pending.isEmpty() ? gap <= FOCUS_AWAY_MS : gap <= FOCUS_GLANCE_MS;
+          if (ok) {
+            long addS = Math.max(ev.s, cur[0].end);
+            if (ev.e > addS) {
+              cur[0].ms += ev.e - addS;
+              cur[0].end = ev.e;
+              cur[0].intervals.add(new long[] {addS, ev.e});
             }
-            List<Event> saved = new ArrayList<>(pending);
-            emit(cur[0]);
-            cur[0] = null;
             pending.clear();
-            for (Event p : saved) process(p);
-            process(ev);
-            return;
-          }
-          if (ev.e - cur[0].end <= FOCUS_GLANCE_MS && gap <= FOCUS_GLANCE_MS) {
-            pending.add(ev);
             return;
           }
           List<Event> saved = new ArrayList<>(pending);
@@ -311,11 +299,32 @@ public final class FocusRewards {
           pending.clear();
           for (Event p : saved) process(p);
           process(ev);
+          return;
         }
+        if (ev.e - cur[0].end <= FOCUS_GLANCE_MS && gap <= FOCUS_GLANCE_MS) {
+          pending.add(ev);
+          return;
+        }
+        List<Event> saved = new ArrayList<>(pending);
+        emit(cur[0]);
+        cur[0] = null;
+        pending.clear();
+        for (Event p : saved) process(p);
+        process(ev);
       }
-      Runner runner = new Runner();
-      for (Event ev : events) runner.process(ev);
-      runner.emit(cur[0]);
+    }
+    Runner runner = new Runner();
+    for (Event ev : events) runner.process(ev);
+    runner.emit(cur[0]);
+    return mergeIntervals(qualified);
+  }
+
+  /** Pure single-app focus projection across devices within [dayStartMs, dayEndMs). */
+  public static long unionFocusMs(List<DeviceStream> streams, long dayStartMs, long dayEndMs) {
+    if (dayEndMs <= dayStartMs || streams == null || streams.isEmpty()) return 0L;
+    List<long[]> allQualified = new ArrayList<>();
+    for (DeviceStream stream : streams) {
+      allQualified.addAll(verifiedFocusIntervals(stream, dayStartMs, dayEndMs));
     }
     long sum = 0L;
     for (long[] iv : mergeIntervals(allQualified)) sum += iv[1] - iv[0];

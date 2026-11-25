@@ -41,6 +41,17 @@ public final class FocusRewardsTest {
             new FocusRewards.Span(162 * MIN, 180 * MIN, "NotebookLM", FocusRewards.Category.LEARNING)),
         Collections.emptyList());
 
+    List<long[]> laptopIvs = FocusRewards.verifiedFocusIntervals(laptop, 0, 200 * MIN);
+    check(laptopIvs.size() == 2
+        && laptopIvs.get(0)[0] == 0 && laptopIvs.get(0)[1] == 15 * MIN
+        && laptopIvs.get(1)[0] == 15 * MIN + 30 * SEC && laptopIvs.get(1)[1] == 30 * MIN + 30 * SEC,
+        "Expected 2 laptop focus intervals");
+    List<long[]> phoneIvs = FocusRewards.verifiedFocusIntervals(phone, 0, 200 * MIN);
+    check(phoneIvs.size() == 2
+        && phoneIvs.get(0)[0] == 10 * MIN && phoneIvs.get(0)[1] == 26 * MIN
+        && phoneIvs.get(1)[0] == 162 * MIN && phoneIvs.get(1)[1] == 180 * MIN,
+        "Expected 2 phone focus intervals");
+
     long union = FocusRewards.unionFocusMs(Arrays.asList(laptop, phone), 0, 200 * MIN);
     check(union == 48 * MIN + 30 * SEC, "Expected 48.5m unioned focus, got " + union);
   }
