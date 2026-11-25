@@ -663,16 +663,25 @@ public final class MainActivity extends Activity {
       }
     }
 
-    // Thin category bar + unclipped legend
+    // Thin category bar + unclipped legend (prepends Ice Deep focus segment when present)
+    List<FocusStats.Category> barCats = v.barCategories();
     Theme.gap(scrollContent, 11);
     Theme.CategoryBarView catBar = new Theme.CategoryBarView(this);
-    catBar.setData(v.categories, selectedCategoryId);
+    catBar.setData(barCats, selectedCategoryId);
     scrollContent.addView(catBar, new LinearLayout.LayoutParams(
         LinearLayout.LayoutParams.MATCH_PARENT, Theme.dp(this, 9)));
 
-    if (!v.categories.isEmpty()) {
+    if (!barCats.isEmpty()) {
       Theme.gap(scrollContent, 8);
-      scrollContent.addView(buildCategoryLegend(v.categories));
+      scrollContent.addView(buildCategoryLegend(barCats));
+    }
+
+    // Option C: one quiet plain-text log line for today's unbroken focus runs (no badges).
+    if (!v.focusRuns.isEmpty()) {
+      Theme.gap(scrollContent, 8);
+      scrollContent.addView(Theme.divider(this, 0, 0));
+      Theme.gap(scrollContent, 7);
+      scrollContent.addView(buildFocusLogLine(v.focusRuns));
     }
 
     // Week 7-day chart card
@@ -685,7 +694,9 @@ public final class MainActivity extends Activity {
     Theme.gap(scrollContent, 16);
     List<FocusStats.AppStat> visibleApps = new ArrayList<>();
     for (FocusStats.AppStat a : v.apps) {
-      if (selectedCategoryId == null || (a.category != null && selectedCategoryId.equals(a.category.id))) {
+      if (selectedCategoryId == null
+          || ("focus".equals(selectedCategoryId) && a.focusMs > 0)
+          || (a.category != null && selectedCategoryId.equals(a.category.id))) {
         visibleApps.add(a);
       }
     }
@@ -894,6 +905,13 @@ public final class MainActivity extends Activity {
     sb.append(FocusStats.fmt(v.buildMs)).append(" building");
     sb.setSpan(new ForegroundColorSpan(Theme.FG), bStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     sb.setSpan(new StyleSpan(Typeface.BOLD), bStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    if (v.focusMs >= 60_000L) {
+      sb.append(", ");
+      int fStart = sb.length();
+      sb.append(FocusStats.fmt(v.focusMs)).append(" deep focus");
+      sb.setSpan(new ForegroundColorSpan(Theme.ICE), fStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      sb.setSpan(new StyleSpan(Typeface.BOLD), fStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
     if (v.driftMs >= 30_000L) {
       sb.append(", ");
       int dStart = sb.length();
@@ -905,6 +923,28 @@ public final class MainActivity extends Activity {
     }
     sb.append(".");
     return Theme.text(this, sb, 13f, Theme.MUTED, false);
+  }
+
+  private TextView buildFocusLogLine(List<FocusStats.FocusRun> runs) {
+    SpannableStringBuilder sb = new SpannableStringBuilder();
+    int lblStart = sb.length();
+    sb.append("Long runs  ");
+    sb.setSpan(new ForegroundColorSpan(Theme.ICE), lblStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    int shown = Math.min(5, runs.size());
+    for (int i = 0; i < shown; i++) {
+      if (i > 0) sb.append(" · ");
+      FocusStats.FocusRun r = runs.get(i);
+      int appStart = sb.length();
+      sb.append(r.app).append(" ");
+      sb.setSpan(new ForegroundColorSpan(Theme.SUB), appStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      int durStart = sb.length();
+      sb.append(FocusStats.fmt(r.ms));
+      sb.setSpan(new ForegroundColorSpan(Theme.ICE), durStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+    if (runs.size() > shown) {
+      sb.append("  +").append(String.valueOf(runs.size() - shown)).append(" more");
+    }
+    return Theme.text(this, sb, 11.5f, Theme.MUTED, false);
   }
 
   private View buildCategoryLegend(List<FocusStats.Category> cats) {
@@ -960,6 +1000,16 @@ public final class MainActivity extends Activity {
     LinearLayout sec = Theme.column(this);
     LinearLayout head = Theme.row(this);
     head.addView(Theme.text(this, "Last 7 days", 12f, Theme.MUTED, false));
+    boolean anyFocus = false;
+    for (FocusStats.DayStat d : v.week) if (d.focusMs >= 60_000L) anyFocus = true;
+    if (anyFocus) {
+      Theme.gap(head, 10);
+      View focusSw = new View(this);
+      focusSw.setBackground(Theme.roundRect(this, Theme.ICE, 0, 2));
+      head.addView(focusSw, new LinearLayout.LayoutParams(Theme.dp(this, 7), Theme.dp(this, 7)));
+      Theme.gap(head, 5);
+      head.addView(Theme.text(this, "Deep focus", 11.5f, Theme.MUTED, false));
+    }
     Theme.gap(head, 10);
     View keySw = new View(this);
     keySw.setBackground(Theme.roundRect(this, Theme.WARN, 0, 2));
@@ -1013,7 +1063,12 @@ public final class MainActivity extends Activity {
       int offH = d.offMs >= 30_000L && d.totalMs > 0
           ? Math.max(Theme.dp(this, 3), Math.min(totalH, (int) (maxBarPx * Math.min(d.totalMs, d.offMs) / (float) maxMs)))
           : 0;
-      int onH = Math.max(0, totalH - offH);
+      int nonOffH = Math.max(0, totalH - offH);
+      long cappedFocus = Math.min(Math.max(0L, d.totalMs - Math.min(d.totalMs, d.offMs)), d.focusMs);
+      int focusH = cappedFocus >= 60_000L && nonOffH > 0
+          ? Math.max(Theme.dp(this, 3), Math.min(nonOffH, (int) (maxBarPx * cappedFocus / (float) maxMs)))
+          : 0;
+      int onH = Math.max(0, nonOffH - focusH);
 
       LinearLayout barStack = Theme.column(this);
       int barW = Theme.dp(this, 22);
@@ -1032,6 +1087,13 @@ public final class MainActivity extends Activity {
             ? Theme.roundRect(this, Theme.BAR_GRAY, 0, 0)
             : Theme.topRounded(this, Theme.BAR_GRAY, 0, 3));
         barStack.addView(onSeg, new LinearLayout.LayoutParams(barW, onH));
+      }
+      if (focusH > 0) {
+        View focusSeg = new View(this);
+        focusSeg.setBackground((offH > 0 || onH > 0)
+            ? Theme.roundRect(this, Theme.ICE, 0, 0)
+            : Theme.topRounded(this, Theme.ICE, 0, 3));
+        barStack.addView(focusSeg, new LinearLayout.LayoutParams(barW, focusH));
       }
       stackWrap.addView(barStack);
       col.addView(stackWrap, new LinearLayout.LayoutParams(
@@ -1091,7 +1153,8 @@ public final class MainActivity extends Activity {
         : "video".equals(catId) && a.ms >= 30L * FocusStats.MIN);
     boolean heavyWaste = singleDayView && ("adult".equals(catId)
         || (a.category != null && ActivityClassifier.FG_DRIFT.equals(a.category.group) && a.ms >= 60L * FocusStats.MIN));
-    int timeColor = heavyWaste ? Theme.BAD_TEXT : (a.mostlyDnsOff() || wasteWarn) ? Theme.WARN : Theme.FG;
+    boolean hasFocus = a.focusMs > 0 && !heavyWaste && !a.mostlyDnsOff() && !wasteWarn;
+    int timeColor = heavyWaste ? Theme.BAD_TEXT : (a.mostlyDnsOff() || wasteWarn) ? Theme.WARN : hasFocus ? Theme.ICE : Theme.FG;
     row.addView(Theme.text(this, FocusStats.fmt(a.ms), 13.5f, timeColor, true));
 
     row.setOnClickListener(view -> {
@@ -1102,7 +1165,7 @@ public final class MainActivity extends Activity {
     wrap.addView(row);
 
     if (a.name.equals(expandedAppName)) {
-      LinearLayout detail = Theme.row(this);
+      LinearLayout detail = Theme.column(this);
       detail.setPadding(Theme.dp(this, icoDp + 24), 0, Theme.dp(this, 13), Theme.dp(this, 10));
       SpannableStringBuilder sb = new SpannableStringBuilder();
       if (a.category != null) sb.append(a.category.label);
@@ -1117,6 +1180,19 @@ public final class MainActivity extends Activity {
         sb.setSpan(new ForegroundColorSpan(Theme.WARN), offStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
       }
       detail.addView(Theme.text(this, sb, 11.5f, Theme.MUTED, false));
+      if (hasFocus && !a.focusRuns.isEmpty()) {
+        java.text.SimpleDateFormat hhmm = new java.text.SimpleDateFormat("HH:mm", Locale.ROOT);
+        int limitRuns = Math.min(5, a.focusRuns.size());
+        for (int ri = 0; ri < limitRuns; ri++) {
+          FocusStats.FocusRun fr = a.focusRuns.get(ri);
+          Theme.gap(detail, 4);
+          LinearLayout frRow = Theme.row(this);
+          frRow.addView(Theme.text(this, FocusStats.fmt(fr.ms) + " unbroken" + (fr.active ? " · active" : ""), 11f, Theme.ICE, true),
+              new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+          frRow.addView(Theme.text(this, hhmm.format(new Date(fr.start)) + "–" + hhmm.format(new Date(fr.end)), 11f, Theme.MUTED, false));
+          detail.addView(frRow);
+        }
+      }
       wrap.addView(detail);
     }
     return wrap;

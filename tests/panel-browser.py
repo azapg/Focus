@@ -78,11 +78,17 @@ async def main(output=None):
     await page.locator('#panel.open').wait_for()
     await page.wait_for_timeout(650)
 
-    # One-sentence hero: total screen time and building share; thin category bar + clickable legend.
+    # One-sentence hero: total screen time, building share, and Ice deep focus (Notion 52m + VS Code 42m).
     assert await page.locator('[data-total]').inner_text() == '2h 44m'
     assert await page.locator('[data-build-pct]').inner_text() == '1h 52m building'  # Notion 52m + VS Code 42m + GitHub 18m
+    assert await page.locator('[data-deep-focus]').inner_text() == '1h 34m deep focus'
+    assert await page.locator('[data-deep-focus]').evaluate("e => getComputedStyle(e).color") == 'rgb(203, 226, 255)'
+    assert await page.locator('[data-focus-log]').is_visible()
+    focus_log_txt = await page.locator('[data-focus-log]').inner_text()
+    assert 'Long runs' in focus_log_txt and 'Notion' in focus_log_txt and 'VS Code' in focus_log_txt
     assert await page.locator('.thin-bar .thin-seg').count() >= 2
     assert await page.locator('.cat-leg button[data-dcat]').count() >= 2
+    assert await page.locator('.cat-leg button[data-dcat=focus]').count() == 1
 
     # Today hides the noisy 24h timeline and legend completely.
     assert await page.locator('#pTimelineSec').is_hidden()
@@ -90,25 +96,32 @@ async def main(output=None):
     await page.locator('.habit-credit').get_by_text('8m earned', exact=False).wait_for()
     assert await page.get_by_text('2 peeks · 1 DNS pause', exact=True).is_visible()
 
-    # Screen time shows only icon, name, and time at rest; at least 5 rows inside the bento card.
+    # Screen time shows only icon, name, and time at rest (no badges); deep-focus apps tint duration Ice.
     assert await page.locator('#pApps details[data-fit]:not([hidden])').count() >= 5
     assert await page.locator('#pApps .st-cat').count() == 0
     # Time turns amber only when an app was mostly used with DNS off (YouTube: 10m of 26m is not mostly).
     yt_time = page.locator('details.st', has=page.locator('summary', has_text='YouTube')).locator('.n').first
     vscode_time = page.locator('details.st', has=page.locator('summary', has_text='VS Code')).locator('.n').first
+    gh_time = page.locator('details.st', has=page.locator('summary', has_text='GitHub')).locator('.n').first
     assert int(await yt_time.get_attribute('data-dns-off')) == 600000
     assert 'dns-off' not in (await yt_time.get_attribute('class'))
+    assert 'focus-ice' not in (await yt_time.get_attribute('class'))
     assert int(await vscode_time.get_attribute('data-dns-off')) == 0
+    assert 'focus-ice' in (await vscode_time.get_attribute('class'))
+    assert await vscode_time.evaluate("e => getComputedStyle(e).color") == 'rgb(203, 226, 255)'
+    assert 'focus-ice' not in (await gh_time.get_attribute('class'))
     # Websites carry a small globe; desktop programs don't.
     assert await page.locator('details.st', has=page.locator('summary', has_text='GitHub')).locator('[data-src=web]').count() == 1
     assert await page.locator('details.st', has=page.locator('summary', has_text='VS Code')).locator('.src-ico').count() == 0
 
-    # Notion is normalized (no app.notion.com) and expands into category meta + page titles without raw URLs.
+    # Notion is normalized (no app.notion.com) and expands into category meta, unbroken focus runs, and page titles.
     notion = page.locator('#pApps details.st').filter(has=page.locator('summary', has_text='Notion'))
     assert await notion.count() == 1
     assert 'app.notion.com' not in await page.locator('#pApps').inner_text()
     await notion.locator('summary').click()
+    assert await page.locator('#tip').evaluate("e => getComputedStyle(e).opacity") == '0'
     assert 'Writing' in await notion.locator('.st-meta').inner_text()
+    assert '52m unbroken' in await notion.locator('.focus-sessions').inner_text()
     notion_pages = await notion.locator('.cat-pages').inner_text()
     assert 'Seed Library' in notion_pages and 'Greenhouse Notes' in notion_pages
     assert 'https://' not in notion_pages
@@ -144,13 +157,15 @@ async def main(output=None):
     inbox = await page.evaluate('window.__uncategorized')
     assert inbox and len(inbox['items']) == 1 and inbox['items'][0]['value'] == 'newtool.example'
 
-    # Range switching (Week shows quiet 7-day stacked bars with amber DNS-off caps) before XSS mutation.
+    # Range switching (Week shows quiet 7-day stacked bars with Ice deep-focus base and amber DNS-off caps) before XSS mutation.
     await page.locator('[data-r=week]').click()
     await page.wait_for_timeout(150)
     assert await page.locator('#pTimelineSec').is_visible()
     assert await page.locator('#pLegend').is_hidden()
     assert await page.locator('.simple-week .col').count() == 7
-    assert 'DNS off' in await page.locator('.wk-key').inner_text()
+    assert 'DNS off' in await page.locator('.wk-card .bento-title').inner_text()
+    assert 'Deep focus' in await page.locator('.wk-card .bento-title').inner_text()
+    assert await page.locator('.wk-focus').count() >= 2
     await capture_panel(page, output, 'panel-week.png')
     await page.locator('[data-r=today]').click()
     await page.wait_for_timeout(150)
@@ -338,8 +353,30 @@ async def main(output=None):
     await page.locator('[data-r=today]').click()
     await page.wait_for_timeout(150)
 
+    # Active deep-focus streak with no warning/breach turns the idle notch Ice (#cbe2ff).
+    await page.evaluate("""async () => {
+      const now = Date.now(), m = 60000;
+      window.__testHistory = {
+        now,
+        spans: [
+          { s: now - 35 * m, e: now, app: 'T3 Code', label: 'T3 Code', source: 'window_title' },
+        ],
+        peeks: [],
+        pauses: [],
+      };
+      window.__handlers.habits({ payload: { rows: [], credit: 0, cap: 45 } });
+      window.__handlers['focus-state-transition']({ payload: { to: 'focused' } });
+      await new Promise(r => setTimeout(r, 80));
+      document.querySelector('.w .amb').click();
+      await new Promise(r => setTimeout(r, 120));
+      document.querySelector('.w .amb').click();
+    }""")
+    await page.wait_for_timeout(200)
+    assert await page.locator('.w').get_attribute('data-tone') == 'focus'
+    assert await page.locator('.w .a-on.focus-ice').count() == 1
+
     assert not errors, errors
-    print('PASS: v8 OLED desktop (thin bar, clickable legend, bento cards, searchable Explorer, Week stacked bars, openable pauses, XSS escaping, Esc, surgical orange/red signals) verified.')
+    print('PASS: v8 OLED desktop (thin bar, clickable legend, bento cards, searchable Explorer, Week stacked bars, openable pauses, XSS escaping, Esc, surgical orange/red signals, Ice deep focus) verified.')
 
 if __name__ == "__main__":
   asyncio.run(main())
