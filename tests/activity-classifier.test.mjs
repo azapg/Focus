@@ -308,3 +308,38 @@ test('fine category palette keeps productive and neutral work monochrome and col
     assert.equal(isGray(byId[id].color), false, `${id} should carry a warning/breach color (${byId[id].color})`);
   }
 });
+
+test('observed X places drive details and score in the same device and range', () => {
+  const web = (s, e, url, title = '') => ({
+    s: s * MIN, e: e * MIN, app: 'Chrome', source: 'chromium_extension',
+    browser: { url, title, tab_id: 1, host_pid: 2, window_id: 3 },
+  });
+  const profile = 'https://x.com/seed_library';
+  const title = 'Seed Library (@seed_library) / X';
+  const desktop = { kind: 'windows', name: 'Laptop', history: { now: 21 * MIN, spans: [
+    web(0, 4, 'https://x.com/home'),
+    web(4, 5, profile, title),
+    web(5, 6, profile, title),
+    web(6, 7, 'https://x.com/search?q=seed+swap'),
+    web(7, 8, profile, title),
+    web(8, 9, 'https://x.com/about'),
+    web(9, 10, 'https://x.com/search?q=REDACTED'),
+    web(10, 12, 'https://www.youtube.com/shorts/fictional'),
+    web(12, 14, 'https://www.youtube.com/watch?v=fictional'),
+    web(14, 21, 'https://open.spotify.com/'),
+  ] } };
+  const phone = { kind: 'phone', name: 'Phone', history: { now: 21 * MIN, spans: [
+    { s: 0, e: 5 * MIN, app: 'com.android.chrome', domain: 'x.com' },
+    { s: 5 * MIN, e: 6 * MIN, app: 'com.whatsapp' },
+  ] } };
+  const summary = ActivityClassifier.summarizeFine([desktop, phone], 2 * MIN, 20 * MIN);
+  assert.deepEqual(summary.score, { clean: 10 * MIN, drift: 4 * MIN, unverified: 8 * MIN });
+  const x = summary.apps.find((app) => app.app === 'X');
+  assert.equal(x.ms, 11 * MIN);
+  assert.equal(x.details.coveredMs, 6 * MIN);
+  assert.equal(x.details.homeMs, 2 * MIN);
+  assert.deepEqual(x.details.profile.get('@seed_library'), { label: 'Seed Library', handle: '@seed_library', visits: 2 });
+  assert.equal(x.details.search.get('seed swap').visits, 1);
+  assert.equal(x.details.search.size, 1);
+  assert.equal(ActivityClassifier.summarizeFine([phone], 0, 20 * MIN).apps.find((app) => app.app === 'X').details, null);
+});

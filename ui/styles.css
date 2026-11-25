@@ -1114,40 +1114,108 @@ details.st > summary::-webkit-details-marker {
 .st-row .n.dns-bad {
   color: var(--d-red-text);
 }
-.st-detail {
-  padding: 0 13px 10px 45px;
+div.st-row {
+  cursor: default;
 }
-.st-meta {
+button.app-detail-button {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.st-right {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 11px;
+  gap: 7px;
   color: var(--d-mut);
-  font-variant-numeric: tabular-nums;
 }
-.st-meta > span {
-  display: inline-flex;
+.clean-score {
+  margin: 5px 0 0;
+  font-size: 12px;
+  color: var(--d-mut);
+}
+.clean-score b {
+  color: var(--d-fg);
+}
+.app-detail-content {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+.app-detail-head, .app-detail-head h2 {
+  display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
 }
-.st-meta i {
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-  flex: none;
+.app-detail-head {
+  justify-content: space-between;
 }
-.st-meta-sep {
-  color: #3f3f46;
+.app-detail-head h2 {
+  margin: 0;
+  font-size: 16px;
 }
-.st-meta-off {
-  color: var(--d-orange);
+.app-detail-content p {
+  margin: -6px 0 0;
+  font-size: 12px;
+  color: var(--d-mut);
 }
-.st-meta-off.bad {
-  color: var(--d-red-text);
+.app-detail-card {
+  padding: 12px;
 }
-.st-detail .cat-pages {
-  padding: 6px 0 0;
+.app-detail-card h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.app-detail-card progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 8px;
+  appearance: none;
+  background: var(--d-div);
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.app-detail-card progress::-webkit-progress-bar {
+  background: var(--d-div);
+}
+.app-detail-card progress::-webkit-progress-value {
+  background: var(--d-orange);
+}
+.app-detail-card progress::-moz-progress-bar {
+  background: var(--d-orange);
+}
+.app-detail-lists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 12px;
+}
+.app-detail-lists:empty {
+  display: none;
+}
+.app-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding-top: 8px;
+  overflow-wrap: anywhere;
+}
+.app-detail-row small, .app-detail-more {
+  color: var(--d-mut);
+}
+.app-detail-row > small:last-child {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.app-detail-more {
+  margin-top: 8px;
+}
+.app-detail-more summary {
+  cursor: pointer;
 }
 .src-ico {
   display: inline-flex;

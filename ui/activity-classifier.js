@@ -354,8 +354,12 @@ const ActivityClassifier = (() => {
     }
 
     if (base === 'x.com' || base === 'twitter.com') {
+      const query = path === '/search' ? urlObj.searchParams.get('q')?.trim() : '';
+      if (query && query !== 'REDACTED') {
+        return { app: 'X', category: 'browsing', itemKind: 'search', place: { kind: 'search', label: query }, matchType: 'host', matchValue: base };
+      }
       if (path === '/' || path === '/home') {
-        return { app: 'X', category: 'browsing', itemKey: 'x:home', itemTitle: 'Home feed', itemKind: 'feed', matchType: 'host', matchValue: base };
+        return { app: 'X', category: 'browsing', itemKey: 'x:home', itemTitle: 'Home feed', itemKind: 'feed', place: path === '/home' ? { kind: 'home' } : null, matchType: 'host', matchValue: base };
       }
       const statusMatch = path.match(/^\/([^/]+)\/status\/(\d+)/);
       if (statusMatch) {
@@ -375,7 +379,11 @@ const ActivityClassifier = (() => {
       const profileMatch = path.match(/^\/([A-Za-z0-9_]+)\/?$/);
       if (profileMatch && !['explore', 'notifications', 'messages', 'search', 'i', 'settings', 'compose'].includes(profileMatch[1].toLowerCase())) {
         const handle = `@${profileMatch[1]}`;
-        return { app: 'X', category: 'browsing', itemKey: `x:profile:${profileMatch[1].toLowerCase()}`, itemTitle: `${handle} profile`, itemKind: 'profile', itemMeta: handle, matchType: 'host', matchValue: base };
+        const profileTitle = stripSuffix(title, [' / X', ' / Twitter']);
+        const suffix = `(${handle})`;
+        const confirmed = profileTitle.toLowerCase().endsWith(suffix.toLowerCase());
+        const label = confirmed ? profileTitle.slice(0, -suffix.length).trim() : '';
+        return { app: 'X', category: 'browsing', itemKey: `x:profile:${profileMatch[1].toLowerCase()}`, itemTitle: `${handle} profile`, itemKind: 'profile', itemMeta: handle, place: confirmed ? { kind: 'profile', label: label || handle, handle: handle.toLowerCase() } : null, matchType: 'host', matchValue: base };
       }
       return { app: 'X', category: 'browsing', itemKey: `x:other:${path.split('/')[1] || 'other'}`, itemTitle: stripSuffix(title, [' / X']) || 'X', itemKind: 'page', matchType: 'host', matchValue: base };
     }
@@ -435,7 +443,7 @@ const ActivityClassifier = (() => {
     if (base === 'youtube.com' || base === 'm.youtube.com' || base === 'youtu.be') {
       const vid = urlObj.searchParams.get('v') || (base === 'youtu.be' ? path.slice(1) : '');
       const videoTitle = stripSuffix(title, [' - YouTube', ' · YouTube']);
-      return { app: 'YouTube', category: 'watching', itemKey: vid ? `yt:${vid}` : `yt:${path}`, itemTitle: videoTitle || 'YouTube', itemKind: vid ? 'video' : 'feed', matchType: 'host', matchValue: base };
+      return { app: 'YouTube', category: 'watching', itemKey: vid ? `yt:${vid}` : `yt:${path}`, itemTitle: videoTitle || 'YouTube', itemKind: vid ? 'video' : 'feed', place: /^\/shorts(?:\/|$)/.test(path) ? { kind: 'shorts' } : null, matchType: 'host', matchValue: base };
     }
 
     if (base === 'twitch.tv') {
@@ -601,6 +609,7 @@ const ActivityClassifier = (() => {
           itemTitle: web.itemTitle,
           itemKind: web.itemKind || 'page',
           itemMeta: web.itemMeta || '',
+          place: web.place || null,
           lowQualityTitle: Boolean(web.lowQualityTitle),
           audible: Boolean(span.browser.audible),
           noise: Boolean(web.noise),
@@ -992,6 +1001,18 @@ const ActivityClassifier = (() => {
     return merged;
   }
 
+  function cleanBucket(classification, fine) {
+    const { app, place, category, userRule } = classification;
+    if (place?.kind === 'home' || place?.kind === 'shorts') return 'drift';
+    if (['X', 'WhatsApp', 'WhatsApp Business', 'YouTube'].includes(app)) {
+      if (place?.kind === 'search' || place?.kind === 'profile') return 'clean';
+      if (!userRule) return 'unverified';
+    }
+    if (['building', 'writing', 'designing', 'learning', 'reading', 'listening', 'messaging'].includes(category)) return 'clean';
+    if (['games', 'adult'].includes(fine.id)) return 'drift';
+    return 'unverified';
+  }
+
   /** Screen time per fine category and per app, across all selected devices. */
   function summarizeFine(sources, from, to, { userRules = null, cache = null } = {}) {
     const cats = Object.create(null);
@@ -999,7 +1020,9 @@ const ActivityClassifier = (() => {
     const apps = Object.create(null);
     let total = 0;
     let totalOff = 0;
+    const score = { clean: 0, drift: 0, unverified: 0 };
     for (const src of sources) {
+      let lastPlace = null;
       const h = src.history;
       const boundTo = Math.min(to, h.now || to);
       const offs = mergeIntervals((h.pauses || []).map((p) => [p.t, Math.min(p.end, boundTo)]));
@@ -1020,7 +1043,7 @@ const ActivityClassifier = (() => {
         totalOff += o;
         cats[f.id] = (cats[f.id] || 0) + d;
         catOff[f.id] = (catOff[f.id] || 0) + o;
-        const entry = (apps[f.app] ??= { app: f.app, ms: 0, off: 0, cats: Object.create(null), devices: Object.create(null), items: Object.create(null), webMs: 0 });
+        const entry = (apps[f.app] ??= { app: f.app, ms: 0, off: 0, cats: Object.create(null), devices: Object.create(null), items: Object.create(null), webMs: 0, driftMs: 0, details: null });
         // Website = seen as a URL/domain; native apps and desktop programs are not.
         if (c.matchType === 'host' || s.domain || (s.source === 'chromium_extension' && s.browser?.url)) entry.webMs += d;
         entry.ms += d;
@@ -1028,6 +1051,28 @@ const ActivityClassifier = (() => {
         entry.cats[f.id] = (entry.cats[f.id] || 0) + d;
         const dev = src.kind === 'phone' ? 'Phone' : src.kind === 'tv' ? 'TV' : src.name;
         entry.devices[dev] = (entry.devices[dev] || 0) + d;
+        const bucket = cleanBucket(c, f);
+        score[bucket] += d;
+        if (bucket === 'drift') entry.driftMs += d;
+        if (f.app === 'X' && c.place && ['home', 'search', 'profile'].includes(c.place.kind)) {
+          const { kind, label, handle } = c.place;
+          const details = (entry.details ??= { coveredMs: 0, homeMs: 0, search: new Map(), profile: new Map() });
+          details.coveredMs += d;
+          if (kind === 'home') {
+            details.homeMs += d;
+            lastPlace = null;
+          } else {
+            const key = handle || label;
+            const item = details[kind].get(key) || { label, handle, visits: 0 };
+            const browser = s.browser;
+            const session = `${browser.host_pid}:${browser.window_id}:${browser.tab_id}`;
+            if (lastPlace?.kind !== kind || lastPlace.key !== key || lastPlace.end !== a || lastPlace.session !== session) item.visits++;
+            details[kind].set(key, item);
+            lastPlace = { kind, key, end: b, session };
+          }
+        } else {
+          lastPlace = null;
+        }
         if (c.itemTitle) {
           const item = (entry.items[c.itemTitle] ??= { title: c.itemTitle, ms: 0, off: 0 });
           item.ms += d;
@@ -1053,11 +1098,13 @@ const ActivityClassifier = (() => {
           color: cat.color,
           devices: top(e.devices).map(([name, ms]) => ({ name, ms })),
           web: e.webMs >= e.ms * 0.9,
+          details: e.details,
+          driftMs: e.driftMs,
           items: Object.values(e.items).sort((x, y) => y.ms - x.ms),
         };
       })
       .sort((x, y) => y.ms - x.ms);
-    return { total, totalOff, categories: catList, groups, apps: appList };
+    return { total, totalOff, categories: catList, groups, apps: appList, score };
   }
 
   /** Build the compact agent-readable inbox written to %LOCALAPPDATA%\FocusDNS\uncategorized.json. */
