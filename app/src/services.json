@@ -1,0 +1,12 @@
+{
+  "discord": ["discord.com", "discord.gg", "discordapp.com", "discordapp.net", "discord.media"],
+  "whatsapp_web": ["web.whatsapp.com", "whatsapp.net"],
+  "telegram": ["telegram.org", "t.me", "telegram.me"],
+  "youtube": ["youtube.com", "youtu.be", "googlevideo.com", "ytimg.com", "youtubei.googleapis.com"],
+  "reddit": ["reddit.com", "redd.it", "redditmedia.com", "redditstatic.com"],
+  "slack": ["slack.com", "slack-edge.com", "slack-files.com"],
+  "github": ["github.com", "githubusercontent.com", "githubassets.com"],
+  "x": ["x.com", "twitter.com", "twimg.com"],
+  "facebook": ["facebook.com", "fbcdn.net"],
+  "instagram": ["instagram.com", "cdninstagram.com"]
+}

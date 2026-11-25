@@ -1,0 +1,34 @@
+[
+  {
+    "input": "https://user:pass@github.com/example-org/sample-project?tab=readme&token=secret#access_token=x",
+    "output": "https://github.com/example-org/sample-project?tab=readme&token=REDACTED"
+  },
+  {
+    "input": "https://www.youtube.com/watch?v=abc123&t=30",
+    "output": "https://www.youtube.com/watch?v=abc123&t=30"
+  },
+  {
+    "input": "https://example.org/?code=secret&custom=private",
+    "output": "https://example.org/?code=REDACTED&custom=REDACTED"
+  },
+  {
+    "input": "https://example.org/#/projects/1",
+    "output": "https://example.org/#/projects/1"
+  },
+  {
+    "input": "https://example.org/#/projects?token=abc",
+    "output": "https://example.org/"
+  },
+  {
+    "input": "file:///private.txt",
+    "output": null
+  },
+  {
+    "input": "chrome://settings",
+    "output": null
+  },
+  {
+    "input": "https://example.org/a-long-ordinary-article-title-about-how-browsers-work",
+    "output": "https://example.org/a-long-ordinary-article-title-about-how-browsers-work"
+  }
+]

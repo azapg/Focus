@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Focus TV · Usage dashboard</title>
+<style>
+  @font-face {
+    font-family: Geist;
+    src: url("../../ui/fonts/geist-latin.woff2") format("woff2");
+    font-weight: 400;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .tv, .tv * { font-family: Geist, sans-serif; font-weight: 400; }
+  button { font: inherit; cursor: pointer; color: inherit; }
+  button:focus-visible { outline: 2px solid #fafafa; outline-offset: 2px; }
+  .sample { display: block; margin: 0 0 9px; color: var(--muted-foreground, #a1a1aa); font-size: 12px; }
+  .tv {
+    --base: #000; --text: #fafafa; --muted-tv: #a1a1aa; --line: #202024;
+    --surface: #060607; --selected: #232327; --amber: #efb461;
+    --amber-chart: #bd791f; --bar: #66666e;
+    background: var(--base); color: var(--text); border-radius: 15px;
+    padding: clamp(18px, 3.5vw, 32px); font-size: 14px; line-height: 1.4; font-variant-numeric: tabular-nums;
+  }
+  header, .heading, .panel-head, .app, .pause, .chart-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .brand { display: flex; gap: 8px; align-items: center; font-size: 16px; }
+  .focus-ring { width: 22px; height: 22px; }
+  nav, .segmented { display: flex; align-items: center; gap: 3px; }
+  .segmented { border: 1px solid var(--line); border-radius: 99px; padding: 3px; background: #101012; }
+  .pill { border: 1px solid transparent; border-radius: 99px; background: transparent; padding: 6px 11px; font-size: 12px; white-space: nowrap; }
+  .pill:hover, .pill[aria-pressed=true] { background: var(--selected); }
+  .settings { border-color: var(--line); margin-left: 5px; }
+  main { margin-top: 25px; }
+  h1, h2, p { margin: 0; }
+  h1 { font-size: clamp(24px, 5.2vw, 46px); line-height: 1.1; text-wrap: balance; }
+  h1 .scope { font-size: .49em; color: var(--muted-tv); white-space: nowrap; }
+  h2 { font-size: 14px; }
+  .muted, .app .duration, .pause small { color: var(--muted-tv); }
+  .range { margin-bottom: 4px; font-size: 12px; }
+  .dns-total { color: var(--amber); font-size: 13px; text-align: right; flex-shrink: 0; }
+  .charts { margin-top: 16px; }
+  .panel { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; min-width: 0; }
+  .panel-head { margin-bottom: 8px; min-height: 24px; }
+  .panel-head h2 { color: var(--muted-tv); }
+  .breakdown { margin-top: 12px; }
+  .segments { display: flex; gap: 2px; height: 8px; border-radius: 3px; overflow: hidden; background: var(--line); }
+  .segments i { min-width: 3px; border-radius: 2px; }
+  .category-legend { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 7px; font-size: 11px; color: var(--muted-tv); }
+  .category-legend button { display: flex; align-items: center; gap: 5px; padding: 2px 4px; border: 0; border-radius: 4px; background: transparent; }
+  .category-legend button[aria-pressed=true], .category-legend button:hover { color: var(--text); background: var(--selected); }
+  .segments .dim { opacity: .35; }
+  .category-legend i { width: 7px; height: 7px; border-radius: 2px; }
+  .category-legend .category-time { color: #d4d4d8; }
+  .legend { color: var(--muted-tv); font-size: 11px; white-space: nowrap; }
+  .legend::before { content: ""; display: inline-block; background: var(--amber-chart); width: 7px; height: 7px; border-radius: 2px; margin-right: 5px; }
+  .plot { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 7px; }
+  .scale { display: flex; flex-direction: column; justify-content: space-between; height: 101px; padding-bottom: 3px; text-align: right; font-size: 10px; color: var(--muted-tv); }
+  .bars { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; position: relative; min-width: 0; }
+  .guides { pointer-events: none; position: absolute; inset: 3px 0 20px; display: flex; flex-direction: column; justify-content: space-between; }
+  .guides i { display: block; border-top: 1px solid var(--line); }
+  .bucket { position: relative; display: grid; grid-template-rows: 98px 17px; gap: 4px; align-items: end; padding: 0 3px; background: transparent; border: 0; border-radius: 4px; font-size: 10px; color: var(--muted-tv); min-width: 0; }
+  .bucket[aria-pressed=true], .bucket:hover { background: #19191d; color: var(--text); }
+  .bucket > span { display: block; }
+  .column { width: min(100%, 35px); justify-self: center; height: var(--height); min-height: 2px; background: var(--bar); border-radius: 3px 3px 1px 1px; overflow: hidden; }
+  .bucket[aria-pressed=true] .column { background: #dedee2; }
+  .column i { display: block; height: var(--off); background: var(--amber-chart); }
+  .chart-summary { color: var(--muted-tv); margin: 6px 0 0 34px; min-height: 18px; font-size: 11px; }
+  .chart-summary b { color: var(--text); }
+  .text-btn { padding: 4px 7px; border-radius: 6px; background: transparent; border: 0; font-size: 12px; color: var(--muted-tv); }
+  .text-btn:hover { color: var(--text); background: var(--selected); }
+  .lower { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; align-items: stretch; }
+  .row { border: 0; background: transparent; padding: 7px 6px; width: 100%; text-align: left; border-radius: 7px; min-height: 38px; }
+  .row:hover { background: var(--selected); }
+  .app .app-name { flex: 1; min-width: 0; }
+  .app-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .mark { width: 23px; height: 23px; flex-shrink: 0; border-radius: 6px; display: inline-grid; place-items: center; background: #28282c; color: #e6e6e9 !important; font-size: 11px; }
+  .app-name small { display: block; font-size: 10px; color: var(--muted-tv); }
+  .meter { width: 17%; height: 4px; border-radius: 3px; background: #29292d; }
+  .meter i { height: 100%; display: block; background: #b5b5be; border-radius: 3px; }
+  .duration { text-align: right; min-width: 40px; white-space: nowrap; font-size: 12px; }
+  .arrow { color: #888890; }
+  .pause { align-items: center; }
+  .list { flex: 1; }
+  .list .row + .row { border-top: 1px solid #141417; }
+  .list .row { min-height: 45px; }
+  .pause-title { font-size: 12px; display: block; }
+  .pause small { display: block; font-size: 11px; margin-top: 1px; }
+  .pause .duration { color: var(--muted-tv); }
+  .pause .dns { color: var(--amber); }
+  .empty { color: var(--muted-tv); padding: 7px 5px; font-size: 12px; }
+  dialog { color: var(--text); background: #121214; border: 1px solid #34343a; border-radius: 14px; padding: 17px; width: min(340px, calc(100% - 36px)); }
+  dialog::backdrop { background: #000a; }
+  .dialog-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; margin-bottom: 14px; }
+  .dialog-head h2 { font-size: 21px; }
+  .primary, .secondary { width: 100%; border: 1px solid transparent; border-radius: 8px; text-align: left; padding: 10px 12px; margin-top: 6px; }
+  .primary { color: #101012; background: #f2f2f4; }
+  .secondary { background: #252528; }
+  .confirmation { font-size: 12px; min-height: 18px; margin-top: 8px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 530px) {
+    .lower { grid-template-columns: 1fr; }
+    .chart-summary { margin-left: 0; }
+    .bucket { padding-inline: 0; }
+    .bars { gap: 3px; }
+  }
+</style>
+<span class="sample">Interactive prototype · sample activity and pauses</span>
+<section class="tv" aria-label="Focus on TV">
+  <header>
+    <div class="brand"><img class="focus-ring" src="../../assets/mark.svg" alt="">Focus</div>
+    <nav aria-label="Dashboard controls">
+      <div class="segmented" role="group" aria-label="Period">
+        <button class="pill" id="today" aria-pressed="true">Today</button>
+        <button class="pill" id="week" aria-pressed="false">Week</button>
+      </div>
+      <button class="pill settings" id="settings">Settings</button>
+    </nav>
+  </header>
+  <main>
+    <div class="heading">
+      <div><p class="range muted" id="range"></p><h1><span id="total"></span> <span class="scope">on this TV</span></h1></div>
+      <div class="dns-total" id="dnsTotal"></div>
+    </div>
+    <div class="breakdown" id="breakdown" aria-label="Screen time by category">
+      <div id="segments" class="segments" aria-hidden="true"></div>
+      <div id="categories" class="category-legend"></div>
+    </div>
+    <div class="charts">
+      <section class="panel">
+        <div class="panel-head"><h2 id="chartTitle"></h2><span class="legend">Viewing with DNS off</span></div>
+        <div class="plot">
+          <div class="scale" id="scale" aria-hidden="true"></div>
+          <div class="bars" id="bars" role="group" aria-labelledby="chartTitle"></div>
+        </div>
+        <div class="chart-summary" id="chartSummary" aria-live="polite"></div>
+      </section>
+    </div>
+    <div class="lower">
+      <section class="panel">
+        <div class="panel-head"><h2 id="appsTitle">Apps</h2><button class="text-btn" id="allApps">All apps ›</button></div>
+        <div id="apps" class="list"></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2 id="pausesTitle">Pauses</h2><button class="text-btn" id="allPauses">View all ›</button></div>
+        <div id="pauses" class="list"></div>
+      </section>
+    </div>
+  </main>
+  <dialog id="dialog" aria-labelledby="dialogTitle">
+    <div class="dialog-head">
+      <div><h2 id="dialogTitle"></h2><p class="muted" id="dialogSub"></p></div>
+      <button class="text-btn" id="close">Close</button>
+    </div>
+    <div id="dialogBody"></div>
+  </dialog>
+</section>
+<script>
+  const get = id => document.getElementById(id);
+  const tv = document.querySelector('.tv');
+  const hours = (h, m = 0) => h * 60 + m;
+  const entries = [
+    [['YouTube', 18, 0, 18, 25], ['Netflix', 20, 0, 21, 8]],
+    [['Twitch', 19, 5, 19, 45], ['YouTube', 21, 0, 21, 19]],
+    [['Netflix', 20, 0, 20, 40]],
+    [['Twitch', 18, 5, 18, 27]],
+    [],
+    [],
+    [['Twitch', 12, 53, 13, 45], ['YouTube', 13, 46, 14, 18], ['Twitch', 14, 19, 18, 27], ['YouTube', 18, 37, 18, 38], ['YouTube Music', 18, 42, 19, 8]]
+  ].map(day => day.map(([app, h, m, endH, endM]) => ({ app, from: hours(h, m), to: hours(endH, endM) })));
+  const pauses = [
+    { day: 0, app: 'NextDNS', from: hours(20, 15), duration: 10, reason: 'Movie night' },
+    { day: 1, app: 'YouTube', from: hours(21, 0), duration: 5, reason: 'Check a tutorial' },
+    { day: 6, app: 'NextDNS', from: hours(13, 51), duration: 10, reason: 'Watch a saved video' },
+    { day: 6, app: 'Twitch', from: hours(16, 12), duration: 5, reason: 'Catch the end of a stream' }
+  ];
+  const days = ['Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Mon'];
+  const catalog = { Twitch: 'T', YouTube: '▶', Netflix: 'N', 'Prime Video': 'P', 'Disney+': 'D', 'YouTube Music': '♪' };
+  const categoryFor = app => app === 'YouTube Music' ? 'Music' : 'Videos';
+  const categoryColors = { Videos: '#bcbcc2', Music: '#686870' };
+  const isBlocked = new Set();
+  let period = 'today', selection = null, categoryFilter = null, opener;
+  const fmt = m => m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}` : `${m}m`;
+  const time = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const overlap = (a, b, c, d) => Math.max(0, Math.min(b, d) - Math.max(a, c));
+  const span = (day, from = 0, to = 1440) => ({ day, from, to });
+
+  function totals(spans) {
+    const apps = {};
+    let off = 0, dns = 0;
+    for (const { day, from, to } of spans) {
+      const dnsPauses = pauses.filter(p => p.day === day && p.app === 'NextDNS');
+      for (const pause of dnsPauses) dns += overlap(from, to, pause.from, pause.from + pause.duration);
+      for (const activity of entries[day]) {
+        const used = overlap(from, to, activity.from, activity.to);
+        if (used) apps[activity.app] = (apps[activity.app] || 0) + used;
+        for (const pause of dnsPauses) {
+          off += overlap(Math.max(from, activity.from), Math.min(to, activity.to), pause.from, pause.from + pause.duration);
+        }
+      }
+    }
+    const ranked = Object.entries(apps).sort((a, b) => b[1] - a[1]);
+    return { ranked, off, dns, total: ranked.reduce((sum, [, m]) => sum + m, 0) };
+  }
+
+  function chartBuckets() {
+    if (period === 'week') return days.map((label, day) => ({ label, title: label, span: span(day) }));
+    return Array.from({ length: 12 }, (_, i) => {
+      const hour = String(i * 2).padStart(2, '0');
+      return { label: i % 2 ? '' : hour, title: `${hour}:00–${time((i + 1) * 120)}`,
+        span: span(6, i * 120, (i + 1) * 120) };
+    });
+  }
+
+  function render(focus) {
+    const whole = period === 'today' ? [span(6)] : days.map((_, day) => span(day));
+    const buckets = chartBuckets();
+    const interval = selection === null ? null : buckets[selection];
+    const window = interval ? [interval.span] : whole;
+    const stats = totals(window);
+    get('today').setAttribute('aria-pressed', period === 'today');
+    get('week').setAttribute('aria-pressed', period === 'week');
+    get('range').textContent = interval?.title ?? (period === 'today' ? 'Today · Mon, Nov 23' : 'Week · Nov 17–23');
+    get('total').textContent = fmt(stats.total);
+    fillBreakdown(stats.ranked);
+    get('dnsTotal').textContent = `${fmt(stats.dns)} DNS off`;
+    get('chartTitle').textContent = period === 'today' ? 'Viewing by time of day' : 'Viewing by day';
+    const data = buckets.map(bucket => totals([bucket.span]));
+    const step = period === 'today' ? 60 : 180;
+    const max = Math.max(step, Math.ceil(Math.max(...data.map(d => d.total)) / step) * step);
+    get('scale').innerHTML = `<span>${fmt(max)}</span><span>${fmt(max / 2)}</span><span>0</span>`;
+    get('bars').innerHTML = '<div class="guides" aria-hidden="true"><i></i><i></i><i></i></div>';
+    buckets.forEach((bucket, i) => {
+      const { total, off } = data[i];
+      const bar = document.createElement('button');
+      bar.id = `bar${i}`;
+      bar.className = 'bucket';
+      bar.setAttribute('aria-pressed', i === selection);
+      bar.setAttribute('aria-label', `${bucket.title}, ${fmt(total)} viewing${off ? `, ${fmt(off)} with DNS off` : ''}`);
+      bar.innerHTML = `<span class="column" aria-hidden="true" style="--height:${total / max * 98}px;--off:${total ? off / total * 100 : 0}%"><i></i></span><span aria-hidden="true">${bucket.label}</span>`;
+      bar.onclick = () => { selection = selection === i ? null : i; categoryFilter = null; render(bar.id); };
+      get('bars').append(bar);
+    });
+    get('chartSummary').replaceChildren();
+    const summary = document.createElement('span');
+    if (interval) {
+      summary.textContent = `${interval.title} · ${fmt(stats.total)} viewing${stats.off ? ` · ${fmt(stats.off)} with DNS off` : ''}`;
+      const clear = button('Clear filter', 'text-btn', () => { const previous = selection; selection = null; categoryFilter = null; render(`bar${previous}`); });
+      get('chartSummary').append(summary, clear);
+    } else {
+      summary.textContent = period === 'today' ? 'Select a time to see its apps and pauses' : 'Select a day to see its apps and pauses';
+      get('chartSummary').append(summary);
+    }
+    const appScope = categoryFilter ?? interval?.title;
+    get('appsTitle').textContent = appScope ? `Apps · ${appScope}` : 'Apps';
+    get('pausesTitle').textContent = interval ? `Pauses · ${interval.title}` : 'Pauses';
+    const shown = stats.ranked.filter(([app]) => !categoryFilter || categoryFor(app) === categoryFilter);
+    fillApps(get('apps'), shown, stats.total);
+    fillPauses(get('pauses'), pausesFor(window));
+    if (focus) get(focus)?.focus();
+  }
+
+  function button(label, style, run) {
+    const b = document.createElement('button');
+    b.className = style;
+    b.textContent = label;
+    b.onclick = run;
+    return b;
+  }
+
+  function fillApps(target, rows, total) {
+    target.replaceChildren();
+    if (!rows.length) { target.append(empty('No app activity in this period')); return; }
+    for (const [app, minutes] of rows) {
+      const row = button(app, 'row app', () => openApp(app, minutes, row));
+      const blocked = isBlocked.has(app);
+      row.innerHTML = `<span class="mark" aria-hidden="true">${catalog[app]}</span><span class="app-name"><span style="color:inherit">${app}${blocked ? '<small>Blocked</small>' : ''}</span></span>`;
+      if (total) {
+        const meter = document.createElement('span');
+        meter.className = 'meter';
+        meter.setAttribute('aria-hidden', 'true');
+        const bar = document.createElement('i');
+        bar.style.width = `${100 * minutes / total}%`;
+        meter.append(bar);
+        row.append(meter);
+      }
+      row.insertAdjacentHTML('beforeend', `<span class="duration">${fmt(minutes)}</span><span class="arrow" aria-hidden="true">›</span>`);
+      target.append(row);
+    }
+  }
+
+  function pausesFor(spans) {
+    return pauses.filter(p => spans.some(s => p.day === s.day && overlap(s.from, s.to, p.from, p.from + p.duration)))
+      .sort((a, b) => b.day - a.day || b.from - a.from);
+  }
+
+  function fillBreakdown(rows) {
+    const totals = new Map();
+    for (const [app, minutes] of rows) {
+      const category = categoryFor(app);
+      totals.set(category, (totals.get(category) || 0) + minutes);
+    }
+    get('breakdown').hidden = !totals.size;
+    get('segments').replaceChildren();
+    get('categories').replaceChildren();
+    for (const [category, minutes] of totals) {
+      const color = categoryColors[category];
+      const segment = document.createElement('i');
+      segment.style.flex = String(minutes);
+      segment.style.backgroundColor = color;
+      segment.classList.toggle('dim', categoryFilter !== null && category !== categoryFilter);
+      get('segments').append(segment);
+      const label = button(category, '', () => {
+        categoryFilter = categoryFilter === category ? null : category;
+        render(label.id);
+      });
+      label.id = `category-${category}`;
+      label.setAttribute('aria-pressed', categoryFilter === category);
+      label.innerHTML = `<i style="background:${color}" aria-hidden="true"></i>${category} <span class="category-time">${fmt(minutes)}</span>`;
+      get('categories').append(label);
+    }
+  }
+
+  function fillPauses(target, list) {
+    target.replaceChildren();
+    if (!list.length) { target.append(empty('No pauses in this period')); return; }
+    for (const p of list) {
+      const row = button(p.reason, 'row pause', () => openPause(p, row));
+      row.innerHTML = `<span><span class="pause-title">${p.reason}</span><small>${days[p.day]} ${time(p.from)} · ${p.app === 'NextDNS' ? 'DNS off' : p.app + ' allowed'}</small></span><span class="duration ${p.app === 'NextDNS' ? 'dns' : ''}">${fmt(p.duration)}</span>`;
+      target.append(row);
+    }
+  }
+
+  function empty(text) {
+    const p = document.createElement('p');
+    p.className = 'empty';
+    p.textContent = text;
+    return p;
+  }
+
+  function dialog(title, subtitle, trigger) {
+    if (!get('dialog').open) {
+      opener = trigger;
+      get('dialog').showModal();
+    }
+    get('dialogTitle').textContent = title;
+    get('dialogSub').textContent = subtitle;
+    get('dialogBody').replaceChildren();
+    return get('dialogBody');
+  }
+
+  function openApp(app, minutes, trigger) {
+    const panel = dialog(app, `${fmt(minutes)} in the selected period`, trigger);
+    const confirmation = document.createElement('p');
+    confirmation.className = 'confirmation muted';
+    confirmation.setAttribute('aria-live', 'polite');
+    const label = () => (isBlocked.has(app) ? 'Unblock ' : 'Block ') + app;
+    const action = button(label(), 'primary', () => {
+      if (isBlocked.has(app)) isBlocked.delete(app); else isBlocked.add(app);
+      action.textContent = label();
+      confirmation.textContent = isBlocked.has(app) ? `${app} is blocked on this TV.` : `${app} is unblocked on this TV.`;
+      dashboardDirty = true;
+    });
+    panel.append(action, confirmation);
+    action.focus();
+  }
+
+  function openApps(trigger) {
+    const panel = dialog('All apps', 'Installed on this TV', trigger);
+    const whole = period === 'today' ? [span(6)] : days.map((_, day) => span(day));
+    const stats = totals(whole);
+    const use = Object.fromEntries(stats.ranked);
+    fillApps(panel, Object.keys(catalog).sort().map(app => [app, use[app] || 0]), stats.total);
+    panel.querySelector('button')?.focus();
+  }
+
+  function openPause(p, trigger) {
+    const panel = dialog(p.reason, `${days[p.day]} ${time(p.from)} · ${fmt(p.duration)}`, trigger);
+    panel.append(empty(p.app === 'NextDNS' ? 'DNS was off on this TV' : `${p.app} was temporarily allowed`));
+    get('close').focus();
+  }
+
+  function openPauses(trigger) {
+    const panel = dialog('Pause history', 'This TV', trigger);
+    fillPauses(panel, pausesFor(days.map((_, day) => span(day))));
+    panel.querySelector('button')?.focus();
+  }
+
+  let dashboardDirty = false;
+  get('dialog').addEventListener('close', () => {
+    if (dashboardDirty) {
+      const rows = [...get('apps').children];
+      const oldIndex = rows.indexOf(opener);
+      render();
+      const updated = [...get('apps').children];
+      (oldIndex >= 0 ? updated[oldIndex] : opener)?.focus();
+      dashboardDirty = false;
+    } else opener?.focus();
+  });
+  get('close').onclick = () => get('dialog').close();
+  get('today').onclick = () => { period = 'today'; selection = null; categoryFilter = null; render(); };
+  get('week').onclick = () => { period = 'week'; selection = null; categoryFilter = null; render(); };
+  get('allApps').onclick = () => openApps(get('allApps'));
+  get('allPauses').onclick = () => openPauses(get('allPauses'));
+  get('settings').onclick = () => {
+    const panel = dialog('Settings', 'This TV', get('settings'));
+    panel.append(button('App restrictions ›', 'secondary', () => openApps(get('settings'))),
+      button('Pause history ›', 'secondary', () => openPauses(get('settings'))));
+    panel.querySelector('button').focus();
+  };
+  // Arrow keys mirror a TV remote when the dashboard has focus.
+  tv.addEventListener('keydown', event => {
+    const directions = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    if (!directions[event.key] || !(document.activeElement instanceof HTMLButtonElement)) return;
+    const scope = get('dialog').open ? get('dialog') : tv;
+    const midpoint = element => {
+      const r = element.getBoundingClientRect();
+      return [r.x + r.width / 2, r.y + r.height / 2];
+    };
+    const [x, y] = midpoint(document.activeElement);
+    const [dx, dy] = directions[event.key];
+    let next, best = Infinity;
+    for (const candidate of scope.querySelectorAll('button')) {
+      if (!candidate.getClientRects().length) continue;
+      const [cx, cy] = midpoint(candidate);
+      const along = (cx - x) * dx + (cy - y) * dy;
+      const across = Math.abs((cx - x) * dy + (cy - y) * dx);
+      const score = along + across * 1.25;
+      if (along > 6 && score < best) { next = candidate; best = score; }
+    }
+    if (next) { event.preventDefault(); next.focus(); }
+  });
+  render();
+</script>
+</html>

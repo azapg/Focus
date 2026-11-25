@@ -1,0 +1,9 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/hab_widget_row" android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:paddingLeft="10dp" android:paddingTop="4dp" android:paddingRight="10dp"
+    android:paddingBottom="4dp" android:layout_marginTop="3dp" android:background="@drawable/widget_habit_row_bg">
+  <TextView android:id="@+id/hab_widget_name" android:layout_width="match_parent" android:layout_height="wrap_content"
+      android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:textSize="13sp" android:textColor="#FAFAFA" />
+  <TextView android:id="@+id/hab_widget_caption" android:layout_width="match_parent" android:layout_height="wrap_content"
+      android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:textSize="11sp" android:textColor="#8A8A8A" />
+</LinearLayout>

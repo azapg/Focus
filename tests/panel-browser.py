@@ -1,0 +1,280 @@
+"""Render the actual app UI with synthetic Tauri history; no Windows/DNS operations."""
+import asyncio
+
+from screenshot_browser import BUILD, capture_panel, fixture_browser, fixture_page
+
+MOCK = r'''(() => {
+  const day = new Date('2026-02-12T14:00:00Z'); day.setHours(0, 0, 0, 0);
+  const base = day.getTime(), m = 60000;
+  const row = (minute, duration, label, url, title, audible = false) => ({
+    s: base + minute * m,
+    e: base + (minute + duration) * m,
+    app: url ? 'Chrome' : label,
+    label,
+    source: url ? 'chromium_extension' : 'window_title',
+    ...(url ? { browser: { url, title, visibility: 'page', audible, tab_id: 1, window_id: 1, browser_pid: 123, host_pid: 456 } } : {}),
+  });
+  window.__rules = { version: 1, rules: [] };
+  window.__uncategorized = null;
+  window.__testHistory = {
+    now: base + 14 * 60 * m,
+    spans: [
+      row(540, 28, 'app.notion.com', 'https://app.notion.com/p/Seed-Library-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'Seed Library | Notion'),
+      row(568, 22, 'app.notion.com', 'https://app.notion.com/p/Greenhouse-Notes-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?p=REDACTED&t=123', 'Greenhouse Notes | Notion'),
+      row(590, 2, 'app.notion.com', 'https://app.notion.com/p/r-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'r | Notion'),
+      row(592, 42, 'VS Code'),
+      row(634, 18, 'github.com', 'https://github.com/example-org/seed-catalog/issues/8', 'Add seed packet labels · Issue #8 · example-org/seed-catalog · GitHub'),
+      row(652, 26, 'www.youtube.com', 'https://www.youtube.com/watch?v=demo', 'How to germinate marigolds - YouTube', true),
+      row(678, 12, 'Chrome'),
+      row(-1440 * 2 + 550, 35, 'VS Code'),
+      row(-1440 * 3 + 1430, 18, 'VS Code'),
+      row(-1440 * 4 + 900, 32, 'www.youtube.com', 'https://www.youtube.com/watch?v=demo', 'How to germinate marigolds - YouTube', true),
+      row(690, 14, 'newtool.example', 'https://newtool.example/workspace', 'Design sandbox'),
+    ],
+    peeks: [base + 640 * m, base + 670 * m],
+    pauses: [
+      { t: base + 652 * m, end: base + 662 * m, minutes: 10, reason: 'Find the seed swap time on Discord',
+        check_in: 'bored', rating: 1, rating_note: '<The schedule was already in my calendar>' },
+    ],
+  };
+  window.__calls = [];
+  window.__handlers = {};
+  window.__TAURI__ = {
+    core: {
+      invoke: async (c, args) => {
+        window.__calls.push({ c, args });
+        if (c === 'history') {
+          if (window.__delayStats) {
+            window.__delayStats = false;
+            await new Promise(resolve => { window.__releaseStats = resolve; });
+          }
+          return window.__testHistory;
+        }
+        if (c === 'startup_panel') return 'today';
+        if (c === 'peek_link') return args.url.endsWith('/explore') ? { refusal: 'permalink' }
+          : window.__peekReply || { snapshot: { site: 'X', text: 'The seed swap opens at noon. Bring labeled envelopes.' } };
+        if (c === 'judge_pause') return { id: 'ask-test', failure: 'configuration', decision: null,
+          scope_available: false, friction: { hold_ms: 2000, wait_ms: 0 }, manual_choices: [1] };
+        if (c === 'get_state') return { paused_at: 0, paused_until: 0, now: Date.now(), dry_run: true };
+        if (c === 'rate_pause') return { paused_at: 0, paused_until: 0, now: Date.now(), rating_prompt: null };
+        if (c === 'activity_rules_load') return structuredClone(window.__rules);
+        if (c === 'activity_rules_save') { window.__rules = structuredClone(args.rules); return null; }
+        if (c === 'activity_uncategorized_save') { window.__uncategorized = structuredClone(args.inbox); return null; }
+        return null;
+      },
+    },
+    event: { listen: async (name, handler) => { window.__handlers[name] = handler; return () => {}; } },
+  };
+})();'''
+
+
+async def main(output=None):
+  async with fixture_browser() as context:
+    await context.add_init_script(MOCK)
+    page = await fixture_page(context)
+    errors = []
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    await page.goto((BUILD / 'index.html').as_uri())
+    await page.locator('#panel.open').wait_for()
+    await page.wait_for_timeout(650)
+
+    # One-sentence hero: total screen time and building share; thin category bar + clickable legend.
+    assert await page.locator('[data-total]').inner_text() == '2h 44m'
+    assert await page.locator('[data-build-pct]').inner_text() == '1h 52m building'  # Notion 52m + VS Code 42m + GitHub 18m
+    assert await page.locator('.thin-bar .thin-seg').count() >= 2
+    assert await page.locator('.cat-leg button[data-dcat]').count() >= 2
+
+    # Today hides the noisy 24h timeline and legend completely.
+    assert await page.locator('#pTimelineSec').is_hidden()
+    await page.evaluate("window.__handlers.habits({payload: {rows: [], credit: 8, cap: 45}})")
+    await page.locator('.habit-credit').get_by_text('8m earned', exact=False).wait_for()
+    assert await page.get_by_text('2 peeks · 1 DNS pause', exact=True).is_visible()
+
+    # Screen time shows only icon, name, and time at rest; at least 5 rows inside the bento card.
+    assert await page.locator('#pApps details[data-fit]:not([hidden])').count() >= 5
+    assert await page.locator('#pApps .st-cat').count() == 0
+    # Time turns amber only when an app was mostly used with DNS off (YouTube: 10m of 26m is not mostly).
+    yt_time = page.locator('details.st', has=page.locator('summary', has_text='YouTube')).locator('.n').first
+    vscode_time = page.locator('details.st', has=page.locator('summary', has_text='VS Code')).locator('.n').first
+    assert int(await yt_time.get_attribute('data-dns-off')) == 600000
+    assert 'dns-off' not in (await yt_time.get_attribute('class'))
+    assert int(await vscode_time.get_attribute('data-dns-off')) == 0
+    # Websites carry a small globe; desktop programs don't.
+    assert await page.locator('details.st', has=page.locator('summary', has_text='GitHub')).locator('[data-src=web]').count() == 1
+    assert await page.locator('details.st', has=page.locator('summary', has_text='VS Code')).locator('.src-ico').count() == 0
+
+    # Notion is normalized (no app.notion.com) and expands into category meta + page titles without raw URLs.
+    notion = page.locator('#pApps details.st').filter(has=page.locator('summary', has_text='Notion'))
+    assert await notion.count() == 1
+    assert 'app.notion.com' not in await page.locator('#pApps').inner_text()
+    await notion.locator('summary').click()
+    assert 'Writing' in await notion.locator('.st-meta').inner_text()
+    notion_pages = await notion.locator('.cat-pages').inner_text()
+    assert 'Seed Library' in notion_pages and 'Greenhouse Notes' in notion_pages
+    assert 'https://' not in notion_pages
+
+    await capture_panel(page, output, 'browser-sites.png')
+
+    # "See all" opens the searchable Explorer view with All / Building / Drifting / DNS off filters.
+    await page.locator('[data-see-all]').click()
+    await page.locator('#explorerView').wait_for(state='visible')
+    assert await page.locator('#explorerView details.st').count() == 6
+    await capture_panel(page, output, 'panel-explorer.png')
+    await page.locator('#expSearchIn').fill('notion')
+    assert await page.locator('#explorerView details.st').count() == 1
+    await page.locator('[data-exp-back]').click()
+    await page.locator('#statsMain').wait_for(state='visible')
+
+    # Refresh preserves expanded Notion details.
+    await page.evaluate("Panel.render((c,a)=>window.__TAURI__.core.invoke(c,a),'today')")
+    assert await notion.get_attribute('open') is not None, 'refresh collapsed page details'
+
+    # Pause audit flags 10m of unmentioned YouTube during a Discord pause as drift.
+    pauses_txt = await page.locator('#pPauses').inner_text()
+    assert '1 drifted' in pauses_txt and 'YouTube' in pauses_txt
+    assert 'ending on youtube.com' in pauses_txt and 'Check-ins by hour' in pauses_txt
+    assert 'Bored · 1/5 · <The schedule was already in my calendar>' in pauses_txt
+    assert await page.locator('[data-pause-count]').count() == 0
+    assert await page.locator('.dl-ring[data-dns-limit]').count() == 1
+    # A pause opens to show what was asked for versus how long DNS was off.
+    await page.locator('[data-pz]').first.click()
+    assert 'Asked for 10m' in await page.locator('.pz-more:not(.pz-feedback)').inner_text()
+
+    # Uncategorized inbox is still saved for agent review.
+    inbox = await page.evaluate('window.__uncategorized')
+    assert inbox and len(inbox['items']) == 1 and inbox['items'][0]['value'] == 'newtool.example'
+
+    # Range switching (Week shows quiet 7-day stacked bars with amber DNS-off caps) before XSS mutation.
+    await page.locator('[data-r=week]').click()
+    await page.wait_for_timeout(150)
+    assert await page.locator('#pTimelineSec').is_visible()
+    assert await page.locator('#pLegend').is_hidden()
+    assert await page.locator('.simple-week .col').count() == 7
+    assert 'DNS off' in await page.locator('.wk-key').inner_text()
+    await capture_panel(page, output, 'panel-week.png')
+    await page.locator('[data-r=today]').click()
+    await page.wait_for_timeout(150)
+    assert await page.locator('#pTimelineSec').is_hidden()
+
+    # Captured title/label markup remains plain text (no XSS).
+    await page.evaluate("window.__testHistory.spans[0].browser.title='<img src=x onerror=window.__injected=true>';window.__testHistory.spans[0].label='__proto__'")
+    await page.evaluate("Panel.render((c,a)=>window.__TAURI__.core.invoke(c,a),'today')")
+    assert await page.locator('.cat-pages img,.cat-pages script').count() == 0
+    assert await page.evaluate('window.__injected') is None
+
+    dock_bounds = await page.locator('.w').bounding_box()
+    stats_bounds = await page.locator('#panel').bounding_box()
+    await page.evaluate("""() => {
+      const now = Date.now();
+      window.__handlers.state({payload: {paused_at: 0, paused_until: 0, now,
+        rating_prompt: {paused_at: 17, pause_id: 42, ended_at: now, expires_at: now + 60000}}});
+    }""")
+    rating = page.get_by_role('region',name='Was that worth it?')
+    await rating.wait_for(state='visible')
+    assert await rating.evaluate("(element) => getComputedStyle(element).position") == 'fixed'
+    assert await page.locator('.w').bounding_box() == dock_bounds
+    # Stats can shrink to leave room for the rating while staying anchored.
+    await rating.evaluate("""(element) => {
+      const stats = document.getElementById('panel').getBoundingClientRect();
+      if (stats.bottom > element.getBoundingClientRect().top)
+        throw new Error('Pause rating overlaps Stats');
+    }""")
+    resized_stats = await page.locator('#panel').bounding_box()
+    assert all(resized_stats[key] == stats_bounds[key] for key in ('x', 'y', 'width'))
+    assert 0 < resized_stats['height'] <= stats_bounds['height']
+    assert await rating.locator('button[aria-label="Dismiss rating"] svg.lucide-x').count() == 1
+    await rating.get_by_role('textbox',name='Optional rating note').fill('Nothing relevant on X')
+    await rating.get_by_role('button',name='1 out of 5').click()
+    await rating.wait_for(state='hidden')
+    args = await page.evaluate("window.__calls.find(c => c.c === 'rate_pause').args")
+    assert args == {'pausedAt':17, 'pauseId':42, 'rating':1, 'note':'Nothing relevant on X'}
+
+    # An in-flight Stats open must stay closed once Ask replaces it.
+    await page.keyboard.press('Escape')
+    await page.evaluate("window.__handlers['cursor-in']({})")
+    await page.locator('.w .amb').wait_for()
+    await page.evaluate("""() => {
+      window.__delayStats = true;
+      document.querySelector('.w .amb').click();
+    }""")
+    await page.wait_for_function("typeof window.__releaseStats === 'function'")
+    await page.locator('.w .judge').click()
+    link = page.locator('#dockPauseJudge textarea')
+    button = page.locator('#dockPauseJudge button[type=submit]')
+    await link.fill('https://x.com/explore')
+    await button.click()
+    await page.get_by_text('Use a direct link to a public post.').wait_for()
+    await link.fill('  https://x.com/example_garden/status/1234567890  ')
+    await link.press('Enter')
+    card = page.locator('.dock-peek')
+    await card.wait_for()
+    assert await card.locator('a, button, iframe, video').count() == 0
+    assert await link.count() == 0
+    assert await card.evaluate("""(card) => {
+      const dock = document.querySelector('.w');
+      return getComputedStyle(dock).visibility === 'visible'
+        && card.getBoundingClientRect().top >= dock.getBoundingClientRect().bottom
+        && card.getBoundingClientRect().top === document.querySelector('#panel').offsetTop;
+    }""")
+    assert await page.evaluate("""window.__calls.filter(c => c.c === 'peek_link').map(c => c.args.url)""") == [
+      'https://x.com/explore', 'https://x.com/example_garden/status/1234567890',
+    ]
+    assert not await page.evaluate("window.__calls.some(c => c.c === 'judge_pause')")
+    if output:
+      await card.screenshot(path=output / 'peek-laptop.png', animations="disabled")
+    await page.evaluate("""async () => {
+      window.__releaseStats();
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+    }""")
+    assert 'open' not in (await page.locator('#panel').get_attribute('class'))
+    # Escape also works after keyboard focus moves from the post to the dock.
+    await page.keyboard.press('Shift+Tab')
+    assert await page.evaluate("document.activeElement.closest('.w') !== null")
+    await page.keyboard.press('Escape')
+    await card.wait_for(state='hidden')
+    assert 'open' not in (await page.locator('#panel').get_attribute('class'))
+
+    await page.evaluate("window.__handlers['cursor-in']({})")
+    dock_ask = page.locator('.w .judge')
+    await dock_ask.press('Enter')
+    await link.fill('https://x.com/example_garden/status/1234567890')
+    await link.press('Enter')
+    await card.wait_for()
+    focus_returns = await page.evaluate("window.__calls.filter(c => c.c === 'return_focus').length")
+    await dock_ask.press('Enter')
+    await link.wait_for()
+    await card.wait_for(state='hidden')
+    assert await page.evaluate("window.__calls.filter(c => c.c === 'return_focus').length") == focus_returns
+
+    await link.fill('https://x.com/example_garden/status/1234567890')
+    await link.press('Enter')
+    await card.wait_for()
+    await page.locator('.w .chips button[data-m="1"]').press('Enter')
+    await card.wait_for(state='hidden')
+    await page.evaluate("window.__handlers['cursor-out']({})")
+    await page.wait_for_timeout(450)
+    assert await page.locator('.w').get_attribute('data-state') == 'form'
+    check_in = page.locator('#dockCheckIn button').first
+    await check_in.click()
+    assert await check_in.get_attribute('aria-pressed') == 'true'
+    await page.locator('.w .reason input').press('Escape')
+
+    await page.evaluate("window.__handlers['cursor-in']({})")
+    await dock_ask.click()
+    await link.fill('Read https://x.com/test/status/12')
+    await button.click()
+    await page.get_by_text('Check your Gateway settings.').wait_for()
+    if output:
+      await page.mouse.move(0, 700)
+      await page.wait_for_timeout(300)
+      await page.locator('.judge-sheet').screenshot(
+        path=output / 'ask-retry.png', animations='disabled', caret='hide', omit_background=True,
+      )
+    assert await page.evaluate("window.__calls.filter(c => c.c === 'judge_pause').length") == 1
+    assert not any(c['c'] in ['pause', 'resume', 'lock'] for c in await page.evaluate('window.__calls'))
+    assert not errors, errors
+    print('PASS: v8 OLED desktop (thin bar, clickable legend, bento cards, searchable Explorer, Week stacked bars, openable pauses, XSS escaping, Esc) verified.')
+
+if __name__ == "__main__":
+  asyncio.run(main())

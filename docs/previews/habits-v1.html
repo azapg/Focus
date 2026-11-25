@@ -1,0 +1,2027 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FocusDNS · Habits v1</title>
+<style>
+  :root {
+    --d-bg: #000000;
+    --d-rail: #030303;
+    --d-card: #060607;
+    --d-card-2: #0a0a0c;
+    --d-active: #222225;
+    --d-active-bd: #3a3a3f;
+    --d-border: rgba(255, 255, 255, 0.085);
+    --d-border-hi: rgba(255, 255, 255, 0.14);
+    --d-div: rgba(255, 255, 255, 0.06);
+    --d-fg: #fafafa;
+    --d-fg2: #d4d4d8;
+    --d-sub: #a1a1aa;
+    --d-mut: #71717a;
+    --d-dim: #52525b;
+    --d-amber: #c27a12;
+    --d-amber-hi: #e09f3e;
+    --d-amber-tv: #efb461;
+    --d-amber-bd: rgba(194, 122, 18, 0.38);
+    --ui: var(--font-sans, "Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif);
+    --ease: cubic-bezier(.22, 1, .36, 1);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--ui);
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: var(--foreground, #fafafa);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  input { user-select: text; -webkit-user-select: text; }
+  button:focus-visible, input:focus-visible { outline: 1px solid #52525b; outline-offset: 2px; }
+  [hidden] { display: none !important; }
+
+  .shell {
+    width: 100%;
+    max-width: 1080px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* ---- Prototype Control Strip ---- */
+  .ctrl-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    border-radius: var(--radius, 12px);
+    background: var(--card, #060607);
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.085));
+  }
+
+  .seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 999px;
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.09));
+    background: rgba(255, 255, 255, 0.02);
+    flex-wrap: wrap;
+  }
+  .seg button {
+    border: 0;
+    background: transparent;
+    color: var(--muted-foreground, #8a8a90);
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .seg button:hover { color: var(--foreground, #fafafa); }
+  .seg button.on { background: #222225; color: #fafafa; }
+  .needs-attention { color: var(--d-amber-hi) !important; }
+
+  .ctrl-right { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .quiet-btn {
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--muted-foreground, #8a8a90);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .quiet-btn:hover { color: var(--foreground, #fafafa); background: rgba(255, 255, 255, 0.06); }
+  .quiet-btn.on { background: #222225; border-color: #3a3a3f; color: #fafafa; }
+
+  .stage-rel { position: relative; }
+
+  /* =========================================================
+     SWIPEABLE FLOATING TOASTS & SYSTEM NOTIFICATIONS
+     ========================================================= */
+  .swipeable {
+    touch-action: pan-y;
+    cursor: grab;
+    will-change: transform, opacity;
+  }
+  .swipeable:active { cursor: grabbing; }
+
+  .toast-overlay-bottom {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(310px, calc(100% - 28px));
+    z-index: 45;
+    animation: toastUp 200ms var(--ease);
+  }
+  @keyframes toastUp {
+    from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+
+  .undo-toast {
+    position: relative;
+    overflow: hidden;
+    background: rgba(12, 12, 15, 0.97);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.92);
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--d-fg);
+    font-size: 12px;
+  }
+  .undo-meta { color: var(--d-sub); font-size: 11.5px; margin-left: 6px; }
+  .undo-btn {
+    border: 0;
+    background: var(--d-active);
+    color: var(--d-fg);
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 4.5px 10px;
+    border-radius: 8px;
+    flex: none;
+  }
+  .undo-btn:hover { background: #2c2c31; }
+  .undo-bar {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    width: 100%;
+    background: rgba(250, 250, 250, 0.45);
+    transform-origin: left;
+    animation: undoDrain 5s linear forwards;
+  }
+  @keyframes undoDrain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+  /* Android System Notification (matches FocusNotifications.java: ic_stat_focus + Focus + title + quiet body) */
+  .sys-notif {
+    background: #16161a;
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    border-radius: 20px;
+    padding: 12px 14px;
+    color: #fafafa;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.86);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    text-align: left;
+    width: 100%;
+  }
+  .sys-notif.amber { border-color: var(--d-amber-bd); }
+  .sys-notif.shade { background: #141418; box-shadow: none; }
+  .sys-notif.lock { background: rgba(20, 20, 24, 0.90); backdrop-filter: blur(16px); }
+  .sn-app {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #a1a1aa;
+  }
+  .sn-mark { width: 13px; height: 13px; flex: none; }
+  .sn-title { font-size: 13px; font-weight: 500; color: #fafafa; line-height: 1.3; }
+  .sn-body { font-size: 12px; color: #a1a1aa; line-height: 1.35; }
+  .sn-body.amber { color: var(--d-amber-hi); }
+
+  /* =========================================================
+     TEXT-ONLY ATOMS HOLD-TO-COMPLETE HABIT CARDS
+     ========================================================= */
+  .habit-stack { display: flex; flex-direction: column; gap: 6px; }
+
+  .hold-card {
+    position: relative;
+    overflow: hidden;
+    border-radius: 11px;
+    background: var(--d-card-2);
+    border: 1px solid var(--d-border);
+    transition: transform 160ms var(--ease), border-color 180ms ease, opacity 280ms var(--ease), max-height 300ms var(--ease), margin 300ms var(--ease);
+    max-height: 140px;
+    touch-action: none;
+    cursor: pointer;
+  }
+  .hold-card:hover { border-color: rgba(255, 255, 255, 0.14); }
+  .hold-card.is-holding { transform: scale(0.988); border-color: rgba(255, 255, 255, 0.22); }
+  .hold-card.is-holding.is-amber { border-color: var(--d-amber-bd); }
+  .hold-card.is-completing { border-color: rgba(255, 255, 255, 0.30); }
+  .hold-card.is-leaving {
+    opacity: 0;
+    transform: translateX(18px) scale(0.97);
+    max-height: 0;
+    margin-top: -6px;
+    border-color: transparent;
+    pointer-events: none;
+  }
+
+  .hold-fill {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, #1d1d22 0%, #2b2b32 100%);
+    transform-origin: left center;
+    transform: scaleX(0);
+    pointer-events: none;
+    will-change: transform;
+  }
+  .hold-card.is-amber .hold-fill {
+    background: linear-gradient(90deg, rgba(194, 122, 18, 0.20) 0%, rgba(194, 122, 18, 0.35) 100%);
+  }
+  .hold-card.is-completing .hold-fill {
+    background: rgba(250, 250, 250, 0.22);
+    transform: scaleX(1) !important;
+  }
+
+  .hold-inner {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+  }
+  .hold-card.compact .hold-inner { padding: 10px 12px; gap: 10px; }
+
+  .hab-copy { flex: 1; min-width: 0; }
+  .hab-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--d-fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hab-sub {
+    font-size: 11px;
+    color: var(--d-mut);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hab-sub .amber { color: var(--d-amber-hi); }
+
+  .hab-nums {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    flex: none;
+    font-size: 11.5px;
+    color: var(--d-mut);
+  }
+  .streak-btn {
+    border: 0;
+    background: transparent;
+    padding: 2px 4px;
+    border-radius: 5px;
+    color: var(--d-fg2);
+    font-weight: 500;
+  }
+  .streak-btn:hover { background: rgba(255, 255, 255, 0.08); }
+  .streak-btn.amber { color: var(--d-amber-hi); }
+
+  /* Completed quiet text list */
+  .done-section {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--d-div);
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .done-toggle {
+    border: 0;
+    background: transparent;
+    color: var(--d-mut);
+    font-size: 11px;
+    padding: 3px 2px 5px;
+    align-self: flex-start;
+  }
+  .done-toggle:hover { color: var(--d-sub); }
+  .done-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 7px 4px;
+    border-radius: 7px;
+    color: var(--d-sub);
+    font-size: 12px;
+    border: 0;
+    background: transparent;
+    width: 100%;
+    text-align: left;
+  }
+  .done-row:hover { background: rgba(255, 255, 255, 0.03); }
+  .done-right { display: flex; align-items: center; gap: 11px; font-size: 11px; color: var(--d-mut); flex: none; }
+
+  /* Expanded 7-day never-miss-twice strip + optional photo check */
+  .hab-detail {
+    padding: 11px 13px;
+    margin-top: 2px;
+    border-radius: 10px;
+    background: #08080a;
+    border: 1px solid var(--d-div);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .day-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+  .d-cell { display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 10px; color: var(--d-mut); }
+  .d-dot { width: 10px; height: 10px; border-radius: 50%; background: #141417; }
+  .d-dot.done { background: #d4d4d8; }
+  .d-dot.miss1 { background: transparent; border: 1.5px solid #71717a; }
+  .d-dot.due { background: transparent; border: 1.25px dashed #52525b; }
+  .d-dot.off { width: 4px; height: 4px; margin: 3px 0; background: #27272a; }
+
+  .photo-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .photo-box {
+    border-radius: 8px;
+    background: #040405;
+    border: 1px solid var(--d-border);
+    padding: 7px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 10.5px;
+    color: var(--d-mut);
+  }
+  .photo-box .ph-cap { display: flex; justify-content: space-between; }
+
+  /* =========================================================
+     LAPTOP SURFACE (Top Pill Delivery + OLED Panel)
+     ========================================================= */
+  .laptop-stage {
+    background: radial-gradient(120% 90% at 50% 0%, #0f0f13 0%, #040405 60%, #010102 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 14px 12px 18px;
+    color: var(--d-fg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .pill-slot {
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    position: relative;
+  }
+
+  .win-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 5px 6px;
+    min-height: 36px;
+    padding: 4px 10px;
+    border-radius: 18px;
+    background: #060608;
+    border: 1px solid var(--d-border-hi);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 10px 28px rgba(0, 0, 0, 0.78);
+    color: var(--d-fg);
+    font-size: 12px;
+    max-width: 100%;
+    transition: border-color 180ms ease;
+  }
+  .win-pill.amber {
+    border-color: var(--d-amber-bd);
+    box-shadow: inset 0 1px 0 rgba(224, 159, 62, 0.18), 0 10px 28px rgba(0, 0, 0, 0.88);
+  }
+  .win-pill.nudge-pill {
+    padding: 4px 14px;
+    gap: 8px;
+  }
+  .nudge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--d-amber-hi); flex: none; }
+  .nudge-dot.live { background: #fafafa; box-shadow: 0 0 0 3px rgba(250, 250, 250, 0.15); }
+  .nudge-pill-text { font-size: 12px; color: var(--d-fg); font-weight: 500; }
+  .nudge-pill-sub { font-size: 11.5px; color: var(--d-sub); }
+
+  .p-amb {
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--d-mut);
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+  .p-amb b { color: var(--d-fg); font-weight: 500; }
+  .p-div { width: 1px; height: 15px; background: rgba(255, 255, 255, 0.10); flex: none; }
+  .p-chips { display: inline-flex; gap: 4px; }
+  .p-btn {
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: transparent;
+    color: var(--d-fg);
+    font-size: 11.5px;
+    padding: 0 9px;
+    white-space: nowrap;
+  }
+  .p-btn:hover { background: rgba(255, 255, 255, 0.10); }
+  .p-btn.on { background: var(--d-active); border-color: var(--d-active-bd); }
+
+  /* Floating pill quick-check popover (zero layout jump, swipeable) */
+  .pill-pop-wrap {
+    position: absolute;
+    top: 44px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(360px, calc(100% - 16px));
+    z-index: 40;
+    animation: toastIn 180ms var(--ease);
+  }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+  .pill-pop {
+    background: rgba(10, 10, 13, 0.97);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 14px;
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.95);
+    padding: 11px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .oled-panel {
+    width: 100%;
+    max-width: 716px;
+    background: var(--d-bg);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    color: var(--d-fg);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.84);
+    overflow: hidden;
+  }
+
+  .focus-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 13px 16px 8px;
+    gap: 10px;
+  }
+  .focus-period {
+    display: inline-flex;
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    border-radius: 999px;
+    padding: 2px;
+    background: rgba(6, 6, 8, 0.62);
+    gap: 2px;
+  }
+  .focus-period button {
+    border: 0;
+    background: transparent;
+    color: var(--d-mut);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 12px;
+    border-radius: 999px;
+  }
+  .focus-period button.on { background: rgba(255, 255, 255, 0.11); color: #fafafa; }
+
+  .text-act {
+    border: 0;
+    background: transparent;
+    color: var(--d-sub);
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: 7px;
+  }
+  .text-act:hover { background: rgba(255, 255, 255, 0.07); color: var(--d-fg); }
+
+  .stats-body { padding: 4px 16px 16px; }
+  .hero-line { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+  .hero-total { font-size: 27px; font-weight: 600; letter-spacing: -0.025em; line-height: 1; }
+  .hero-sent { color: var(--d-mut); font-size: 12.5px; }
+  .hero-sent b { color: var(--d-fg); font-weight: 600; }
+  .hero-drift { color: var(--d-sub); font-weight: 500; }
+
+  .thin-bar {
+    display: flex;
+    gap: 2px;
+    height: 8px;
+    margin-top: 11px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #141416;
+  }
+  .thin-seg { height: 100%; border-radius: 2px; min-width: 4px; }
+
+  .bento-card {
+    background: var(--d-card);
+    border: 1px solid var(--d-border);
+    border-radius: 13px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .bento-pad { padding: 12px 13px 13px; }
+  .bento-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 11px 13px 8px;
+  }
+  .bento-pad .bento-head { padding: 0 0 10px; }
+  .bento-title { font-size: 11.5px; font-weight: 500; color: var(--d-mut); }
+  .bento-title b { color: var(--d-fg); font-weight: 500; margin-left: 5px; }
+  .bento-grid { display: grid; grid-template-columns: 1.04fr 0.96fr; gap: 12px; margin-top: 12px; }
+  .bento-full { margin-top: 14px; }
+
+  .st-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8.5px 13px;
+    position: relative;
+  }
+  .st-row + .st-row::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    right: 13px;
+    top: 0;
+    height: 1px;
+    background: var(--d-div);
+  }
+  .st-name { font-size: 12.5px; color: var(--d-fg); }
+  .st-time { font-size: 12.5px; font-weight: 500; color: var(--d-fg); }
+  .st-time.off { color: var(--d-sub); }
+
+  .ring-box { display: flex; align-items: center; gap: 12px; padding: 4px 13px 12px; }
+  .ring-svg { width: 42px; height: 42px; flex: none; }
+  .ring-svg .trk { fill: none; stroke: #202024; stroke-width: 5.5; }
+  .ring-svg .fill { fill: none; stroke: #a1a1aa; stroke-width: 5.5; stroke-linecap: round; transition: stroke-dasharray 260ms ease; }
+  .ring-txt b { display: block; font-size: 13px; font-weight: 600; color: var(--d-fg); }
+  .ring-txt span { display: block; font-size: 11px; color: var(--d-mut); margin-top: 2px; }
+
+  .credit-line {
+    border-top: 1px solid var(--d-div);
+    padding: 9px 13px;
+    font-size: 11.5px;
+    color: var(--d-mut);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .credit-line b { color: var(--d-fg2); font-weight: 500; }
+
+  .pz-row {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 9px 13px;
+    border-top: 1px solid var(--d-div);
+    align-items: baseline;
+  }
+  .pz-t { font-size: 10.5px; color: var(--d-sub); }
+  .pz-why { font-size: 12px; color: var(--d-fg); }
+  .pz-did { font-size: 10.5px; color: var(--d-mut); margin-top: 2px; }
+  .pz-did .drift { color: var(--d-sub); }
+  .pz-m { font-size: 11px; color: var(--d-sub); }
+
+  .wk-bars { display: flex; align-items: flex-end; gap: 8px; height: 98px; padding: 4px 13px 11px; }
+  .wk-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; }
+  .wk-v { font-size: 10.5px; color: var(--d-sub); }
+  .wk-stack { flex: 1; width: 100%; max-width: 22px; display: flex; flex-direction: column; justify-content: flex-end; border-radius: 3px; overflow: hidden; }
+  .wk-on { background: #3f3f46; width: 100%; display: block; }
+  .wk-off { background: #71717a; width: 100%; display: block; }
+  .wk-d { font-size: 10.5px; color: var(--d-mut); }
+  .wk-d.today { color: var(--d-fg); font-weight: 600; }
+
+  /* Settings & Text-Only Habit Editor */
+  .t3-set { display: grid; grid-template-columns: 150px minmax(0, 1fr); min-height: 390px; background: var(--d-bg); }
+  .t3-rail { background: var(--d-rail); border-right: 1px solid var(--d-div); padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
+  .t3-nav { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 6.5px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--d-sub); font-size: 12px; text-align: left; }
+  .t3-nav:hover { background: rgba(255, 255, 255, 0.05); color: var(--d-fg); }
+  .t3-nav.on { background: rgba(255, 255, 255, 0.10); color: var(--d-fg); font-weight: 500; }
+  .t3-crumb { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--d-div); font-size: 12px; color: var(--d-mut); }
+  .t3-crumb b { color: var(--d-fg); font-weight: 500; }
+  .t3-pane { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 14px; }
+  .t3-card { background: var(--d-card); border: 1px solid var(--d-border); border-radius: 11px; overflow: hidden; }
+  .t3-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 13px; position: relative; }
+  .t3-row + .t3-row::before { content: ""; position: absolute; left: 13px; right: 13px; top: 0; height: 1px; background: var(--d-div); }
+  .t3-row-title { font-size: 12.5px; font-weight: 500; color: var(--d-fg); }
+  .t3-row-desc { font-size: 11px; color: var(--d-mut); margin-top: 1.5px; }
+  .t3-seg { display: inline-flex; padding: 2px; border-radius: 8px; background: #08080a; border: 1px solid rgba(255, 255, 255, 0.10); }
+  .t3-seg button { border: 0; background: transparent; color: var(--d-mut); font-size: 11px; font-weight: 500; padding: 3.5px 8px; border-radius: 6px; }
+  .t3-seg button.on { background: var(--d-active); color: #fafafa; }
+  .t3-btn { border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.04); color: var(--d-fg); font-size: 11px; font-weight: 500; padding: 5px 10px; border-radius: 7px; white-space: nowrap; }
+  .t3-btn:hover { background: rgba(255, 255, 255, 0.10); }
+  .t3-btn.primary { background: var(--d-active); border-color: var(--d-active-bd); }
+
+  .editor-box {
+    background: #08080a;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 11px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .ed-input {
+    width: 100%;
+    background: #101013;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    color: var(--d-fg);
+    padding: 7px 10px;
+    font-size: 12.5px;
+    outline: none;
+  }
+  .ed-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .ed-lbl { font-size: 11px; color: var(--d-sub); }
+  .day-pick { display: inline-flex; gap: 4px; }
+  .day-btn { width: 26px; height: 26px; border-radius: 999px; border: 1px solid var(--d-border); background: transparent; color: var(--d-mut); font-size: 11px; }
+  .day-btn.on { background: var(--d-active); border-color: var(--d-active-bd); color: var(--d-fg); }
+
+  /* =========================================================
+     PHONE + WIDGET SURFACE
+     ========================================================= */
+  .phone-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 344px) minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+  }
+  .phone-frame {
+    position: relative;
+    background: #000000;
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 30px;
+    overflow: hidden;
+    box-shadow: 0 20px 44px rgba(0, 0, 0, 0.78);
+    color: var(--d-fg);
+    display: flex;
+    flex-direction: column;
+  }
+  .phone-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 20px 4px;
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .phone-body {
+    padding: 8px 15px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 13px;
+    min-height: 492px;
+  }
+  .phone-dock-wrap {
+    padding: 10px 15px 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .phone-capsule {
+    display: inline-flex;
+    padding: 3.5px;
+    border-radius: 999px;
+    background: rgba(8, 8, 10, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+  }
+  .phone-capsule button {
+    border: 0;
+    background: transparent;
+    color: var(--d-mut);
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 6px 14px;
+    border-radius: 999px;
+  }
+  .phone-capsule button.on { background: var(--d-active); color: var(--d-fg); }
+  .phone-pause-btn {
+    height: 35px;
+    padding: 0 14px;
+    border-radius: 999px;
+    background: rgba(8, 8, 10, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    color: var(--d-fg);
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+
+  /* Muted host app (e.g. X feed) behind heads-up notification */
+  .host-app {
+    padding: 10px 16px 18px;
+    min-height: 552px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    background: #000000;
+  }
+  .host-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+    color: #52525b;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #141417;
+  }
+  .host-post {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid #121215;
+  }
+  .sk-line { height: 8px; border-radius: 4px; background: #141417; }
+  .sk-box { height: 82px; border-radius: 10px; background: #0c0c0f; border: 1px solid #18181b; margin-top: 3px; }
+
+  .heads-up-overlay {
+    position: absolute;
+    top: 38px;
+    left: 11px;
+    right: 11px;
+    z-index: 40;
+    animation: headsIn 200ms var(--ease);
+  }
+  @keyframes headsIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .widget-stage {
+    position: relative;
+    background: radial-gradient(120% 100% at 20% 0%, #141418 0%, #08080a 65%, #030304 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 16px;
+    color: var(--d-fg);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .android-widget {
+    background: #0E0E10;
+    border: 1px solid #262626;
+    border-radius: 22px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+  }
+  .aw-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #8A8A8A;
+    padding: 0 2px 2px;
+  }
+  .aw-head b { color: #FAFAFA; font-weight: 500; }
+
+  .widget-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+  .aw-compact {
+    position: relative;
+    overflow: hidden;
+    background: #0E0E10;
+    border: 1px solid #262626;
+    border-radius: 22px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 116px;
+    min-width: 0;
+  }
+  .aw-compact-inner {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 10px;
+    flex: 1;
+  }
+  .aw-big { font-size: 25px; font-weight: 600; color: #FAFAFA; line-height: 1; letter-spacing: -0.02em; }
+  .aw-sub { font-size: 11px; color: #8A8A8A; }
+
+  /* =========================================================
+     SYSTEM NOTIFICATIONS SURFACE (Heads-up, Shade, Lock Screen, Laptop Pill)
+     ========================================================= */
+  .notif-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .notif-card {
+    background: #000000;
+    border: 1px solid var(--d-border);
+    border-radius: 16px;
+    padding: 14px;
+    color: var(--d-fg);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 230px;
+    position: relative;
+    overflow: hidden;
+  }
+  .notif-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--d-mut);
+  }
+  .notif-label b { color: var(--d-sub); font-weight: 500; }
+
+  .lock-clock {
+    text-align: center;
+    padding: 14px 0 8px;
+  }
+  .lock-time { font-size: 38px; font-weight: 500; letter-spacing: -0.03em; line-height: 1; color: #fafafa; }
+  .lock-date { font-size: 12px; color: var(--d-sub); margin-top: 5px; }
+
+  .shade-mock {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .shade-other {
+    background: #0d0d10;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 18px;
+    padding: 11px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    opacity: 0.55;
+  }
+
+  .laptop-bar-mock {
+    background: #09090b;
+    border: 1px solid var(--d-border);
+    border-radius: 12px;
+    padding: 16px 12px 34px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    flex: 1;
+  }
+  .laptop-host-lines {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 8px;
+    opacity: 0.45;
+  }
+
+  .silent-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--d-dim);
+    font-size: 12px;
+    padding: 18px 0;
+  }
+
+  /* =========================================================
+     TV SURFACE (TEXT-ONLY 10-FOOT OLED)
+     ========================================================= */
+  .tv-surface {
+    position: relative;
+    background: #000000;
+    color: #fafafa;
+    border: 1px solid #202024;
+    border-radius: 16px;
+    padding: 20px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .tv-head { display: flex; align-items: center; justify-content: space-between; }
+  .tv-brand { font-size: 15px; font-weight: 500; }
+  .tv-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 12px; }
+  .tv-panel { background: #060607; border: 1px solid #202024; border-radius: 12px; padding: 13px; display: flex; flex-direction: column; gap: 8px; }
+  .tv-app-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 6px; font-size: 13px; }
+  .tv-app-row + .tv-app-row { border-top: 1px solid #141417; }
+
+  @media (max-width: 680px) {
+    .bento-grid, .phone-grid, .notif-grid, .tv-grid, .t3-set { grid-template-columns: 1fr; }
+    .t3-rail { border-right: 0; border-bottom: 1px solid var(--d-div); flex-direction: row; flex-wrap: wrap; }
+    .widget-pair { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="shell" id="app">
+  <div class="ctrl-bar">
+    <div class="seg" role="tablist" aria-label="Surface">
+      <button class="on" data-surface="laptop" role="tab">Laptop</button>
+      <button data-surface="phone" role="tab">Phone &amp; Widget</button>
+      <button data-surface="notifs" role="tab">Notifications</button>
+      <button data-surface="tv" role="tab">TV</button>
+    </div>
+    <div class="ctrl-right">
+      <div class="seg" aria-label="Nudge">
+        <button class="on" data-nudge="none">Normal</button>
+        <button class="warn" data-nudge="gentle">Nudge</button>
+        <button class="warn" data-nudge="locked">Feeds locked</button>
+        <button data-nudge="agents">Agents</button>
+      </div>
+      <button class="quiet-btn" id="allDoneBtn">All done</button>
+      <button class="quiet-btn" id="resetBtn">Reset</button>
+    </div>
+  </div>
+
+  <div id="stage"></div>
+</div>
+
+<script>
+(() => {
+  /* FocusDNS Android notification status bar mark (android/res/drawable/ic_stat_focus.xml) */
+  const FOCUS_STAT_MARK = '<svg class="sn-mark" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-opacity="0.35" stroke-width="2.6" d="M12,3.8a8.2,8.2 0,1 0,0 16.4a8.2,8.2 0,1 0,0 -16.4"/><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" d="M12,3.8A8.2,8.2 0,1 1,3.8 12"/><path fill="currentColor" d="M12,9.6a2.4,2.4 0,1 0,0 4.8a2.4,2.4 0,1 0,0 -4.8Z"/></svg>';
+
+  const DAYS_LBL = ['Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Mon'];
+  const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const BASE_DNS_MIN = 45;
+  const DNS_OFF_MIN = 10;
+  const HOLD_MS = 650;
+
+  const INITIAL_HABITS = [
+    {
+      id: 'dishes', name: 'Wash the dishes',
+      cadence: 'daily', cadenceText: 'Daily · 20:00', durationMin: 5, rewardMin: 10,
+      streak: 12, streakUnit: 'd', grace: true, overdue: false, doneToday: false,
+      awayMin: 6, week: ['done', 'done', 'done', 'done', 'done', 'miss1', 'due']
+    },
+    {
+      id: 'laundry', name: 'Laundry',
+      cadence: 'weekly', cadenceText: 'Wed, Sun', durationMin: 15, rewardMin: 15,
+      streak: 4, streakUnit: 'w', grace: false, overdue: true, doneToday: false,
+      awayMin: 14, week: ['off', 'done', 'off', 'off', 'off', 'miss1', 'due']
+    },
+    {
+      id: 'desk', name: 'Clear desk',
+      cadence: 'daily', cadenceText: 'Daily · 18:30', durationMin: 5, rewardMin: 5,
+      streak: 3, streakUnit: 'd', grace: false, overdue: false, doneToday: false,
+      awayMin: 5, week: ['off', 'off', 'off', 'done', 'done', 'done', 'due']
+    },
+    {
+      id: 'sweep', name: 'Sweep the floor',
+      cadence: 'every_n', cadenceText: 'Every 2 days', durationMin: 12, rewardMin: 10,
+      streak: 6, streakUnit: '×', grace: false, overdue: false, doneToday: true,
+      awayMin: 11, week: ['done', 'off', 'done', 'off', 'done', 'off', 'done']
+    },
+    {
+      id: 'walk', name: 'Walk outside',
+      cadence: 'daily', cadenceText: 'Daily · 08:30', durationMin: 15, rewardMin: 5,
+      streak: 9, streakUnit: 'd', grace: false, overdue: false, doneToday: true,
+      awayMin: 18, week: ['done', 'done', 'done', 'done', 'done', 'done', 'done']
+    }
+  ];
+
+  const APPS = [
+    { name: 'T3 Code', time: '1h 12m', off: false },
+    { name: 'Notion', time: '40m', off: false },
+    { name: 'YouTube', time: '18m', off: true },
+    { name: 'WhatsApp', time: '16m', off: false },
+    { name: 'X', time: '8m', off: true }
+  ];
+
+  const WEEK_BARS = [
+    { d: 'Tue', total: '3h', onH: 46, offH: 6 },
+    { d: 'Wed', total: '4h', onH: 58, offH: 9 },
+    { d: 'Thu', total: '2h', onH: 36, offH: 0 },
+    { d: 'Fri', total: '4h', onH: 52, offH: 11 },
+    { d: 'Sat', total: '3h', onH: 40, offH: 7 },
+    { d: 'Sun', total: '2h', onH: 28, offH: 4 },
+    { d: 'Mon', total: '3h', onH: 42, offH: 6, today: true }
+  ];
+
+  let state = makeInitialState();
+  let activeHold = null;
+  let activeSwipe = null;
+  let undoTimer = null;
+
+  function makeInitialState() {
+    return {
+      surface: 'laptop',      // laptop | phone | notifs | tv
+      nudge: 'none',          // none | gentle | locked | agents
+      laptopRange: 'today',   // today | week
+      laptopView: 'stats',    // stats | settings
+      settingsTab: 'habits',  // protection | habits
+      pillPopOpen: false,
+      phoneTab: 'today',      // today | week
+      showDone: true,
+      expandedId: null,
+      photoOpenId: null,
+      editorOpen: false,
+      draft: defaultDraft(),
+      habits: JSON.parse(JSON.stringify(INITIAL_HABITS)),
+      creditCap: 45,
+      nudgeRule: 'gentle',
+      agentNudgeOn: true,
+      undo: null,
+      demoHold: null
+    };
+  }
+
+  function defaultDraft() {
+    return { name: '', cadence: 'daily', everyN: 2, days: ['Mon', 'Thu'], timeOfDay: 'Evening', rewardMin: 10 };
+  }
+
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function fmtMin(m) {
+    m = Math.max(0, Math.round(m));
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    const r = m % 60;
+    return r ? `${h}h ${String(r).padStart(2, '0')}m` : `${h}h 00m`;
+  }
+
+  function computed() {
+    const done = state.habits.filter(h => h.doneToday);
+    const due = state.habits.filter(h => !h.doneToday);
+    const earnedMin = Math.min(state.creditCap, done.reduce((n, h) => n + h.rewardMin, 0));
+    const allowance = BASE_DNS_MIN + earnedMin;
+    const leftMin = Math.max(0, allowance - DNS_OFF_MIN);
+    const ringFrac = allowance > 0 ? Math.min(1, DNS_OFF_MIN / allowance) : 0;
+    const allDone = due.length === 0;
+    // Active nudge only exists if at least one due habit is unchecked
+    const activeNudge = allDone ? 'none' : state.nudge;
+    return { done, due, earnedMin, allowance, leftMin, ringFrac, allDone, activeNudge };
+  }
+
+  function duePhrase(n) {
+    return n === 1 ? '1 habit left today' : `${n} habits left today`;
+  }
+
+  function nudgeCopy(kind, dueCount) {
+    if (dueCount <= 0 || kind === 'none') return null;
+    const left = duePhrase(dueCount);
+    if (kind === 'gentle') {
+      return { title: left, body: '', pill: left, amber: true, live: false };
+    }
+    if (kind === 'locked') {
+      return { title: 'Feeds locked until a habit is done', body: `${left} · Work and messaging stay open`, pill: 'Feeds locked until a habit is done', amber: true, live: false };
+    }
+    if (kind === 'agents') {
+      return { title: 'Agents running (~4m)', body: left, pill: `Agents running (~4m) · ${left}`, amber: false, live: true };
+    }
+    return null;
+  }
+
+  /* ---- Atoms Long-Press Engine ---- */
+  function cancelHold() {
+    if (!activeHold) return;
+    cancelAnimationFrame(activeHold.raf);
+    const { el, fillEl } = activeHold;
+    el.classList.remove('is-holding');
+    if (fillEl) {
+      fillEl.style.transition = 'transform 220ms cubic-bezier(.22, 1, .36, 1)';
+      fillEl.style.transform = 'scaleX(0)';
+    }
+    activeHold = null;
+  }
+
+  function startHold(el, id) {
+    if (activeHold) cancelHold();
+    const fillEl = el.querySelector('.hold-fill');
+    if (!fillEl) return;
+
+    el.classList.add('is-holding');
+    fillEl.style.transition = 'none';
+
+    const start = performance.now();
+    const step = (now) => {
+      if (!activeHold || activeHold.el !== el) return;
+      const p = Math.min(1, (now - start) / HOLD_MS);
+      fillEl.style.transform = `scaleX(${p.toFixed(4)})`;
+      if (p >= 1) {
+        completeFromCard(el, id);
+        return;
+      }
+      activeHold.raf = requestAnimationFrame(step);
+    };
+    activeHold = { el, fillEl, id, raf: requestAnimationFrame(step) };
+  }
+
+  function completeFromCard(el, id) {
+    if (activeHold) { cancelAnimationFrame(activeHold.raf); activeHold = null; }
+    const h = state.habits.find(x => x.id === id);
+    if (!h || h.doneToday) return;
+
+    el.classList.remove('is-holding');
+    el.classList.add('is-completing');
+
+    setTimeout(() => {
+      el.classList.add('is-leaving');
+      setTimeout(() => {
+        const prevNudge = state.nudge;
+        h.doneToday = true;
+        h.streak += 1;
+        h.week[6] = 'done';
+        if (state.nudge === 'locked') state.nudge = 'none';
+        if (state.expandedId === id) state.expandedId = null;
+
+        clearTimeout(undoTimer);
+        state.undo = { id: h.id, name: h.name, rewardMin: h.rewardMin, prevNudge };
+        undoTimer = setTimeout(() => { state.undo = null; render(); }, 5000);
+        render();
+      }, 280);
+    }, 100);
+  }
+
+  function triggerUndo() {
+    if (!state.undo) return;
+    clearTimeout(undoTimer);
+    const { id, prevNudge } = state.undo;
+    const h = state.habits.find(x => x.id === id);
+    if (h && h.doneToday) {
+      h.doneToday = false;
+      h.streak = Math.max(0, h.streak - 1);
+      h.week[6] = 'due';
+    }
+    if (prevNudge && prevNudge !== 'none') state.nudge = prevNudge;
+    state.undo = null;
+    render();
+  }
+
+  /* ---- Horizontal Swipe-to-Dismiss Engine (mouse drag + touch) ---- */
+  function finishSwipe(el, dx, kind) {
+    if (Math.abs(dx) >= 72) {
+      el.style.transition = 'transform 200ms ease-out, opacity 200ms ease-out';
+      el.style.transform = `translateX(${dx > 0 ? 260 : -260}px)`;
+      el.style.opacity = '0';
+      setTimeout(() => {
+        if (kind === 'undo') { clearTimeout(undoTimer); state.undo = null; }
+        else if (kind === 'pillpop') { state.pillPopOpen = false; }
+        else if (kind === 'editor') { state.editorOpen = false; }
+        else { state.nudge = 'none'; }
+        render();
+      }, 190);
+      return true;
+    }
+    el.style.transition = 'transform 220ms cubic-bezier(.22, 1, .36, 1), opacity 220ms ease';
+    el.style.transform = 'translateX(0)';
+    el.style.opacity = '1';
+    return false;
+  }
+
+  function openHabitsFromNudge(targetSurface) {
+    state.nudge = 'none';
+    state.pillPopOpen = false;
+    if (targetSurface === 'phone') {
+      state.surface = 'phone';
+      state.phoneTab = 'today';
+    } else {
+      state.surface = 'laptop';
+      state.laptopView = 'stats';
+      state.laptopRange = 'today';
+    }
+    render();
+  }
+
+  function saveDraft() {
+    const name = state.draft.name.trim();
+    if (!name) return;
+    let cadenceText = 'Daily';
+    let week = ['done', 'done', 'done', 'done', 'done', 'done', 'due'];
+    if (state.draft.cadence === 'every_n') {
+      cadenceText = `Every ${state.draft.everyN} days`;
+      week = ['off', 'done', 'off', 'done', 'off', 'off', 'due'];
+    } else if (state.draft.cadence === 'weekly') {
+      cadenceText = state.draft.days.length ? state.draft.days.join(', ') : 'Weekly';
+      week = ['off', 'done', 'off', 'off', 'done', 'off', 'due'];
+    } else if (state.draft.timeOfDay && state.draft.timeOfDay !== 'Anytime') {
+      cadenceText = `Daily · ${state.draft.timeOfDay}`;
+    }
+    state.habits.unshift({
+      id: 'h_' + Date.now(),
+      name,
+      cadence: state.draft.cadence,
+      cadenceText,
+      durationMin: 5,
+      rewardMin: state.draft.rewardMin,
+      streak: 0,
+      streakUnit: state.draft.cadence === 'weekly' ? 'w' : state.draft.cadence === 'every_n' ? '×' : 'd',
+      grace: false,
+      overdue: false,
+      doneToday: false,
+      awayMin: 5,
+      week
+    });
+    state.editorOpen = false;
+    state.draft = defaultDraft();
+    render();
+  }
+
+  /* ---- Text-Only Habit Hold Card ---- */
+  function renderHoldCard(h, compact = false) {
+    const amber = !h.doneToday;
+    const subText = h.overdue
+      ? `<span class="amber">Overdue</span> · ${esc(h.cadenceText)}`
+      : h.grace
+        ? `<span class="amber">Missed yesterday</span> · ${esc(h.cadenceText)}`
+        : `<span class="amber">Due</span> · ${esc(h.cadenceText)}`;
+
+    const demoP = state.demoHold && state.demoHold.id === h.id ? state.demoHold.progress : 0;
+    const fillStyle = demoP > 0 ? `style="transform:scaleX(${demoP})"` : '';
+
+    return `
+      <div class="hold-card${compact ? ' compact' : ''}${amber ? ' is-amber' : ''}${demoP > 0 ? ' is-holding' : ''}"
+           data-hold-habit="${esc(h.id)}" tabindex="0" role="button" aria-label="${esc(h.name)}">
+        <div class="hold-fill" ${fillStyle}></div>
+        <div class="hold-inner">
+          <div class="hab-copy">
+            <div class="hab-title">${esc(h.name)}</div>
+            ${!compact ? `<div class="hab-sub">${subText}</div>` : (amber ? `<div class="hab-sub"><span class="amber">${h.overdue ? 'Overdue' : h.grace ? 'Missed yesterday' : 'Due'}</span></div>` : '')}
+          </div>
+          <div class="hab-nums">
+            <button type="button" class="streak-btn${h.grace ? ' amber' : ''}" data-expand-habit="${esc(h.id)}">${h.streak}${h.streakUnit}</button>
+            <span>+${h.rewardMin}m</span>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderHabitDetail(h) {
+    const photoOpen = state.photoOpenId === h.id;
+    return `
+      <div class="hab-detail">
+        <div class="day-strip">
+          ${h.week.map((st, i) => `<div class="d-cell"><span>${DAYS_LBL[i]}</span><span class="d-dot ${st}"></span></div>`).join('')}
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--d-mut)">
+          <span>${h.doneToday ? `Away ${h.awayMin}m` : `~${h.durationMin}m`}</span>
+          <button type="button" class="text-act" style="padding:2px 6px" data-toggle-photo="${esc(h.id)}">
+            ${photoOpen ? 'Hide photo' : 'Photo check'}
+          </button>
+        </div>
+        ${photoOpen ? `
+          <div class="photo-pair">
+            <div class="photo-box">
+              <svg viewBox="0 0 180 58" width="100%" height="50" style="display:block;border-radius:5px;background:#09090c">
+                <rect x="14" y="36" width="152" height="12" rx="3" fill="#18181c" stroke="#27272a"/>
+                <ellipse cx="62" cy="34" rx="22" ry="5.5" fill="#27272a" stroke="#52525b"/>
+                <ellipse cx="66" cy="28" rx="18" ry="4.5" fill="#1f1f24" stroke="#52525b"/>
+                <rect x="108" y="18" width="14" height="18" rx="3" fill="#27272a" stroke="#52525b"/>
+              </svg>
+              <div class="ph-cap"><span>Before</span><span>20:08</span></div>
+            </div>
+            <div class="photo-box">
+              <svg viewBox="0 0 180 58" width="100%" height="50" style="display:block;border-radius:5px;background:#09090c">
+                <rect x="14" y="36" width="152" height="12" rx="3" fill="#18181c" stroke="#3f3f46"/>
+              </svg>
+              <div class="ph-cap"><span style="color:#fafafa">After</span><span>20:14</span></div>
+            </div>
+          </div>
+        ` : ''}
+      </div>`;
+  }
+
+  function renderUndoToast() {
+    if (!state.undo) return '';
+    return `
+      <div class="toast-overlay-bottom">
+        <div class="undo-toast swipeable" data-swipe="undo">
+          <div>
+            <span>${esc(state.undo.name)}</span>
+            <span class="undo-meta">+${state.undo.rewardMin}m</span>
+          </div>
+          <button type="button" class="undo-btn" data-undo>Undo</button>
+          <span class="undo-bar"></span>
+        </div>
+      </div>`;
+  }
+
+  function renderAndroidNotif(copy, styleClass = '', tapTarget = 'phone') {
+    if (!copy) return '';
+    return `
+      <div class="sys-notif ${styleClass}${copy.amber ? ' amber' : ''} swipeable"
+           data-swipe="nudge" data-open-habits="${tapTarget}" role="button" tabindex="0">
+        <div class="sn-app"><span>Focus · now</span></div>
+        <div class="sn-title">${esc(copy.title)}</div>
+        ${copy.body ? `<div class="sn-body${copy.amber ? ' amber' : ''}">${esc(copy.body)}</div>` : ''}
+      </div>`;
+  }
+
+  function renderEditor() {
+    const d = state.draft;
+    return `
+      <div class="editor-box swipeable" data-swipe="editor">
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="ed-input" id="edName" placeholder="Habit name" value="${esc(d.name)}">
+          <button type="button" class="t3-btn primary" data-save-habit>Add</button>
+        </div>
+        <div class="ed-row">
+          <span class="ed-lbl">Cadence</span>
+          <div class="t3-seg">
+            <button type="button" class="${d.cadence === 'daily' ? 'on' : ''}" data-ed-cad="daily">Daily</button>
+            <button type="button" class="${d.cadence === 'every_n' ? 'on' : ''}" data-ed-cad="every_n">Every N days</button>
+            <button type="button" class="${d.cadence === 'weekly' ? 'on' : ''}" data-ed-cad="weekly">Weekly</button>
+          </div>
+        </div>
+        ${d.cadence === 'every_n' ? `
+          <div class="ed-row">
+            <span class="ed-lbl">Interval</span>
+            <div class="t3-seg">${[2, 3, 4, 7].map(n => `<button type="button" class="${d.everyN === n ? 'on' : ''}" data-ed-everyn="${n}">${n}d</button>`).join('')}</div>
+          </div>
+        ` : ''}
+        ${d.cadence === 'weekly' ? `
+          <div class="ed-row">
+            <span class="ed-lbl">Days</span>
+            <div class="day-pick">${WEEKDAYS.map(w => `<button type="button" class="day-btn${d.days.includes(w) ? ' on' : ''}" data-ed-day="${w}">${w[0]}</button>`).join('')}</div>
+          </div>
+        ` : ''}
+        <div class="ed-row">
+          <span class="ed-lbl">Time</span>
+          <div class="t3-seg">${['Anytime', 'Morning', 'Afternoon', 'Evening'].map(t => `<button type="button" class="${d.timeOfDay === t ? 'on' : ''}" data-ed-time="${t}">${t}</button>`).join('')}</div>
+        </div>
+        <div class="ed-row">
+          <span class="ed-lbl">Credit</span>
+          <div class="t3-seg">${[5, 10, 15].map(r => `<button type="button" class="${d.rewardMin === r ? 'on' : ''}" data-ed-rew="${r}">+${r}m</button>`).join('')}</div>
+        </div>
+      </div>`;
+  }
+
+  function renderPausesCard(c, compact = false) {
+    const r = 17, C = 2 * Math.PI * r;
+    const usedLen = (c.ringFrac * C).toFixed(1);
+    const earnedNames = c.done.map(h => `${h.name.split(' ')[0]} +${h.rewardMin}m`).join(' · ');
+    return `
+      <div class="bento-card">
+        <div class="bento-head"><span class="bento-title">Pauses</span></div>
+        <div class="ring-box">
+          <svg class="ring-svg" viewBox="0 0 42 42" aria-hidden="true">
+            <circle cx="21" cy="21" r="${r}" class="trk"/>
+            <circle cx="21" cy="21" r="${r}" class="fill" stroke-dasharray="${usedLen} ${C.toFixed(1)}" transform="rotate(-90 21 21)"/>
+          </svg>
+          <div class="ring-txt">
+            <b>${DNS_OFF_MIN}m DNS off · ${fmtMin(c.leftMin)} left</b>
+            <span>${BASE_DNS_MIN}m base + ${c.earnedMin}m earned</span>
+          </div>
+        </div>
+        ${earnedNames ? `<div class="credit-line"><span>${esc(earnedNames)}</span><b>+${c.earnedMin}m</b></div>` : ''}
+        ${!compact ? `
+          <div class="pz-row">
+            <span class="pz-t">10:52</span>
+            <div>
+              <div class="pz-why">Check Discord messages</div>
+              <div class="pz-did"><span class="drift">→ YouTube 10m</span> · Laptop</div>
+            </div>
+            <span class="pz-m">10m</span>
+          </div>
+        ` : ''}
+      </div>`;
+  }
+
+  function renderHabitsCard(c, compact = false) {
+    const dueOrdered = [
+      ...c.due.filter(h => h.overdue || h.grace),
+      ...c.due.filter(h => !h.overdue && !h.grace)
+    ];
+
+    return `
+      <div class="bento-card bento-pad">
+        <div class="bento-head">
+          <span class="bento-title">Habits <b class="${c.due.length ? 'needs-attention' : ''}">${c.due.length ? `${c.due.length} due` : `${c.done.length}/${state.habits.length}`}</b></span>
+          <button type="button" class="text-act" style="padding:2px 6px" data-open-editor>New</button>
+        </div>
+
+        ${dueOrdered.length ? `
+          <div class="habit-stack">
+            ${dueOrdered.map(h => `
+              ${renderHoldCard(h, compact)}
+              ${state.expandedId === h.id && !compact ? renderHabitDetail(h) : ''}
+            `).join('')}
+          </div>
+        ` : `<div style="padding:10px 2px;font-size:12px;color:var(--d-sub)">All habits done today.</div>`}
+
+        ${state.editorOpen ? renderEditor() : ''}
+
+        ${c.done.length ? `
+          <div class="done-section">
+            <button type="button" class="done-toggle" data-toggle-done>
+              Done · ${c.done.length}
+            </button>
+            ${state.showDone ? c.done.map(h => `
+              <button type="button" class="done-row" data-expand-habit="${esc(h.id)}">
+                <span>${esc(h.name)}</span>
+                <span class="done-right">
+                  <span>Away ${h.awayMin}m</span>
+                  <span>+${h.rewardMin}m</span>
+                </span>
+              </button>
+              ${state.expandedId === h.id && !compact ? renderHabitDetail(h) : ''}
+            `).join('') : ''}
+          </div>
+        ` : ''}
+      </div>`;
+  }
+
+  /* ---- Laptop Surface (Top Pill Delivery) ---- */
+  function renderLaptopPill(c, copy) {
+    if (copy) {
+      return `
+        <div class="win-pill nudge-pill${copy.amber ? ' amber' : ''} swipeable"
+             data-swipe="nudge" data-open-habits="laptop" role="button" tabindex="0">
+
+          <span class="nudge-pill-text">${esc(copy.pill)}</span>
+        </div>`;
+    }
+    return `
+      <div class="win-pill">
+        <span class="p-amb"><b>2h 44m</b><span>·</span><span>${fmtMin(c.leftMin)} left</span></span>
+        <span class="p-div"></span>
+        <div class="p-chips">
+          <button type="button" class="p-btn">1m</button>
+          <button type="button" class="p-btn">5m</button>
+          <button type="button" class="p-btn">10m</button>
+          <button type="button" class="p-btn">30m</button>
+        </div>
+        <span class="p-div"></span>
+        <button type="button" class="p-btn${state.pillPopOpen ? ' on' : ''}${c.due.length ? ' needs-attention' : ''}" data-toggle-pillpop>
+          ${c.due.length ? `${c.due.length} due` : 'Done'}
+        </button>
+        <span class="p-div"></span>
+        <button type="button" class="p-btn">Lock</button>
+      </div>`;
+  }
+
+  function renderLaptop(c) {
+    const copy = nudgeCopy(c.activeNudge, c.due.length);
+
+    const pillPopover = !copy && state.pillPopOpen ? `
+      <div class="pill-pop-wrap">
+        <div class="pill-pop swipeable" data-swipe="pillpop">
+          <div style="font-size:11.5px;color:var(--d-mut);padding:0 2px">Due today</div>
+          <div class="habit-stack">
+            ${c.due.length
+              ? c.due.map(h => renderHoldCard(h, true)).join('')
+              : `<div style="font-size:12px;color:var(--d-sub);padding:4px 2px">All habits done today.</div>`}
+          </div>
+        </div>
+      </div>` : '';
+
+    const panel = state.laptopView === 'settings' ? `
+      <div class="oled-panel">
+        <div class="t3-set">
+          <div class="t3-rail">
+            <button type="button" class="t3-nav${state.settingsTab === 'protection' ? ' on' : ''}" data-set-tab="protection">Protection</button>
+            <button type="button" class="t3-nav${state.settingsTab === 'habits' ? ' on' : ''}" data-set-tab="habits">Habits <span style="color:var(--d-mut);font-size:11px">${state.habits.length}</span></button>
+          </div>
+          <div>
+            <div class="t3-crumb">
+              <span>Settings / <b>${state.settingsTab === 'habits' ? 'Habits' : 'Protection'}</b></span>
+              <button type="button" class="t3-btn" data-open-stats>Done</button>
+            </div>
+            <div class="t3-pane">
+              ${state.settingsTab === 'protection' ? `
+                <div class="t3-card">
+                  <div class="t3-row">
+                    <div>
+                      <div class="t3-row-title">Base DNS-off limit</div>
+                      <div class="t3-row-desc">${BASE_DNS_MIN}m · +${c.earnedMin}m earned today</div>
+                    </div>
+                    <span style="font-size:12px;color:var(--d-fg2)">${fmtMin(c.allowance)}</span>
+                  </div>
+                  <div class="t3-row">
+                    <div class="t3-row-title">Daily credit cap</div>
+                    <div class="t3-seg">${[30, 45, 60].map(cap => `<button type="button" class="${state.creditCap === cap ? 'on' : ''}" data-set-cap="${cap}">+${cap}m</button>`).join('')}</div>
+                  </div>
+                </div>
+              ` : `
+                <div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                    <span style="font-size:12px;font-weight:500">Habits</span>
+                    <button type="button" class="t3-btn primary" data-open-editor>New habit</button>
+                  </div>
+                  <div class="t3-card">
+                    ${state.habits.map(h => `
+                      <div class="t3-row">
+                        <div>
+                          <div class="t3-row-title">${esc(h.name)}</div>
+                          <div class="t3-row-desc">${esc(h.cadenceText)}</div>
+                        </div>
+                        <span style="font-size:11.5px;color:var(--d-mut)">+${h.rewardMin}m</span>
+                      </div>
+                    `).join('')}
+                  </div>
+                  ${state.editorOpen ? renderEditor() : ''}
+                </div>
+                <div class="t3-card">
+                  <div class="t3-row">
+                    <div>
+                      <div class="t3-row-title">Unfocused use</div>
+                      <div class="t3-row-desc">Work and messaging stay open</div>
+                    </div>
+                    <div class="t3-seg">
+                      <button type="button" class="${state.nudgeRule === 'gentle' ? 'on' : ''}" data-set-nrule="gentle">Nudge</button>
+                      <button type="button" class="${state.nudgeRule === 'escalate' ? 'on' : ''}" data-set-nrule="escalate">Lock feeds</button>
+                    </div>
+                  </div>
+                  <div class="t3-row">
+                    <div class="t3-row-title">While agents run</div>
+                    <div class="t3-seg">
+                      <button type="button" class="${state.agentNudgeOn ? 'on' : ''}" data-set-agent="1">On</button>
+                      <button type="button" class="${!state.agentNudgeOn ? 'on' : ''}" data-set-agent="0">Off</button>
+                    </div>
+                  </div>
+                </div>
+              `}
+            </div>
+          </div>
+        </div>
+      </div>
+    ` : `
+      <div class="oled-panel">
+        <div class="focus-head">
+          <div class="focus-period">
+            <button type="button" class="${state.laptopRange === 'today' ? 'on' : ''}" data-range="today">Today</button>
+            <button type="button" class="${state.laptopRange === 'week' ? 'on' : ''}" data-range="week">Week</button>
+          </div>
+          <button type="button" class="text-act" data-open-settings="habits">Settings</button>
+        </div>
+
+        <div class="stats-body">
+          <div class="hero-line">
+            <span class="hero-total">${state.laptopRange === 'week' ? '21h 18m' : '2h 44m'}</span>
+            <span class="hero-sent">on screens, <b>${state.laptopRange === 'week' ? '14h 40m building' : '1h 52m building'}</b>, <span class="hero-drift">${state.laptopRange === 'week' ? '2h 54m drifting' : '26m drifting'}</span>.</span>
+          </div>
+          <div class="thin-bar" aria-hidden="true">
+            <span class="thin-seg" style="flex:72;background:#d4d4d8"></span>
+            <span class="thin-seg" style="flex:40;background:#bdbdc4"></span>
+            <span class="thin-seg" style="flex:26;background:#777780"></span>
+            <span class="thin-seg" style="flex:16;background:#71717a"></span>
+          </div>
+
+          ${state.laptopRange === 'week' ? `
+            <div class="bento-card bento-full">
+              <div class="bento-head"><span class="bento-title">Last 7 days</span><span style="font-size:11px;color:var(--d-mut)">Avg 3h 02m/day</span></div>
+              <div class="wk-bars">
+                ${WEEK_BARS.map(b => `
+                  <div class="wk-col">
+                    <span class="wk-v">${b.total}</span>
+                    <div class="wk-stack">${b.offH ? `<i class="wk-off" style="height:${b.offH}px"></i>` : ''}<i class="wk-on" style="height:${b.onH}px"></i></div>
+                    <span class="wk-d${b.today ? ' today' : ''}">${b.d}</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          <div class="bento-full">${renderHabitsCard(c, false)}</div>
+
+          <div class="bento-grid">
+            <div class="bento-card">
+              <div class="bento-head"><span class="bento-title">Screen time</span></div>
+              ${APPS.map(a => `
+                <div class="st-row">
+                  <span class="st-name">${esc(a.name)}</span>
+                  <span class="st-time${a.off ? ' off' : ''}">${a.time}</span>
+                </div>
+              `).join('')}
+            </div>
+            ${renderPausesCard(c, false)}
+          </div>
+        </div>
+      </div>`;
+
+    return `
+      <div class="laptop-stage stage-rel">
+        <div class="pill-slot">
+          ${renderLaptopPill(c, copy)}
+          ${pillPopover}
+        </div>
+        ${panel}
+        ${renderUndoToast()}
+      </div>`;
+  }
+
+  /* ---- Phone + Android Home Widget Surface ---- */
+  function renderPhone(c) {
+    const copy = nudgeCopy(c.activeNudge, c.due.length);
+
+    // When a system notification nudge fires, show it as a heads-up over another app (X)
+    const phoneInner = copy ? `
+      <div class="host-app">
+        <div class="host-head"><span>X</span><span>For you</span></div>
+        <div class="host-post">
+          <div class="sk-line" style="width:36%"></div>
+          <div class="sk-line" style="width:92%"></div>
+          <div class="sk-line" style="width:74%"></div>
+          <div class="sk-box"></div>
+        </div>
+        <div class="host-post">
+          <div class="sk-line" style="width:28%"></div>
+          <div class="sk-line" style="width:88%"></div>
+          <div class="sk-line" style="width:60%"></div>
+        </div>
+        <div class="host-post" style="border:0">
+          <div class="sk-line" style="width:42%"></div>
+          <div class="sk-line" style="width:80%"></div>
+        </div>
+      </div>
+      <div class="heads-up-overlay">${renderAndroidNotif(copy, '', 'phone')}</div>
+    ` : `
+      <div class="phone-body">
+        <div>
+          <div class="hero-total" style="font-size:26px">${state.phoneTab === 'week' ? '21h 18m' : '2h 44m'}</div>
+          <div class="hero-sent" style="margin-top:3px"><b>1h 52m building</b>, <span class="hero-drift">26m drifting</span>.</div>
+          <div class="thin-bar"><span class="thin-seg" style="flex:72;background:#d4d4d8"></span><span class="thin-seg" style="flex:40;background:#bdbdc4"></span><span class="thin-seg" style="flex:26;background:#777780"></span></div>
+        </div>
+        ${renderHabitsCard(c, true)}
+        ${renderPausesCard(c, true)}
+      </div>
+      <div class="phone-dock-wrap">
+        <div class="phone-capsule">
+          <button type="button" class="${state.phoneTab === 'today' ? 'on' : ''}" data-phone-tab="today">Today</button>
+          <button type="button" class="${state.phoneTab === 'week' ? 'on' : ''}" data-phone-tab="week">Week</button>
+        </div>
+        <button type="button" class="phone-pause-btn">Pause</button>
+      </div>`;
+
+    return `
+      <div class="phone-grid">
+        <div class="phone-frame">
+          <div class="phone-status">
+            <span>20:14</span>
+            <span style="font-size:10.5px;color:var(--d-sub)">5G · 84%</span>
+          </div>
+          ${phoneInner}
+          ${renderUndoToast()}
+        </div>
+
+        <div class="widget-stage">
+          <div class="android-widget">
+            <div class="aw-head">
+              <span>Habits</span>
+              <b class="${c.due.length ? 'needs-attention' : ''}">${c.due.length ? `${c.due.length} due` : `${c.done.length}/${state.habits.length}`} · +${c.earnedMin}m</b>
+            </div>
+            <div class="habit-stack">
+              ${c.due.length
+                ? c.due.slice(0, 3).map(h => renderHoldCard(h, true)).join('')
+                : `<div style="padding:8px 2px;font-size:12px;color:#8A8A8A">All habits done today.</div>`}
+            </div>
+          </div>
+
+          <div class="widget-pair">
+            ${c.due.length ? `
+              <div class="aw-compact hold-card is-amber" data-hold-habit="${esc(c.due[0].id)}" tabindex="0" role="button" aria-label="${esc(c.due[0].name)}" style="border-radius:22px;max-height:none">
+                <div class="hold-fill"></div>
+                <div class="aw-compact-inner">
+                  <div class="aw-head" style="padding:0">
+                    <span>Next</span>
+                    <span style="color:${c.due[0].grace ? 'var(--d-amber-hi)' : '#8A8A8A'}">${c.due[0].streak}${c.due[0].streakUnit}</span>
+                  </div>
+                  <div>
+                    <div style="font-size:14px;font-weight:500;color:#fafafa;line-height:1.25">${esc(c.due[0].name)}</div>
+                    <div class="aw-sub" style="margin-top:4px;color:var(--d-amber-hi)">${c.due[0].overdue ? 'Overdue' : c.due[0].grace ? 'Missed yesterday' : 'Due'}</div>
+                  </div>
+                </div>
+              </div>
+            ` : `
+              <div class="aw-compact">
+                <div class="aw-head" style="padding:0"><span>Next</span><span>Done</span></div>
+                <div class="aw-sub">All done today</div>
+              </div>
+            `}
+            <div class="aw-compact">
+              <div class="aw-head" style="padding:0"><span>Allowance</span><span>Today</span></div>
+              <div>
+                <div class="aw-big">${fmtMin(c.leftMin)}</div>
+                <div class="aw-sub" style="margin-top:5px">${BASE_DNS_MIN}m + ${c.earnedMin}m earned</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  /* ---- System Notifications Surface (Android Heads-up, Shade, Lock Screen + Laptop Pill) ---- */
+  function renderNotifs(c) {
+    const kind = state.nudge === 'none' ? 'gentle' : state.nudge;
+    const copy = c.allDone ? null : nudgeCopy(kind, c.due.length);
+    const agentCopy = c.allDone ? null : nudgeCopy(state.nudge === 'none' ? 'agents' : state.nudge, c.due.length);
+
+    return `
+      <div class="notif-grid">
+        <!-- 1. Android Heads-Up over X -->
+        <div class="notif-card">
+          <div class="notif-label"><b>Phone · Heads-up over X</b><span>20:14</span></div>
+          ${copy ? renderAndroidNotif(copy, '', 'phone') : `<div class="silent-state">No notification</div>`}
+          <div style="display:flex;flex-direction:column;gap:7px;opacity:0.4;margin-top:auto">
+            <div class="sk-line" style="width:34%"></div>
+            <div class="sk-line" style="width:90%"></div>
+            <div class="sk-line" style="width:68%"></div>
+          </div>
+        </div>
+
+        <!-- 2. Android Notification Shade -->
+        <div class="notif-card">
+          <div class="notif-label"><b>Phone · Notification shade</b><span>20:14</span></div>
+          <div class="shade-mock">
+            ${copy ? renderAndroidNotif(copy, 'shade', 'phone') : `<div class="silent-state" style="padding:10px 0">No Focus notification</div>`}
+            <div class="shade-other">
+              <span style="font-size:10.5px;color:#71717a">WhatsApp · 4m</span>
+              <span style="font-size:12.5px;color:#d4d4d8">Alex</span>
+              <span style="font-size:11.5px;color:#71717a">Still on for Friday?</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Android Lock Screen (Agents running default) -->
+        <div class="notif-card">
+          <div class="notif-label"><b>Phone · Lock screen</b><span>${state.nudge === 'none' ? 'Agents' : state.nudge === 'locked' ? 'Feeds locked' : state.nudge === 'agents' ? 'Agents' : 'Nudge'}</span></div>
+          <div class="lock-clock">
+            <div class="lock-time">20:14</div>
+            <div class="lock-date">Mon, Nov 24</div>
+          </div>
+          ${agentCopy ? renderAndroidNotif(agentCopy, 'lock', 'phone') : `<div class="silent-state" style="padding:8px 0">Quiet</div>`}
+        </div>
+
+        <!-- 4. Laptop Top Pill -->
+        <div class="notif-card">
+          <div class="notif-label"><b>Laptop · Top pill</b><span>Over any app</span></div>
+          <div class="laptop-bar-mock">
+            ${copy ? renderLaptopPill(c, copy) : `
+              <div class="win-pill" style="opacity:0.75">
+                <span class="p-amb"><b>2h 44m</b><span>·</span><span>${fmtMin(c.leftMin)} left</span></span>
+                <span class="p-div"></span>
+                <span style="font-size:11.5px;color:var(--d-sub);padding:0 4px">Done</span>
+              </div>
+            `}
+            <div class="laptop-host-lines">
+              <div class="sk-line" style="width:45%"></div>
+              <div class="sk-line" style="width:86%"></div>
+              <div class="sk-line" style="width:62%"></div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  /* ---- TV Surface (Text-only) ---- */
+  function renderTv(c) {
+    const locked = !c.allDone && state.nudge === 'locked';
+    return `
+      <div class="tv-surface">
+        <div class="tv-head">
+          <div class="tv-brand">Focus</div>
+          <span style="font-size:12.5px;color:var(--d-sub)">${locked ? '<span class="needs-attention">Feeds locked</span> · ' : ''}${fmtMin(c.leftMin)} left · +${c.earnedMin}m earned</span>
+        </div>
+        <div class="tv-grid">
+          <div class="tv-panel">
+            <div style="font-size:12px;color:var(--d-sub);margin-bottom:2px">Habits · <span class="${c.due.length ? 'needs-attention' : ''}">${c.due.length ? `${c.due.length} due` : `${c.done.length}/${state.habits.length}`}</span></div>
+            <div class="habit-stack">
+              ${c.due.length
+                ? c.due.map(h => renderHoldCard(h, false)).join('')
+                : `<div style="padding:10px 2px;font-size:13px;color:var(--d-sub)">All habits done today.</div>`}
+            </div>
+          </div>
+          <div class="tv-panel">
+            <div style="font-size:12px;color:var(--d-sub);margin-bottom:2px">TV today</div>
+            ${[
+              { name: 'YouTube', t: locked ? 'Locked' : '32m', amber: locked },
+              { name: 'Twitch', t: locked ? 'Locked' : '52m', amber: locked },
+              { name: 'Spotify', t: '26m', amber: false }
+            ].map(a => `
+              <div class="tv-app-row">
+                <span>${a.name}</span>
+                <span style="color:${a.amber ? 'var(--d-amber-tv)' : 'var(--d-sub)'}">${a.t}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        ${renderUndoToast()}
+      </div>`;
+  }
+
+  function render() {
+    const c = computed();
+    document.querySelectorAll('[data-surface]').forEach(b => b.classList.toggle('on', b.dataset.surface === state.surface));
+    document.querySelectorAll('[data-nudge]').forEach(b => b.classList.toggle('on', b.dataset.nudge === state.nudge));
+    document.getElementById('allDoneBtn').classList.toggle('on', c.allDone);
+
+    const stage = document.getElementById('stage');
+    if (state.surface === 'laptop') stage.innerHTML = renderLaptop(c);
+    else if (state.surface === 'phone') stage.innerHTML = renderPhone(c);
+    else if (state.surface === 'notifs') stage.innerHTML = renderNotifs(c);
+    else stage.innerHTML = renderTv(c);
+
+    const edName = document.getElementById('edName');
+    if (edName) {
+      edName.addEventListener('input', (e) => { state.draft.name = e.target.value; });
+      edName.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveDraft(); });
+    }
+  }
+
+  /* ---- Pointer Events: Hold-to-Complete + Swipe-to-Dismiss ---- */
+  document.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+
+    // 1. Swipeable notification / toast / pill
+    const sw = e.target.closest('[data-swipe]');
+    if (sw && !e.target.closest('[data-undo], [data-hold-habit], .editor-box button, .editor-box input')) {
+      activeSwipe = {
+        el: sw,
+        kind: sw.dataset.swipe,
+        openTarget: sw.dataset.openHabits || null,
+        startX: e.clientX,
+        dx: 0,
+        moved: false
+      };
+      sw.style.transition = 'none';
+      return;
+    }
+
+    // 2. Hold-to-complete habit card
+    if (e.target.closest('[data-expand-habit]')) return;
+    const card = e.target.closest('[data-hold-habit]');
+    if (card) {
+      e.preventDefault();
+      startHold(card, card.dataset.holdHabit);
+    }
+  });
+
+  document.addEventListener('pointermove', (e) => {
+    if (!activeSwipe) return;
+    const dx = e.clientX - activeSwipe.startX;
+    if (Math.abs(dx) > 6) activeSwipe.moved = true;
+    activeSwipe.dx = dx;
+    activeSwipe.el.style.transform = `translateX(${dx}px)`;
+    activeSwipe.el.style.opacity = String(Math.max(0.25, 1 - Math.abs(dx) / 220));
+  });
+
+  ['pointerup', 'pointercancel'].forEach(ev => {
+    document.addEventListener(ev, () => {
+      if (activeHold) cancelHold();
+      if (activeSwipe) {
+        const { el, dx, kind, moved, openTarget } = activeSwipe;
+        activeSwipe = null;
+        if (moved) {
+          finishSwipe(el, dx, kind);
+        } else if (openTarget) {
+          openHabitsFromNudge(openTarget);
+        }
+      }
+    }, true);
+  });
+
+  document.addEventListener('pointerleave', (e) => {
+    if (activeHold && e.target === activeHold.el) cancelHold();
+  }, true);
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+      const card = document.activeElement?.closest?.('[data-hold-habit]');
+      if (card) { e.preventDefault(); startHold(card, card.dataset.holdHabit); return; }
+      const notif = document.activeElement?.closest?.('[data-open-habits]');
+      if (notif) { e.preventDefault(); openHabitsFromNudge(notif.dataset.openHabits); }
+    }
+  });
+  document.addEventListener('keyup', (e) => {
+    if (e.key === ' ' || e.key === 'Enter') cancelHold();
+  });
+
+  /* ---- Click Navigation ---- */
+  document.addEventListener('click', (e) => {
+    const t = e.target;
+
+    if (t.closest('[data-undo]')) { triggerUndo(); return; }
+
+    const surf = t.closest('[data-surface]');
+    if (surf) { state.surface = surf.dataset.surface; state.pillPopOpen = false; state.editorOpen = false; render(); return; }
+
+    const nd = t.closest('[data-nudge]');
+    if (nd) { state.nudge = nd.dataset.nudge; state.pillPopOpen = false; render(); return; }
+
+    if (t.closest('#allDoneBtn')) {
+      const c = computed();
+      if (c.allDone) {
+        state.habits = JSON.parse(JSON.stringify(INITIAL_HABITS));
+      } else {
+        state.habits.forEach(h => {
+          if (!h.doneToday) { h.doneToday = true; h.streak += 1; h.week[6] = 'done'; }
+        });
+      }
+      render();
+      return;
+    }
+
+    if (t.closest('[data-toggle-pillpop]')) { state.pillPopOpen = !state.pillPopOpen; state.nudge = 'none'; render(); return; }
+    if (t.closest('[data-toggle-done]')) { state.showDone = !state.showDone; render(); return; }
+
+    const exp = t.closest('[data-expand-habit]');
+    if (exp) {
+      e.stopPropagation();
+      const id = exp.dataset.expandHabit;
+      state.expandedId = state.expandedId === id ? null : id;
+      if (state.expandedId !== id) state.photoOpenId = null;
+      render();
+      return;
+    }
+
+    const ph = t.closest('[data-toggle-photo]');
+    if (ph) { state.photoOpenId = state.photoOpenId === ph.dataset.togglePhoto ? null : ph.dataset.togglePhoto; render(); return; }
+
+    const rng = t.closest('[data-range]');
+    if (rng) { state.laptopRange = rng.dataset.range; render(); return; }
+
+    const pht = t.closest('[data-phone-tab]');
+    if (pht) { state.phoneTab = pht.dataset.phoneTab; render(); return; }
+
+    const oset = t.closest('[data-open-settings]');
+    if (oset) { state.laptopView = 'settings'; state.settingsTab = oset.dataset.openSettings || 'habits'; render(); return; }
+
+    const stab = t.closest('[data-set-tab]');
+    if (stab) { state.settingsTab = stab.dataset.setTab; render(); return; }
+
+    if (t.closest('[data-open-stats]')) { state.laptopView = 'stats'; render(); return; }
+    if (t.closest('[data-open-editor]')) { state.editorOpen = true; render(); return; }
+    if (t.closest('[data-save-habit]')) { saveDraft(); return; }
+
+    const ec = t.closest('[data-ed-cad]');
+    if (ec) { state.draft.cadence = ec.dataset.edCad; render(); return; }
+    const en = t.closest('[data-ed-everyn]');
+    if (en) { state.draft.everyN = Number(en.dataset.edEveryn); render(); return; }
+    const ed = t.closest('[data-ed-day]');
+    if (ed) {
+      const d = ed.dataset.edDay;
+      const idx = state.draft.days.indexOf(d);
+      if (idx >= 0) state.draft.days.splice(idx, 1); else state.draft.days.push(d);
+      render();
+      return;
+    }
+    const et = t.closest('[data-ed-time]');
+    if (et) { state.draft.timeOfDay = et.dataset.edTime; render(); return; }
+    const er = t.closest('[data-ed-rew]');
+    if (er) { state.draft.rewardMin = Number(er.dataset.edRew); render(); return; }
+    const cap = t.closest('[data-set-cap]');
+    if (cap) { state.creditCap = Number(cap.dataset.setCap); render(); return; }
+    const nr = t.closest('[data-set-nrule]');
+    if (nr) { state.nudgeRule = nr.dataset.setNrule; render(); return; }
+    const ag = t.closest('[data-set-agent]');
+    if (ag) { state.agentNudgeOn = ag.dataset.setAgent === '1'; render(); return; }
+
+    if (t.closest('#resetBtn')) {
+      clearTimeout(undoTimer);
+      const keep = state.surface;
+      state = makeInitialState();
+      state.surface = keep;
+      render();
+      return;
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

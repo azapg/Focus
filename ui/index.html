@@ -1,0 +1,194 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Focus</title><link rel="icon" type="image/svg+xml" href="./favicon.svg">
+<style>
+:root{--bg:#000;--bd:#262626;--sec:#1c1c1c;--fg:#fafafa;--mut:#8a8a8a;
+  --ease:cubic-bezier(.22,1.15,.36,1);--soft:cubic-bezier(.2,.8,.2,1);
+  --ui:"Geist","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif}
+*{box-sizing:border-box;font-style:normal !important}
+html,body{margin:0;height:100%;background:transparent;overflow:hidden;user-select:none;-webkit-user-select:none;cursor:default}
+
+.w{position:absolute;left:50%;top:8px;transform:translateX(-50%);background:#060608;border:1px solid rgba(255,255,255,.14);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 10px 28px rgba(0,0,0,.78);
+  color:var(--fg);font:400 12px/1 var(--ui);overflow:hidden;
+  transition:width .45s var(--ease),height .45s var(--ease),border-radius .45s var(--soft),border-color .3s,background .3s}
+.in{position:absolute;inset:0;display:flex;align-items:center;gap:6px;padding:0 4px 0 12px;opacity:0;pointer-events:none;transition:opacity .15s}
+.w[data-state=hover] .pick,.w[data-state=form] .pick,.w[data-state=paused] .pz{opacity:1;pointer-events:auto;transition:opacity .25s .1s}
+
+.w[data-state=idle]{width:44px;height:6px;border-radius:6px;border-color:#3a3a3a;background:#d4d4d4;box-shadow:none;backdrop-filter:none}
+.w[data-state=idle].has-update{border-color:#fafafa;box-shadow:0 0 0 1px rgba(250,250,250,.28)}
+.w[data-state=idle].p{background:#1a1a1a}
+.drain{position:absolute;left:0;top:0;bottom:0;width:0;background:#d4d4d4;opacity:0;transition:opacity .2s,width 1s linear}
+.w[data-state=idle].p .drain{opacity:1}
+.w[data-state=hover]{height:36px;border-radius:18px} /* width is measured in JS */
+.w[data-state=form]{height:70px;border-radius:18px}
+.w[data-state=form] .pick{height:36px}
+.w[data-state=form] .check-in{display:flex;position:absolute;bottom:5px;inset-inline:5px;justify-content:center}
+.w[data-state=paused]{width:176px;height:36px;border-radius:18px}
+
+.btn{height:26px;display:inline-flex;align-items:center;justify-content:center;gap:5px;border-radius:999px;
+  border:1px solid rgba(255,255,255,.10);background:transparent;color:var(--fg);font:400 12px var(--ui);padding:0 10px;cursor:pointer;white-space:nowrap;outline:none;
+  transition:background .15s,opacity .3s var(--ease),transform .35s var(--ease),width .35s var(--ease),padding .35s var(--ease),margin .35s var(--ease),border-width .2s}
+.btn:hover{background:rgba(255,255,255,.11);border-color:rgba(255,255,255,.16)}
+.btn.on{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18)}
+.btn.icon{width:26px;padding:0;border-color:transparent}
+.btn.icon:hover{background:rgba(255,255,255,.11);border-color:transparent}
+.btn.primary{background:rgba(255,255,255,.13);color:var(--fg);border-color:rgba(255,255,255,.16)}
+.btn.primary:hover{background:rgba(255,255,255,.20)}
+.btn[disabled]{opacity:.5;cursor:default}
+.ico{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lead{color:var(--mut);display:flex}
+.chips{display:flex;gap:4px}
+.chips .btn{opacity:0;transform:translateY(-5px) scale(.92)}
+.w[data-state=hover] .chips .btn,.w[data-state=form] .chips .btn{opacity:1;transform:none}
+.chips .btn:nth-child(1){transition-delay:.06s}.chips .btn:nth-child(2){transition-delay:.09s}
+.chips .btn:nth-child(3){transition-delay:.12s}.chips .btn:nth-child(4){transition-delay:.15s}
+.w[data-state=form] .chips .btn:not(.on){width:0;padding:0;margin:0 -2px;border-width:0;opacity:0;transition-delay:0s}
+.reason{display:none;flex:1;align-items:center;gap:4px;min-width:0}
+.w[data-state=form] .reason{display:flex;animation:rin .45s var(--ease) .08s both}
+@keyframes rin{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:none}}
+.reason input{flex:1;min-width:0;height:26px;background:transparent;border:1px solid var(--bd);border-radius:999px;color:var(--fg);
+  padding:0 10px;font:400 12px var(--ui);outline:none;transition:border-color .15s;user-select:text}
+.reason input::placeholder{color:#6b6b6b;font-style:normal}
+.reason input:focus{border-color:#525252}
+.reason input.err{border-color:#737373;animation:shake .3s}
+@keyframes shake{25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+.count{font:400 12.5px var(--ui);font-variant-numeric:tabular-nums}
+.pz .btn{margin-left:auto}
+
+/* today's numbers (click = stats panel), dividers, lock */
+.pick{padding-left:6px}
+.pick>*{flex-shrink:0}
+.pick>.reason{flex-shrink:1}
+.amb{height:26px;display:flex;align-items:center;gap:6px;padding:0 8px;border:0;border-radius:999px;background:transparent;
+  color:var(--mut);font:400 12px var(--ui);font-variant-numeric:tabular-nums;cursor:pointer;outline:none;
+  opacity:0;transform:translateY(-5px);transition:background .15s,opacity .3s var(--ease),transform .35s var(--ease)}
+.amb b{color:var(--fg);font-weight:400}
+.amb:hover{background:var(--sec)}
+.w[data-state=hover] .amb{opacity:1;transform:none}
+.div{width:1px;height:16px;background:rgba(255,255,255,.10)}
+.lockb{opacity:0;transform:translateY(-5px);transition-delay:.18s}
+.w[data-state=hover] .lockb{opacity:1;transform:none}
+.updb{opacity:0;transform:translateY(-5px);transition-delay:.16s;background:rgba(255,255,255,.08)}
+.w[data-state=hover] .updb{opacity:1;transform:none}
+.w[data-state=form] :is(.amb,.div,.lockb,.updb,.hab-trigger){display:none}
+.amb.open{background:rgba(255,255,255,.11)}
+
+/* ---- stats panel: pure solid OLED black ---- */
+.panel{--line:#161616;--dim:#5c5c5c;--on:#d4d4d4;--away:#1a1a1a;--hatch:repeating-linear-gradient(135deg,#fafafa 0 1.5px,#000 1.5px 4.5px);
+  position:absolute;top:50px;left:50%;width:min(748px,calc(100vw - 16px));max-height:min(var(--maxh,calc(100vh - 58px)),calc(100vh - 58px - var(--pause-rating-space,0px)));overflow-y:auto;overflow-x:hidden;
+  background:#000000;border:1px solid rgba(255,255,255,.13);border-radius:16px;color:var(--fg);font:400 12.5px/1.4 var(--ui);color-scheme:dark;
+  box-shadow:0 18px 44px rgba(0,0,0,.84);
+  transform:translateX(-50%) translateY(-8px) scale(.985);transform-origin:top center;opacity:0;pointer-events:none;clip-path:inset(0 0 100% 0 round 16px);
+  transition:clip-path .5s var(--soft),transform .5s var(--ease),opacity .2s}
+.panel.open{transform:translateX(-50%);opacity:1;pointer-events:auto;clip-path:none}
+.panel::-webkit-scrollbar{width:8px}.panel::-webkit-scrollbar-thumb{background:#262626;border-radius:4px;border:2px solid #000}
+.p-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px 6px}
+.seg{display:inline-flex;border:1px solid var(--bd);border-radius:999px;padding:2px;gap:2px}
+.seg button{border:0;background:transparent;color:var(--mut);font:400 12px var(--ui);padding:5px 12px;border-radius:999px;cursor:pointer;outline:none}
+.seg button.on{background:var(--sec);color:var(--fg)}
+.p-date{color:var(--mut);font-size:11.5px}
+.p-stats{display:flex;gap:28px;padding:10px 18px 16px;flex-wrap:wrap}
+.stat .v{font-size:22px;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1.15}
+.stat .k{color:var(--mut);font-size:11px;margin-top:2px}
+.p-sec{padding:16px 18px}
+.lbl{color:var(--mut);font-size:11px;letter-spacing:.02em;margin:0 0 10px}
+.strip{display:flex;height:18px;gap:2px}
+.strip i{display:block;height:100%;border-radius:2px;min-width:1px}
+.s-on{background:var(--on)}.s-off{background:var(--hatch)}.s-away{background:var(--away)}.s-future{border:1px dashed #1e1e1e}
+.ticks{display:flex;justify-content:space-between;color:var(--dim);font-size:10px;margin-top:5px;font-variant-numeric:tabular-nums}
+.week{display:flex;align-items:flex-end;gap:12px;height:130px}
+.week .col{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%}
+.week .bars{width:100%;max-width:30px;flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px}
+.week .bars i{display:block;border-radius:2px}
+.week .bars i.on{background:var(--on);border-radius:4px 4px 2px 2px}
+.week .bars i.off{background:var(--hatch)}
+.week .d{color:var(--dim);font-size:10px}.week .d.today{color:var(--fg)}
+.week .v{color:var(--mut);font-size:10px;font-variant-numeric:tabular-nums;height:12px}
+.cols{display:grid;grid-template-columns:1fr 1fr}
+.cols>div{padding:16px 18px;min-width:0}
+.cols>div+div{}
+.row{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+.row:first-child{border-top:0;padding-top:0}
+.t{color:var(--mut);font-variant-numeric:tabular-nums;flex:none;width:46px}
+.m{color:var(--mut);font-variant-numeric:tabular-nums;flex:none;text-align:right;min-width:36px}
+.why{flex:1;min-width:0;overflow-wrap:anywhere}
+.did{color:var(--mut);font-size:11px;margin-top:3px}
+.did .x{color:var(--fg)}
+.app{display:grid;grid-template-columns:minmax(0,120px) 1fr 56px;align-items:center;gap:10px;padding:5px 0}
+.app .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.app .bar{display:block;height:6px;border-radius:0 3px 3px 0;background:var(--on);min-width:2px}
+.app .bar.off{background:var(--hatch)}
+.app .n{color:var(--mut);text-align:right;font-variant-numeric:tabular-nums}
+.site summary{list-style:none;cursor:pointer}
+.site summary::-webkit-details-marker{display:none}
+.site summary:focus-visible{outline:1px solid #737373;outline-offset:3px;border-radius:3px}
+.pages{padding:3px 0 7px 15px}
+.page-usage{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:10px;padding:7px 0;user-select:text}
+.page-title{overflow-wrap:anywhere;min-width:0}
+.page-url{grid-column:1 / -1;color:var(--mut);font-size:11px;overflow-wrap:anywhere;margin-top:2px}
+.page-usage .n{color:var(--mut);font-variant-numeric:tabular-nums}
+
+.empty{color:var(--dim)}
+.legend{display:flex;gap:14px;color:var(--mut);font-size:11px;margin-top:10px}
+.legend span{display:flex;align-items:center;gap:6px}
+.sw{width:10px;height:10px;border-radius:2px;display:inline-block;border:1px solid #333}
+#tip{position:fixed;pointer-events:none;background:#0d0d0d;border:1px solid var(--bd);border-radius:8px;padding:5px 7px;font:400 11px var(--ui);
+  color:var(--fg);opacity:0;transition:opacity .12s;white-space:nowrap;z-index:9}
+#tip .k{color:var(--mut)}
+.w .pick [hidden]{display:none!important}
+</style></head>
+<body>
+<div class="w" data-state="idle">
+  <div class="drain"></div>
+  <div class="in pick">
+    <button class="amb" title="Open stats"><b class="a-on">0m</b><span>·</span><span class="a-off">0m off</span></button>
+    <span class="div"></span>
+    <button class="btn judge" hidden>Ask</button>
+    <span class="scope-readout" hidden><span class="judge-services"></span><span class="judge-time"></span></span>
+    <button class="btn scope" hidden>End</button>
+
+    <span class="dns-setup" hidden>NextDNS setup required</span>
+    <div class="chips">
+      <button class="btn" data-m="1">1m</button><button class="btn" data-m="5">5m</button>
+      <button class="btn" data-m="10">10m</button><button class="btn" data-m="30">30m</button>
+    </div>
+    <span class="div"></span>
+    <button class="habit-action hab-trigger" id="habitTrigger" aria-controls="habitQuick" aria-expanded="false">Habits</button>
+    <span class="div"></span>
+    <button class="btn icon updb" id="dockUpdateBtn" hidden title="Update available" aria-label="Update available"><span data-dock-icon="update"></span></button>
+    <button class="btn icon lockb" title="Lock Windows (Win+L)"><span data-dock-icon="lock"></span></button>
+    <div class="reason">
+      <input placeholder="Why?" spellcheck="false">
+      <button class="btn icon primary go" title="Pause"><span data-dock-icon="submit"></span></button>
+    </div>
+  </div>
+  <div class="check-in" id="dockCheckIn" role="group" aria-label="How are you feeling?"></div>
+  <div class="in pz">
+    <span class="lead"><span data-dock-icon="shield"></span></span>
+    <span class="count">0:00</span>
+    <button class="btn resume">Turn DNS on</button>
+  </div>
+</div>
+<button id="habitNudge" type="button" hidden></button>
+<section id="pauseRating" class="pause-rating" aria-label="Was that worth it?" hidden>
+  <div class="pause-rating-row">
+    <span>Was that worth it?</span>
+    <div id="pauseRatingScores" role="group" aria-label="Rating from 1 to 5"></div>
+    <button type="button" class="btn icon" id="dismissPauseRating" aria-label="Dismiss rating"><span data-dock-icon="close"></span></button>
+  </div>
+  <input aria-label="Optional rating note" placeholder="Note" maxlength="200">
+  <div id="pauseRatingError" role="status" hidden></div>
+</section>
+<div id="dockPauseJudge" hidden></div>
+<div class="panel" id="panel"><div id="devicePanelRoot"></div></div>
+<div id="habitQuick" aria-label="Quick habits" hidden></div>
+<div id="habitEditor" hidden></div>
+<div id="habitFloat" aria-live="polite" hidden></div>
+<div id="tip"></div>
+
+
+
+
+
+<script type="module" src="/src/main.tsx"></script>
+</body></html>

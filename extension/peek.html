@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; base-uri 'none'; form-action 'none'">
+  <title>Peek · Focus</title>
+  <link rel="stylesheet" href="peek.css">
+  <script type="module" src="peek-page.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Peek</h1>
+    </header>
+    <p id="status" role="status">Loading…</p>
+    <article id="snapshot" hidden aria-label="Post snapshot">
+      <header class="post-details">
+        <p id="site"></p>
+        <h2 id="title" hidden></h2>
+        <p id="text" hidden></p>
+      </header>
+      <img id="image" hidden alt="">
+    </article>
+    <footer>
+      <button id="done" type="button" class="primary">Done</button>
+      <button id="pause" type="button">Pause</button>
+    </footer>
+    <p id="pause-status" role="status" hidden></p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,20 @@
+[package]
+name = "focus-phone-peek"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+focus-browser-host = { path = "../../browser-host", default-features = false, features = ["peek"] }
+jni = "0.21"
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+# The JNI entry point catches panics and returns an unavailable result.
+panic = "unwind"
+strip = true

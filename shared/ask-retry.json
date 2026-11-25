@@ -1,0 +1,18 @@
+{
+  "max_attempts": 3,
+  "attempt_ms": 5500,
+  "connect_ms": 1500,
+  "hedge_ms": 2500,
+  "backoff_ms": 100,
+  "jitter_ms": 100,
+  "response_margin_ms": 450,
+  "legacy_phone_read_ms": 6600,
+  "legacy_phone_overall_ms": 9500,
+  "legacy_phone_presend_ms": 4350,
+  "decision_commit_margin_ms": 100,
+  "laptop_overall_ms": 9000,
+  "phone_read_ms": 9700,
+  "phone_overall_ms": 15000,
+  "phone_fallback_ms": 3000,
+  "min_retry_window_ms": 250
+}

@@ -1,0 +1,7 @@
+target/
+app/gen/
+node_modules/
+ui-dist/
+__pycache__/
+
+/build/

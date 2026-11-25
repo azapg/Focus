@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.nightingalelab.focus.phone.tests">
+  <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="35" />
+  <application android:label="Focus Phone Tests" />
+  <instrumentation
+      android:name="org.nightingalelab.focus.phone.tests.PhoneDeviceChecks"
+      android:targetPackage="org.nightingalelab.focus.phone" />
+</manifest>

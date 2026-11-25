@@ -1,0 +1,3 @@
+[env]
+# xeet's default asset bundle includes proprietary fonts. Use the FocusDNS bundle.
+XEET_VENDOR_DIR = { value = "browser-host/peek-assets", relative = true, force = true }

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "rules": [],
+  "finiteAlternatives": [
+    {
+      "id": "readest",
+      "app": "Readest",
+      "goal": "5 pages",
+      "androidPackage": "com.bilingify.readest",
+      "laptopUrl": "https://web.readest.com/"
+    },
+    {
+      "id": "duolingo",
+      "app": "Duolingo",
+      "goal": "1 lesson",
+      "androidPackage": "com.duolingo",
+      "laptopUrl": "https://www.duolingo.com/learn"
+    }
+  ]
+}

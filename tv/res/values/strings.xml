@@ -1,0 +1,4 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+  <string name="accessibility_description">Detects app switches to apply your app restrictions and show the pause timer. Does not read screen text, forms or video contents. You can turn it off in Settings.</string>
+</resources>

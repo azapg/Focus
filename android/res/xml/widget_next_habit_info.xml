@@ -1,0 +1,4 @@
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/widget_habit_compact" android:minWidth="100dp" android:minHeight="85dp"
+    android:targetCellWidth="2" android:targetCellHeight="2"
+    android:widgetCategory="home_screen" android:updatePeriodMillis="0" />

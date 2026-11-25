@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">Focus</string>
+  <string name="accessibility_description">Protects your Private DNS settings and reads the active browser domain for Focus stats, including in private tabs when the browser shares its address bar with Android Accessibility. Nothing leaves your devices.</string>
+  <string name="widget_a_name">Focus: The score</string>
+  <string name="widget_b_name">Focus: The sentence</string>
+  <string name="widget_c_name">Focus: The week</string>
+  <string name="widget_e_name">Focus: The ring</string>
+</resources>

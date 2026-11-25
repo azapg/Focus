@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Focus Browser Activity",
+  "version": "0.2.1",
+  "minimum_chrome_version": "120",
+  "description": "Share foreground browser activity with Focus and cover blocked sites when protection is on.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmJ5wSWck8NcFVmrk9BMX+E3HjpVf5jEBEV7Ij/OLbxnQhq5bWhOD9Ap9YFgfvFpdy8C0If8IbhAM8VeUlFCnvhBvK1o4pZ1W7XIfBF9uG/264xal1PYvCRlaaK+qKeG5hu9Bcn9TliB3Vc0wpaU3YkPDwp3VjYhqDr6xjhMkyxchDROz7WVQzzGkCbCNXXiiwinCqM92Aqx3bybZH0TAMubFE3JvZap+CG5FZBkMt5uX4ktLSy9J6Hv3NU8M8LhQIeXtWxhcC9osDcTQVg6DKMwKogkyXfMFaKk1qh1VMdH0eqEnEP+imh83EoUmxqoN3hFmd2hByHXNE6bczikidwIDAQAB",
+  "permissions": [
+    "tabs",
+    "webNavigation",
+    "idle",
+    "nativeMessaging",
+    "storage",
+    "alarms",
+    "contextMenus",
+    "scripting"
+  ],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "incognito": "not_allowed",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Focus",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  }
+}
