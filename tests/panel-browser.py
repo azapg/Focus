@@ -119,6 +119,7 @@ async def main(output=None):
     assert await notion.count() == 1
     assert 'app.notion.com' not in await page.locator('#pApps').inner_text()
     await notion.locator('summary').click()
+    assert await page.locator('#tip').evaluate("e => getComputedStyle(e).opacity") == '0'
     assert 'Writing' in await notion.locator('.st-meta').inner_text()
     assert '52m unbroken' in await notion.locator('.focus-sessions').inner_text()
     notion_pages = await notion.locator('.cat-pages').inner_text()

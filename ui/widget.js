@@ -432,11 +432,13 @@ document.addEventListener('keydown', (event) => {
 });
 w.querySelector('.lockb').onclick = () => { log('lock clicked'); closePanel(); setState('idle'); invoke('lock'); };
 
-// Hover tooltips for anything with data-tip.
+// Hover tooltips for anything with data-tip (hidden once a details row is clicked/expanded).
 const tip = document.getElementById('tip');
+const hideTip = () => { tip.style.opacity = 0; };
+document.addEventListener('pointerdown', hideTip, true);
 document.addEventListener('mousemove', (e) => {
   const el = e.target.closest('[data-tip]');
-  if (!el) { tip.style.opacity = 0; return; }
+  if (!el || el.closest('details[open]')) { hideTip(); return; }
   tip.innerHTML = el.dataset.tip;
   tip.style.left = Math.max(4, Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 4)) + 'px';
   tip.style.top = (e.clientY + 14) + 'px'; tip.style.opacity = 1;
