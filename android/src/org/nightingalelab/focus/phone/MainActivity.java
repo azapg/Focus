@@ -758,15 +758,21 @@ public final class MainActivity extends Activity {
     Theme.DnsRingView ring = new Theme.DnsRingView(this);
     int earned = HabitStore.get(this).read().credit(Habits.day(lastNow));
     int allowance = cfg.dailyLimitMinutes + (v.singleDay && selectedWeekDay < 0 ? earned : 0);
-    ring.setFraction(FocusStats.ringFraction(v, allowance));
+    float ringFrac = FocusStats.ringFraction(v, allowance);
+    long limitMs = allowance * FocusStats.MIN;
+    long perDayOff = v.offAllMs / Math.max(1, v.nDays);
+    boolean overLimit = limitMs > 0 && perDayOff >= limitMs;
+    boolean warnLimit = !overLimit && ringFrac >= 0.75f;
+    ring.setFraction(ringFrac, overLimit ? Theme.BAD : warnLimit ? Theme.WARN : 0xFF71717A);
     ringRow.addView(ring, new LinearLayout.LayoutParams(Theme.dp(this, 42), Theme.dp(this, 42)));
     Theme.gap(ringRow, 12);
     LinearLayout ringCol = Theme.column(this);
-    ringCol.addView(Theme.text(this, FocusStats.fmt(v.offAllMs) + " DNS off", 13.5f, Theme.FG, true));
+    ringCol.addView(Theme.text(this, FocusStats.fmt(v.offAllMs) + " DNS off", 13.5f,
+        overLimit ? Theme.BAD_TEXT : Theme.FG, true));
     Theme.gap(ringCol, 2);
     ringCol.addView(Theme.text(this,
         FocusStats.ringSubtitle(v, allowance, deviceScope != null),
-        11.5f, Theme.MUTED, false));
+        11.5f, overLimit ? Theme.BAD_TEXT : warnLimit ? Theme.WARN : Theme.MUTED, false));
     ringRow.addView(ringCol, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
     pzCard.addView(ringRow);
     if (allowance > cfg.dailyLimitMinutes) {
@@ -890,7 +896,10 @@ public final class MainActivity extends Activity {
       sb.append(", ");
       int dStart = sb.length();
       sb.append(FocusStats.fmt(v.driftMs)).append(" drifting");
-      sb.setSpan(new ForegroundColorSpan(Theme.WARN), dStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      int days = Math.max(1, v.nDays);
+      boolean heavy = (v.driftMs / days) >= 90L * FocusStats.MIN
+          || (v.totalMs >= 30L * FocusStats.MIN && v.driftMs * 100 >= v.totalMs * 35);
+      sb.setSpan(new ForegroundColorSpan(heavy ? Theme.BAD_TEXT : Theme.WARN), dStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
     sb.append(".");
     return Theme.text(this, sb, 13f, Theme.MUTED, false);
@@ -1006,9 +1015,13 @@ public final class MainActivity extends Activity {
 
       LinearLayout barStack = Theme.column(this);
       int barW = Theme.dp(this, 22);
+      PausePolicy.Config wkCfg = Store.get(this).policyConfig();
+      int wkEarned = d.today ? HabitStore.get(this).read().credit(Habits.day(lastNow)) : 0;
+      long dayLimMs = (wkCfg.dailyLimitMinutes + wkEarned) * FocusStats.MIN;
+      boolean dayOver = dayLimMs > 0 && d.offMs > dayLimMs;
       if (offH > 0) {
         View offSeg = new View(this);
-        offSeg.setBackground(Theme.topRounded(this, Theme.WARN, 0, 3));
+        offSeg.setBackground(Theme.topRounded(this, dayOver ? Theme.BAD : Theme.WARN, 0, 3));
         barStack.addView(offSeg, new LinearLayout.LayoutParams(barW, offH));
       }
       if (onH > 0) {
@@ -1069,7 +1082,14 @@ public final class MainActivity extends Activity {
     row.addView(nameWrap, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
     Theme.gap(row, 8);
-    int timeColor = a.mostlyDnsOff() ? Theme.WARN : Theme.FG;
+    String catId = a.category != null ? a.category.id : "";
+    boolean singleDayView = page == Page.TODAY || selectedWeekDay >= 0;
+    boolean wasteWarn = singleDayView && (("social".equals(catId) || "tv".equals(catId) || "games".equals(catId) || "adult".equals(catId))
+        ? a.ms >= 10L * FocusStats.MIN
+        : "video".equals(catId) && a.ms >= 30L * FocusStats.MIN);
+    boolean heavyWaste = singleDayView && ("adult".equals(catId)
+        || (a.category != null && ActivityClassifier.FG_DRIFT.equals(a.category.group) && a.ms >= 60L * FocusStats.MIN));
+    int timeColor = heavyWaste ? Theme.BAD_TEXT : (a.mostlyDnsOff() || wasteWarn) ? Theme.WARN : Theme.FG;
     row.addView(Theme.text(this, FocusStats.fmt(a.ms), 13.5f, timeColor, true));
 
     row.setOnClickListener(view -> {
@@ -1163,7 +1183,8 @@ public final class MainActivity extends Activity {
     top.setGravity(Gravity.TOP);
 
     String tmTxt = withDay ? p.dayTimeLabel : p.timeLabel;
-    int tmColor = p.drift ? Theme.WARN : Theme.MUTED;
+    boolean lowRating = p.rating > 0 && p.rating <= 2;
+    int tmColor = lowRating ? Theme.BAD_TEXT : p.drift ? Theme.WARN : Theme.MUTED;
     TextView tm = Theme.text(this, tmTxt, 11f, tmColor, false);
     tm.setPadding(0, Theme.dp(this, 2), 0, 0);
     top.addView(tm, new LinearLayout.LayoutParams(Theme.dp(this, withDay ? 56 : 40), LinearLayout.LayoutParams.WRAP_CONTENT));

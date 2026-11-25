@@ -943,15 +943,15 @@ const ActivityClassifier = (() => {
     { id: 'learning', label: 'Learning', group: 'learn', color: '#a1a1aa' },
     { id: 'reading', label: 'Reading', group: 'learn', color: '#8f8f98' },
     { id: 'messaging', label: 'Messaging', group: 'connect', color: '#71717a' },
-    { id: 'social', label: 'Social feeds', group: 'drift', color: '#7c7c85' },
-    { id: 'video', label: 'Videos', group: 'drift', color: '#7c7c85' },
-    { id: 'tv', label: 'TV & streams', group: 'drift', color: '#7c7c85' },
-    { id: 'music', label: 'Music', group: 'drift', color: '#8a5a12' },
-    { id: 'games', label: 'Games', group: 'drift', color: '#7c7c85' },
-    { id: 'news', label: 'News', group: 'drift', color: '#52525b' },
-    { id: 'shopping', label: 'Shopping', group: 'drift', color: '#52525b' },
-    { id: 'web', label: 'Web', group: 'drift', color: '#8a5a12' },
-    { id: 'adult', label: 'Adult', group: 'drift', color: '#52525b' },
+    { id: 'social', label: 'Social feeds', group: 'drift', color: '#f59e0b' },
+    { id: 'video', label: 'Videos', group: 'drift', color: '#e58e26' },
+    { id: 'tv', label: 'TV & streams', group: 'drift', color: '#d97706' },
+    { id: 'music', label: 'Music', group: 'neutral', color: '#63636c' },
+    { id: 'games', label: 'Games', group: 'drift', color: '#ea580c' },
+    { id: 'news', label: 'News', group: 'drift', color: '#71717a' },
+    { id: 'shopping', label: 'Shopping', group: 'drift', color: '#71717a' },
+    { id: 'web', label: 'Web', group: 'neutral', color: '#52525b' },
+    { id: 'adult', label: 'Adult', group: 'drift', color: '#ef4444' },
     { id: 'errands', label: 'Errands', group: 'neutral', color: '#52525b' },
     { id: 'unsorted', label: 'Not sure', group: 'neutral', color: '#3f3f46' },
   ];
@@ -995,6 +995,7 @@ const ActivityClassifier = (() => {
   /** Screen time per fine category and per app, across all selected devices. */
   function summarizeFine(sources, from, to, { userRules = null, cache = null } = {}) {
     const cats = Object.create(null);
+    const catOff = Object.create(null);
     const apps = Object.create(null);
     let total = 0;
     let totalOff = 0;
@@ -1018,6 +1019,7 @@ const ActivityClassifier = (() => {
         total += d;
         totalOff += o;
         cats[f.id] = (cats[f.id] || 0) + d;
+        catOff[f.id] = (catOff[f.id] || 0) + o;
         const entry = (apps[f.app] ??= { app: f.app, ms: 0, off: 0, cats: Object.create(null), devices: Object.create(null), items: Object.create(null), webMs: 0 });
         // Website = seen as a URL/domain; native apps and desktop programs are not.
         if (c.matchType === 'host' || s.domain || (s.source === 'chromium_extension' && s.browser?.url)) entry.webMs += d;
@@ -1034,7 +1036,7 @@ const ActivityClassifier = (() => {
       }
     }
     const top = (o) => Object.entries(o).sort((x, y) => y[1] - x[1]);
-    const catList = top(cats).map(([id, ms]) => ({ ...FINE_MAP[id], ms }));
+    const catList = top(cats).map(([id, ms]) => ({ ...FINE_MAP[id], ms, off: catOff[id] || 0 }));
     const groups = Object.create(null);
     for (const c of catList) groups[c.group] = (groups[c.group] || 0) + c.ms;
     const appList = Object.values(apps)

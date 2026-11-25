@@ -356,9 +356,9 @@ export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: 
         <div className="judge-answer" aria-live="polite">
         {result && (
           <>
-            {retry && result.failure && <p className="judge-attention">{result.refused
+            {retry && result.failure && <p className={`judge-attention${result.refused ? " bad" : ""}`}>{result.refused
               ? "Assistant declined this request." : fallbackMessages[result.failure]}</p>}
-            {decision?.action === "deny" && <p>{decision.message}</p>}
+            {decision?.action === "deny" && <p className="judge-attention bad">{decision.message}</p>}
             {decision?.action === "allow_services" && !result.scope_available && <p>Add the NextDNS key in Settings to open these services.</p>}
             {decision?.action === "full_pause" && <p>Full pause · {decision.minutes} min</p>}
             {decision?.counter_offer && <p>{decision.counter_offer}</p>}
@@ -371,7 +371,9 @@ export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: 
               <Input value={plan} maxLength={300} disabled={busy || holding} onChange={(e) => setPlan(e.target.value)} />
             </label>}
             {needsHold && <button
-              type="button" className="t3-btn primary"
+              type="button"
+              className={`t3-btn primary judge-hold${overriding ? " override" : ""}${holding ? " holding" : ""}`}
+              style={{ "--hold-ms": `${result.friction.hold_ms}ms` } as React.CSSProperties}
               disabled={busy || remaining > 0 || (result.friction.requires_plan && plan.trim().length < 3)}
               onPointerDown={(e) => {
                 if (e.button !== 0 || e.target !== e.currentTarget) return;
@@ -387,7 +389,7 @@ export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: 
               }}
               onKeyUp={(e) => { if (e.key === " " || e.key === "Enter") release(); }}
               onBlur={release}
-            >{remaining > 0 ? `Wait ${remaining}s` : holding ? "Keep holding…" : `Hold ${result.friction.hold_ms / 1000}s for ${manual ? duration : decision?.minutes} min`}</button>}
+            ><span>{remaining > 0 ? `Wait ${remaining}s` : holding ? "Keep holding…" : `Hold ${result.friction.hold_ms / 1000}s for ${manual ? duration : decision?.minutes} min`}</span></button>}
           </>
         )}
         {message && <p role="status">{message}</p>}

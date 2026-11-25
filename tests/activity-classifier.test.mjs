@@ -292,3 +292,19 @@ test('coarse browser titles must be whole hostnames to classify as sites', () =>
   assert.equal(lesson.category, 'learning');
   assert.equal(lesson.matchType, 'host');
 });
+
+test('fine category palette keeps productive and neutral work monochrome and colors wasting categories', () => {
+  const isGray = (hex) => {
+    const [, r, g, b] = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex) || [];
+    return r && Math.max(parseInt(r, 16), parseInt(g, 16), parseInt(b, 16)) - Math.min(parseInt(r, 16), parseInt(g, 16), parseInt(b, 16)) <= 16;
+  };
+  const byId = Object.fromEntries(ActivityClassifier.FINE.map((c) => [c.id, c]));
+  for (const id of ['coding', 'business', 'writing', 'design', 'learning', 'reading', 'messaging', 'music', 'web', 'errands', 'unsorted']) {
+    assert.equal(isGray(byId[id].color), true, `${id} should stay monochrome (${byId[id].color})`);
+  }
+  assert.equal(byId.music.group, 'neutral');
+  assert.equal(byId.web.group, 'neutral');
+  for (const id of ['social', 'video', 'tv', 'games', 'adult']) {
+    assert.equal(isGray(byId[id].color), false, `${id} should carry a warning/breach color (${byId[id].color})`);
+  }
+});

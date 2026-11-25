@@ -30,7 +30,7 @@ async function cover(url, until, id) {
   globalThis[key]?.();
   const dialog = document.createElement('dialog');
   dialog.setAttribute('aria-label', 'Feeds locked until a habit is done');
-  dialog.style.cssText = 'border:1px solid #8d6030;background:#100d09;color:#e09f3e;padding:20px;border-radius:12px;font:14px system-ui';
+  dialog.style.cssText = 'border:1px solid rgba(239,68,68,0.55);background:#060607;color:#f87171;padding:20px;border-radius:12px;font:14px system-ui';
   dialog.textContent = 'Feeds locked until a habit is done';
   dialog.addEventListener('cancel', event => event.preventDefault());
   document.documentElement.append(dialog);

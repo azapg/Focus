@@ -19,7 +19,9 @@ public final class HabitViews {
   public static final int WHITE = 0xFFFAFAFA;
   public static final int GREY = 0xFFA1A1AA;
   public static final int MUTED = 0xFF8A8A8A;
-  public static final int ORANGE = 0xFFE09F3E;
+  public static final int ORANGE = 0xFFF59E0B;
+  public static final int RED = 0xFFF87171;
+  public static final int RED_STROKE = 0xFFEF4444;
   public static final int CARD = 0xFF0A0A0C;
   public static final int BORDER = 0xFF26262A;
   public static final long HOLD_MS = 650;
@@ -97,8 +99,9 @@ public final class HabitViews {
       name.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
       label.addView(name);
       String due = status.dueLabel();
+      int dueColor = status.overdue || status.grace ? RED : ORANGE;
       SpannableString detail = new SpannableString(due + " · " + status.habit.cadence());
-      detail.setSpan(new ForegroundColorSpan(ORANGE), 0, due.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      detail.setSpan(new ForegroundColorSpan(dueColor), 0, due.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
       TextView caption = text(context, "", size - 2, MUTED);
       caption.setText(detail);
       label.addView(caption);
@@ -120,7 +123,7 @@ public final class HabitViews {
 
     @Override protected void dispatchDraw(Canvas canvas) {
       if (fill > 0) {
-        paint.setColor(settling ? 0x38FFFFFF : 0x50C27A12);
+        paint.setColor(settling ? 0x38FFFFFF : 0x24FFFFFF);
         canvas.drawRect(0, 0, getWidth() * fill, getHeight(), paint);
       }
       super.dispatchDraw(canvas);

@@ -39,7 +39,20 @@ const Panel = (() => {
   const TOP_APPS = 5;
   const TOP_PAUSES = 3;
   const TOP_CATS = 4;
+  const WASTE_CATS = new Set(['social', 'video', 'tv', 'games', 'adult']);
   const limitMin = () => (typeof FocusLimits !== 'undefined' ? FocusLimits.get().dnsLimitMin : 60);
+
+  function categoryTone(cat, days = 1, overLimit = false) {
+    if (!cat || !WASTE_CATS.has(cat.id)) return '';
+    if (cat.id === 'adult') return 'bad';
+    if (cat.ms / days >= 60 * Stats.MIN) return 'bad';
+    if (overLimit && (cat.off || 0) >= 15 * Stats.MIN) return 'bad';
+    return 'warn';
+  }
+  function categoryColor(cat, days = 1, overLimit = false) {
+    const tone = categoryTone(cat, days, overLimit);
+    return tone === 'bad' ? '#ef4444' : cat.color;
+  }
 
   const SRC_SVG = {
     Phone: '<svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18.5h2"/></svg>',
@@ -96,7 +109,7 @@ const Panel = (() => {
     return `<span class="app-ico letter" aria-hidden="true">${esc(letter)}</span>`;
   }
 
-  function renderHero(fine, range, selectedDay) {
+  function renderHero(fine, range, selectedDay, { days = 1, overLimit = false } = {}) {
     const statsEl = $('pStats');
     statsEl.classList.add('ratio-mode');
     const total = fine.total;
@@ -107,6 +120,9 @@ const Panel = (() => {
     }
     const building = fine.groups.create || 0;
     const drift = fine.groups.drift || 0;
+    const heavyDrift = drift / days >= 90 * Stats.MIN
+      || (total >= 30 * Stats.MIN && drift / total >= 0.35)
+      || (overLimit && drift >= 30 * Stats.MIN);
     const topCats = fine.categories.slice(0, TOP_CATS);
     const restCats = fine.categories.slice(TOP_CATS);
     const major = fine.categories.filter((c) => c.ms / total >= 0.03);
@@ -117,59 +133,74 @@ const Panel = (() => {
       const dim = catFilter && !list.some((c) => c.id === catFilter) ? ' dim' : '';
       return `<span class="thin-seg${dim}" style="flex:${ms};background:${bg}" data-tip="${esc(label)} <span class='k'>${Stats.fmt(ms)}</span>"></span>`;
     };
+    const legBtn = (c) => {
+      const tone = categoryTone(c, days, overLimit);
+      const col = categoryColor(c, days, overLimit);
+      const cls = [catFilter === c.id ? 'on' : catFilter ? 'dim' : '', tone].filter(Boolean).join(' ');
+      return `<button type="button" class="${cls}" data-dcat="${esc(c.id)}"><i style="background:${col}"></i>${esc(c.label)} <span class="m">${Stats.fmt(c.ms)}</span></button>`;
+    };
     statsEl.innerHTML = `
       <div class="hero-line">
         <span class="hero-total v" data-total>${Stats.fmt(total)}</span>
-        <span class="hero-sent">on screens, <b data-build-pct>${Stats.fmt(building)} building</b>${drift >= 60e3 ? `, <span class="hero-drift">${Stats.fmt(drift)} drifting</span>` : ''}.</span>
+        <span class="hero-sent">on screens, <b data-build-pct>${Stats.fmt(building)} building</b>${drift >= 60e3 ? `, <span class="hero-drift${heavyDrift ? ' bad' : ''}">${Stats.fmt(drift)} drifting</span>` : ''}.</span>
       </div>
       <div class="thin-bar">
         ${major.map((c) => {
           const share = Math.round((c.ms / total) * 100);
           const dim = catFilter && catFilter !== c.id ? ' dim' : '';
-          return `<button type="button" class="thin-seg${dim}" data-dcat="${esc(c.id)}" style="flex:${c.ms};background:${c.color}" data-tip="${esc(esc(c.label))} <span class='k'>${Stats.fmt(c.ms)} · ${share}%</span>" aria-label="${esc(c.label)} ${Stats.fmt(c.ms)}"></button>`;
+          const col = categoryColor(c, days, overLimit);
+          return `<button type="button" class="thin-seg${dim}" data-dcat="${esc(c.id)}" style="flex:${c.ms};background:${col}" data-tip="${esc(esc(c.label))} <span class='k'>${Stats.fmt(c.ms)} · ${share}%</span>" aria-label="${esc(c.label)} ${Stats.fmt(c.ms)}"></button>`;
         }).join('')}
         ${minorSeg(minor.filter((c) => c.group !== 'drift'), '#27272a', 'Other categories')}
-        ${minorSeg(minor.filter((c) => c.group === 'drift'), '#7c7c85', 'Other drifting')}
+        ${minorSeg(minor.filter((c) => c.group === 'drift'), '#f59e0b', 'Other drifting')}
       </div>
       <div class="cat-leg">
-        ${topCats.map((c) => `<button type="button" class="${catFilter === c.id ? 'on' : catFilter ? 'dim' : ''}" data-dcat="${esc(c.id)}"><i style="background:${c.color}"></i>${esc(c.label)} <span class="m">${Stats.fmt(c.ms)}</span></button>`).join('')}
+        ${topCats.map(legBtn).join('')}
         ${restCats.length ? `<button type="button" class="cat-more" data-fine-more>${showMoreCats ? 'Less' : `+${restCats.length} more`}</button>` : ''}
       </div>
-      ${restCats.length && showMoreCats ? `<div class="cat-leg rest">${restCats.map((c) => `<button type="button" class="${catFilter === c.id ? 'on' : catFilter ? 'dim' : ''}" data-dcat="${esc(c.id)}"><i style="background:${c.color}"></i>${esc(c.label)} <span class="m">${Stats.fmt(c.ms)}</span></button>`).join('')}</div>` : ''}`;
+      ${restCats.length && showMoreCats ? `<div class="cat-leg rest">${restCats.map(legBtn).join('')}</div>` : ''}`;
   }
 
-  function renderAppRow(a, multiDevice, openSet, showOffOnly = false) {
+  function renderAppRow(a, multiDevice, openSet, showOffOnly = false, { days = 1, overLimit = false } = {}) {
     const devNames = multiDevice ? a.devices.map((d) => d.name) : [];
     const dev = devNames.filter((n, i, all) => all.length > 1 || n !== 'Laptop').join(' + ');
     const pages = a.items.filter((p) => p.ms >= 30e3 && p.title !== a.app);
     const mostlyOff = showOffOnly || (a.off >= 60e3 && a.off >= a.ms * 0.5);
+    const wasteWarn = (a.category === 'social' || a.category === 'tv' || a.category === 'games' || a.category === 'adult')
+      ? a.ms / days >= 10 * Stats.MIN
+      : a.category === 'video' && a.ms / days >= 30 * Stats.MIN;
+    const heavyWaste = WASTE_CATS.has(a.category) && a.ms / days >= 60 * Stats.MIN;
+    const isBad = (mostlyOff && overLimit) || (overLimit && a.off >= 15 * Stats.MIN && WASTE_CATS.has(a.category)) || heavyWaste || a.category === 'adult';
+    const offBad = overLimit && a.off >= 60e3;
     const offText = a.off >= 30e3 ? `${Stats.fmt(a.off)} with DNS off` : '';
+    const dotColor = isBad ? '#ef4444' : a.color;
     const tipParts = [
-      `<span class='tip-dot' style='background:${a.color}'></span>${esc(esc(a.categoryLabel))}`,
+      `<span class='tip-dot' style='background:${dotColor}'></span>${esc(esc(a.categoryLabel))}`,
       dev ? `<span class='k'>· ${esc(esc(dev))}</span>` : '',
-      offText ? `<span class='tip-off'>· ${esc(offText)}</span>` : '',
+      offText ? `<span class='tip-off${offBad ? ' bad' : ''}'>· ${esc(offText)}</span>` : '',
     ].filter(Boolean).join(' ');
     const detailMeta = `
       <div class="st-meta">
-        <span><i style="background:${a.color}"></i>${esc(a.categoryLabel)}</span>
+        <span><i style="background:${dotColor}"></i>${esc(a.categoryLabel)}</span>
         ${dev ? `<span class="st-meta-sep">·</span><span>${esc(dev)}</span>` : ''}
-        ${offText ? `<span class="st-meta-sep">·</span><span class="st-meta-off">${esc(offText)}</span>` : ''}
+        ${offText ? `<span class="st-meta-sep">·</span><span class="st-meta-off${offBad ? ' bad' : ''}">${esc(offText)}</span>` : ''}
       </div>`;
     const pagesHtml = pages.length >= 2
       ? `<div class="cat-pages">${pages.slice(0, 6).map((p) =>
           `<div class="cat-page"><span class="cat-page-title">${esc(p.title)}</span><span class="n">${Stats.fmt(p.ms)}</span></div>`
         ).join('')}</div>`
       : '';
+    const timeCls = ['n', mostlyOff ? 'dns-off' : '', !mostlyOff && wasteWarn ? 'waste-warn' : '', isBad ? 'dns-bad' : ''].filter(Boolean).join(' ');
     return `<details class="site st d-app-item" data-fit data-site="${esc(a.app)}"${openSet.has(a.app) ? ' open' : ''}>
       <summary class="st-row d-app-row" data-tip="${tipParts}">
         <span class="st-left">${appIcon(a.app)}<span class="st-name">${esc(a.app)}</span>${srcIcon(a, multiDevice)}</span>
-        <span class="n${mostlyOff ? ' dns-off' : ''}" data-dns-off="${Math.round(a.off)}">${Stats.fmt(showOffOnly ? a.off : a.ms)}</span>
+        <span class="${timeCls}" data-dns-off="${Math.round(a.off)}">${Stats.fmt(showOffOnly ? a.off : a.ms)}</span>
       </summary>
       <div class="st-detail">${detailMeta}${pagesHtml}</div>
     </details>`;
   }
 
-  function renderScreenTime(fine, multiDevice) {
+  function renderScreenTime(fine, multiDevice, ctx = {}) {
     const appsEl = $('pApps');
     const lblEl = $('pAppsLbl');
     const footEl = $('pAppsFoot');
@@ -187,7 +218,7 @@ const Panel = (() => {
     }
     const open = new Set([...appsEl.querySelectorAll('details[open]')].map((d) => d.dataset.site));
     const shown = list.slice(0, 12);
-    appsEl.innerHTML = shown.map((a) => renderAppRow(a, multiDevice, open)).join('');
+    appsEl.innerHTML = shown.map((a) => renderAppRow(a, multiDevice, open, false, ctx)).join('');
     if (footEl) {
       if (allList.length > TOP_APPS) {
         footEl.hidden = false;
@@ -199,7 +230,7 @@ const Panel = (() => {
     }
   }
 
-  function renderExplorer(fine, multiDevice, range, days, selectedDay) {
+  function renderExplorer(fine, multiDevice, range, days, selectedDay, ctx = {}) {
     const expEl = $('explorerView');
     const statsMain = $('statsMain');
     if (!expEl || !statsMain) return;
@@ -245,7 +276,7 @@ const Panel = (() => {
       <div class="exp-list">
         <div class="bento-card">
           ${list.length
-            ? list.map((a) => renderAppRow(a, multiDevice, open, expFilter === 'off')).join('')
+            ? list.map((a) => renderAppRow(a, multiDevice, open, expFilter === 'off', ctx)).join('')
             : `<div class="bento-empty" style="text-align:center;padding:24px">No apps matching "${esc(expSearch)}".</div>`}
         </div>
       </div>`;
@@ -378,6 +409,13 @@ const Panel = (() => {
     const max = Math.max(...daySums.map((s) => s.active), 60 * Stats.MIN);
     const avgMs = daySums.reduce((n, s) => n + s.active, 0) / 7;
     const H = 72;
+    const baseLim = limitMin();
+    const todayCredit = window.focusHabitCredit || 0;
+    const dayOver = days.map((d, i) => {
+      const limMs = (baseLim + (d === today ? todayCredit : 0)) * Stats.MIN;
+      return limMs > 0 && daySums[i].off > limMs;
+    });
+    const anyOver = dayOver.some(Boolean);
     const selChip = selectedDayIdx != null
       ? `<button type="button" class="filter-chip" data-clear-day>${wday(days[selectedDayIdx])} · Back to 7 days ×</button>`
       : '';
@@ -385,22 +423,23 @@ const Panel = (() => {
     $('pChart').innerHTML = `
       <div class="bento-card wk-card">
         <div class="bento-head">
-          <span class="bento-title">Last 7 days <span class="wk-key"><i></i>DNS off</span>${selChip}</span>
+          <span class="bento-title">Last 7 days <span class="wk-key"><i></i>DNS off</span>${anyOver ? '<span class="wk-key"><i class="bad"></i>Over limit</span>' : ''}${selChip}</span>
           <span class="wk-avg">Avg ${Stats.fmt(avgMs)}/day</span>
         </div>
         <div class="wk-bars simple-week">${days.map((d, i) => {
           const s = daySums[i];
+          const over = dayOver[i];
           const offH = s.off >= 30e3 ? Math.max(3, (H * Math.min(s.active || s.off, s.off)) / max) : 0;
           const onMs = Math.max(0, s.active - Math.min(s.active, s.off));
           const onH = s.active >= 30e3 ? Math.max(3, (H * onMs) / max) : 0;
-          const tip = `${wday(d)} <span class='k'>${Stats.fmt(s.active)}</span>${s.off >= 30e3 ? ` <span class='tip-off'>· ${Stats.fmt(s.off)} DNS off</span>` : ''}`;
+          const tip = `${wday(d)} <span class='k'>${Stats.fmt(s.active)}</span>${s.off >= 30e3 ? ` <span class='tip-off${over ? ' bad' : ''}'>· ${Stats.fmt(s.off)} DNS off${over ? ' (over limit)' : ''}</span>` : ''}`;
           return `<button type="button" class="col wk-col${selectedDayIdx === i ? ' sel' : ''}" data-dday="${i}" data-tip="${tip}">
             <span class="wk-v">${s.active >= 60e3 ? fmtBar(s.active) : '—'}</span>
             <div class="wk-stack">
-              ${offH ? `<i class="wk-off" style="height:${offH.toFixed(1)}px"></i>` : ''}
+              ${offH ? `<i class="wk-off${over ? ' bad' : ''}" style="height:${offH.toFixed(1)}px"></i>` : ''}
               ${onH ? `<i class="wk-on" style="height:${onH.toFixed(1)}px"></i>` : ''}
             </div>
-            <span class="wk-d${d === today ? ' today' : ''}">${wday(d)}</span>
+            <span class="wk-d${d === today ? ' today' : ''}">${wday(d)}${over ? '<i class="wk-dot" aria-hidden="true"></i>' : ''}</span>
           </button>`;
         }).join('')}</div>
       </div>`;
@@ -449,14 +488,30 @@ const Panel = (() => {
     pausesEl.className = `pz${withDay ? ' with-day' : ''}`;
 
     const days = withDay ? 7 : 1;
-    const today = from === Stats.dayStart(Date.now()) && days === 1;
+    const todayStart = Stats.dayStart(Date.now());
+    const today = from === todayStart && days === 1;
     const credit = today ? window.focusHabitCredit || 0 : 0;
+    const limitMs = (limitMin() + credit) * Stats.MIN;
+    const overLimit = limitMs > 0 && (offAllMs / days) >= limitMs;
+
+    // Flag pauses that pushed their calendar day over the shared daily DNS-off limit.
+    const dayTotals = new Map();
+    const overKeys = new Set();
+    const pauseKey = (p) => `${p.sourceId}:${p.t}:${p.pause_id ?? ''}`;
+    for (const p of [...allPauses].filter((x) => x.kind !== 'app').sort((a, b) => a.t - b.t)) {
+      const dayKey = Stats.dayStart(p.t);
+      const dayLim = (limitMin() + (dayKey === todayStart ? (window.focusHabitCredit || 0) : 0)) * Stats.MIN;
+      const nextTotal = (dayTotals.get(dayKey) || 0) + offOf(p);
+      dayTotals.set(dayKey, nextTotal);
+      if (dayLim > 0 && nextTotal > dayLim) overKeys.add(pauseKey(p));
+    }
+
     const peekCount = sources.reduce((count, src) => count + (src.history.peeks ?? []).filter((t) => t >= from && t < to).length, 0);
     const dnsPauseCount = pauses.filter((p) => p.kind !== 'app').length;
     const peeks = peekCount
       ? `<div class="pz-sum"><b>${peekCount} ${peekCount === 1 ? 'peek' : 'peeks'}</b> · ${dnsPauseCount} DNS ${dnsPauseCount === 1 ? 'pause' : 'pauses'}</div>`
       : '';
-    const chart = dnsLimitChart(offAllMs, (limitMin() + credit) * Stats.MIN, days, scoped)
+    const chart = dnsLimitChart(offAllMs, limitMs, days, scoped)
       + (credit ? `<div class="habit-credit">${limitMin()}m base + ${credit}m earned</div>` : '')
       + peeks;
 
@@ -464,7 +519,7 @@ const Panel = (() => {
       const empty = `<div class="bento-empty" style="border-top:1px solid var(--d-div)">No pauses ${withDay ? 'this week' : 'today'}.</div>`;
       pausesEl.innerHTML = chart + (peekCount ? '' : empty);
       if (footEl) { footEl.hidden = true; footEl.innerHTML = ''; }
-      return 0;
+      return { count: 0, overLimit, days };
     }
 
     const running = pauses.filter((p) => p.end > p.sourceNow);
@@ -477,27 +532,32 @@ const Panel = (() => {
         ? p.audit.items.map((x) => `<span class="${x.status === 'drift' && x.ms >= 2 * Stats.MIN ? 'drift' : ''}">${esc(x.app)} ${Stats.fmt(x.ms)}</span>`).join(', ')
         : '';
       const context = [p.device_name, p.kind === 'app' ? p.app_label : ''].filter(Boolean).map(esc).join(' · ');
-      const key = `${p.sourceId}:${p.t}:${p.pause_id ?? ''}`;
+      const key = pauseKey(p);
       const isOpen = openPause === key;
       const live = p.end > p.sourceNow;
+      const isOver = overKeys.has(key);
+      const lowRating = Stats.validRating(p.rating) && p.rating <= 2;
+      const isBad = isOver || lowRating;
       const trail = live ? 'Paused now' : did ? `→ ${did}` : 'No recorded use';
       const feedback = [Stats.checkInLabel(p.check_in), Stats.validRating(p.rating) ? `${p.rating}/5` : '', Stats.validRating(p.rating) ? p.rating_note : ''].filter(Boolean).join(' · ');
-      return `<div class="pz-row d-pz-row${p.audit.hasDrift ? ' drift' : ''}${withDay ? ' with-day' : ''}${isOpen ? ' open' : ''}" data-pz="${esc(key)}" role="button" tabindex="0" aria-expanded="${isOpen}">
+      return `<div class="pz-row d-pz-row${p.audit.hasDrift ? ' drift' : ''}${isBad ? ' bad' : ''}${withDay ? ' with-day' : ''}${isOpen ? ' open' : ''}" data-pz="${esc(key)}" role="button" tabindex="0" aria-expanded="${isOpen}">
         <span class="t d-pz-t">${withDay ? wday(p.t) + ' ' : ''}${time(p.t)}</span>
         <div class="pz-body">
           <div class="why d-pz-why" title="${esc(p.reason)}">${esc(p.reason)}</div>
           <div class="did d-pz-did did-line"><span class="did-apps">${trail}</span>${context ? `<span class="did-dev">&nbsp;· ${context}</span>` : ''}</div>
           ${feedback ? `<div class="pz-more pz-feedback">${esc(feedback)}</div>` : ''}
-          ${isOpen ? `<div class="pz-more">Asked for ${p.minutes}m · DNS off ${Stats.fmt(offOf(p))}${p.audit.hasDrift ? ' · drifted from the reason' : ''}</div>` : ''}
+          ${isOpen ? `<div class="pz-more">Asked for ${p.minutes}m · DNS off ${Stats.fmt(offOf(p))}${isOver ? ' · over daily limit' : ''}${p.audit.hasDrift ? ' · drifted from the reason' : ''}</div>` : ''}
         </div>
         <span class="m d-pz-m" title="Asked for ${p.minutes}m">${Stats.fmt(offOf(p))} <span class="pz-chev">${isOpen ? '▾' : '▸'}</span></span>
       </div>`;
     }).join('');
 
     const { hours, worth } = Stats.pauseFeedback(pauses, from, to);
-    const worthText = worth && `Last ${worth.count} rated ${worth.count === 1 ? 'pause' : 'pauses'}${worth.domain ? ` ending on ${esc(worth.domain)}` : ''} · <b>${worth.average.toFixed(1)}/5</b> average`;
+    const worthTone = worth && worth.average <= 2.0 ? 'tone-bad' : worth && worth.average < 3.5 ? 'tone-warn' : '';
+    const worthText = worth && `Last ${worth.count} rated ${worth.count === 1 ? 'pause' : 'pauses'}${worth.domain ? ` ending on ${esc(worth.domain)}` : ''} · <b class="${worthTone}">${worth.average.toFixed(1)}/5</b> average`;
+    const driftTone = driftCount >= 3 || overLimit ? 'tone-bad' : 'tone-warn';
     const checkHours = hours.map(([hour, counts]) => `<span><b>${String(hour).padStart(2, '0')}:00</b> ${Object.entries(counts).map(([value, n]) => `${Stats.checkInLabel(value)} ×${n}`).join(', ')}</span>`).join('');
-    pausesEl.innerHTML = `${chart}${driftCount ? `<div class="pz-sum"><b>${driftCount} drifted</b> from the reason you gave</div>` : ''}
+    pausesEl.innerHTML = `${chart}${driftCount ? `<div class="pz-sum"><b class="${driftTone}">${driftCount} drifted</b> from the reason you gave</div>` : ''}
       ${worthText ? `<div class="pz-sum">${worthText}</div>` : ''}
       ${checkHours ? `<div class="pz-sum"><b>Check-ins by hour</b><div class="pz-check-hours">${checkHours}</div></div>` : ''}
       <div class="d-pz-list">${rows}</div>`;
@@ -510,7 +570,7 @@ const Panel = (() => {
         footEl.innerHTML = '';
       }
     }
-    return pauses.length;
+    return { count: pauses.length, overLimit, days };
   }
 
   function renderFromSnapshot({ invoke, range, sources, allSources, scoped, from, to, today, days, now }) {
@@ -549,11 +609,11 @@ const Panel = (() => {
     const sum = ActivityClassifier.summarizeClassified(sources, viewFrom, viewTo, { userRules: rulesDoc });
     const fine = ActivityClassifier.summarizeFine(sources, viewFrom, viewTo, { userRules: rulesDoc, cache: fineCache });
 
-    renderHero(fine, range, activeDay);
+    const limitCtx = renderPausesColumn(sources, allSources, viewFrom, viewTo, isMultiDay, multi, scoped);
+    renderHero(fine, range, activeDay, limitCtx);
     renderTimeline(sources, range, today, days);
-    renderPausesColumn(sources, allSources, viewFrom, viewTo, isMultiDay, multi, scoped);
-    renderScreenTime(fine, multi);
-    renderExplorer(fine, multi, range, days, activeDay);
+    renderScreenTime(fine, multi, limitCtx);
+    renderExplorer(fine, multi, range, days, activeDay, limitCtx);
     requestAnimationFrame(fitScreenTime);
     syncUncategorizedInbox(invoke, sum, now);
   }

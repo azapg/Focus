@@ -35,9 +35,11 @@ final class HabitSection {
     LinearLayout head = row(activity);
     long done = statuses.stream().filter(s -> s.completion != null).count();
     long due = statuses.stream().filter(s -> s.due).count();
+    long overdue = statuses.stream().filter(s -> s.due && (s.overdue || s.grace)).count();
     head.addView(text(activity, "Habits", 13, GREY));
-    TextView count = text(activity, "  " + (due == 0 ? done + "/" + statuses.size() : due + " due"), 13,
-        due == 0 ? WHITE : ORANGE);
+    String summary = due == 0 ? done + "/" + statuses.size() : overdue > 0 ? overdue + " overdue" : due + " due";
+    TextView count = text(activity, "  " + summary, 13,
+        due == 0 ? WHITE : overdue > 0 ? RED : ORANGE);
     head.addView(count, new LinearLayout.LayoutParams(0, -2, 1));
     head.addView(action(activity, "New", () -> editor(null)));
     box.addView(head);
@@ -83,6 +85,7 @@ final class HabitSection {
       View point = new View(activity);
       GradientDrawable dot = shape(activity, "done".equals(state) ? 0xFFD4D4D8 : CARD, BORDER, 6);
       if ("due".equals(state)) dot.setStroke(dp(activity, 1), ORANGE);
+      else if ("miss".equals(state)) dot.setStroke(dp(activity, 1), RED_STROKE);
       point.setBackground(dot);
       cell.addView(point, new LinearLayout.LayoutParams(dp(activity, 8), dp(activity, 8)));
       cell.setContentDescription(date.getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.getDefault()) + " " + state);
