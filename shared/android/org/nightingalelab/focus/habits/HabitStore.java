@@ -66,12 +66,32 @@ public final class HabitStore {
   }
 
   private void update(java.util.function.Consumer<Habits> change) {
+    transact(next -> {
+      change.accept(next);
+      return null;
+    });
+  }
+
+  public <T> T updateWallet(java.util.function.Function<Wallet, T> change) {
+    return transact(next -> change.apply(next.wallet));
+  }
+
+  public Wallet.Purchase buyTimeOff(String requestId, int minutes) {
+    return updateWallet(wallet -> {
+      long now = System.currentTimeMillis();
+      return wallet.buyTimeOff(requestId, minutes, now, Habits.day(now));
+    });
+  }
+
+  private <T> T transact(java.util.function.Function<Habits, T> change) {
     List<Runnable> notify;
+    T result;
     synchronized (this) {
       Habits next = read();
-      change.accept(next);
+      result = change.apply(next);
       if (next.definitions.equals(ledger.definitions) && next.events.equals(ledger.events) && next.cap == ledger.cap
-          && next.capEdits.equals(ledger.capEdits)) return;
+          && next.capEdits.equals(ledger.capEdits) && Objects.equals(next.wallet.start, ledger.wallet.start)
+          && next.wallet.ledger.equals(ledger.wallet.ledger)) return result;
       FileOutputStream out = null;
       try {
         out = file.startWrite();
@@ -85,6 +105,7 @@ public final class HabitStore {
       notify = new ArrayList<>(listeners);
     }
     for (Runnable listener : notify) listener.run();
+    return result;
   }
 
   private static String id() {
@@ -148,11 +169,11 @@ public final class HabitStore {
   }
 
   public synchronized boolean usesDnsAllowance() {
-    return allowanceLimit != null || ledger.definitions.values().stream().anyMatch(habit -> !habit.deleted);
+    return allowanceLimit != null || ledger.wallet.active(Habits.day(System.currentTimeMillis())) || ledger.definitions.values().stream().anyMatch(habit -> !habit.deleted);
   }
 
   public synchronized long remainingDnsMs(int day, long now, long localUsed) {
-    return Math.max(0, (dailyBase(now) + ledger.credit(day)) * 60_000L - localUsed - peerDnsMs(day));
+    return Math.max(0, (dailyBase(now) + (long) ledger.wallet.extraPauseMinutes(day)) * 60_000L - localUsed - peerDnsMs(day));
   }
 
   public synchronized void revokePauseLimit() {
@@ -192,15 +213,17 @@ public final class HabitStore {
     return sample.optLong("now") > prior.optLong("now");
   }
 
-  public static JSONObject page(Habits ledger, String after) throws JSONException {
+  public static JSONObject page(Habits ledger, String after, boolean wallet) throws JSONException {
     Habits part = new Habits();
     part.cap = ledger.cap;
+    if (wallet) part.wallet.start = ledger.wallet.start;
     int count = 0;
     String cursor = null;
     Map<String, Object> items = new LinkedHashMap<>();
     ledger.capEdits.forEach((key, value) -> items.put("c:" + key, value));
     ledger.definitions.forEach((key, value) -> items.put("d:" + key, value));
     ledger.events.forEach((key, value) -> items.put("e:" + key, value));
+    if (wallet) ledger.wallet.ledger.forEach((key, value) -> items.put("w:" + key, value));
     for (Map.Entry<String, Object> item : items.entrySet()) {
       if (item.getKey().compareTo(after) <= 0) continue;
       if (count == 512) return new JSONObject().put("habits", encode(part)).put("next", cursor);
@@ -209,7 +232,13 @@ public final class HabitStore {
         Habits.Cap edit = (Habits.Cap) value;
         part.capEdits.put(edit.rev.id, edit);
       } else if (value instanceof Habits.Habit) part.put((Habits.Habit) value);
-      else part.put((Habits.Event) value);
+      else if (value instanceof Habits.Event) {
+        Habits.Event event = (Habits.Event) value;
+        part.put(wallet ? event : event.withoutWalletReward());
+      } else {
+        Wallet.Entry entry = (Wallet.Entry) value;
+        part.wallet.ledger.put(entry.id, entry);
+      }
       count++;
       cursor = item.getKey();
     }
@@ -217,10 +246,11 @@ public final class HabitStore {
   }
 
   public JSONObject exchange(JSONObject input) throws JSONException {
+    boolean wallet = input != null && input.optInt("wallet_sync") == Wallet.SYNC_VERSION;
     if (input != null) {
       JSONObject remote = input.optJSONObject("habits");
       if (remote != null) {
-        Habits decoded = decode(remote);
+        Habits decoded = decode(remote, wallet);
         update(next -> next.merge(decoded));
       }
       JSONObject observations = input.optJSONObject("screens");
@@ -238,7 +268,8 @@ public final class HabitStore {
     }
     JSONObject allowance = input == null ? null : input.optJSONObject("allowance");
     if (allowance != null) mergeAllowance(allowance);
-    return input == null || input.isNull("after") ? new JSONObject() : page(read(), input.getString("after"));
+    JSONObject response = input == null || input.isNull("after") ? new JSONObject() : page(read(), input.getString("after"), wallet);
+    return wallet ? response.put("wallet_sync", Wallet.SYNC_VERSION) : response;
   }
 
   private synchronized void mergeAllowance(JSONObject incoming) throws JSONException {
@@ -365,15 +396,28 @@ public final class HabitStore {
     }
     JSONObject events = new JSONObject();
     for (Habits.Event e : ledger.events.values()) {
-      events.put(e.id, new JSONObject().put("id", e.id).put("habit", e.habit).put("at", e.at)
+      JSONObject event = new JSONObject().put("id", e.id).put("habit", e.habit).put("at", e.at)
           .put("day", e.day).put("period", e.period).put("reward", e.reward)
           .put("away", e.away < 0 ? JSONObject.NULL : e.away)
-          .put("undo", e.undo == null ? JSONObject.NULL : e.undo));
+          .put("undo", e.undo == null ? JSONObject.NULL : e.undo);
+      if (e.walletReward) event.put("wallet_reward", true);
+      events.put(e.id, event);
     }
     JSONObject edits = new JSONObject();
     for (Habits.Cap edit : ledger.capEdits.values()) edits.put(edit.rev.id, encodeCap(edit));
-    return new JSONObject().put("definitions", definitions).put("events", events)
+    JSONObject payload = new JSONObject().put("definitions", definitions).put("events", events)
         .put("cap", ledger.cap == null ? JSONObject.NULL : encodeCap(ledger.cap)).put("cap_edits", edits);
+    if (ledger.wallet.start != null) payload.put("wallet_start", ledger.wallet.start);
+    if (!ledger.wallet.ledger.isEmpty()) {
+      JSONObject entries = new JSONObject();
+      for (Wallet.Entry entry : ledger.wallet.ledger.values()) {
+        entries.put(entry.id, new JSONObject().put("id", entry.id).put("at", entry.at).put("day", entry.day)
+            .put("amount", entry.amount).put("kind", entry.kind).put("ref", entry.reference)
+            .put("reverses", entry.reverses));
+      }
+      payload.put("wallet_entries", entries);
+    }
+    return payload;
   }
 
   private static JSONObject encodeCap(Habits.Cap cap) throws JSONException {
@@ -387,6 +431,10 @@ public final class HabitStore {
   }
 
   static Habits decode(JSONObject raw) throws JSONException {
+    return decode(raw, true);
+  }
+
+  private static Habits decode(JSONObject raw, boolean wallet) throws JSONException {
     Habits ledger = new Habits();
     JSONObject definitions = raw.getJSONObject("definitions");
     for (Iterator<String> keys = definitions.keys(); keys.hasNext();) {
@@ -411,7 +459,7 @@ public final class HabitStore {
       if (!id.equals(e.getString("id"))) continue;
       ledger.put(new Habits.Event(id, e.getString("habit"), e.getLong("at"), e.getInt("day"),
           e.getInt("period"), e.getInt("reward"), e.optInt("away", -1),
-          e.isNull("undo") ? null : e.getString("undo")));
+          e.isNull("undo") ? null : e.getString("undo"), wallet && Boolean.TRUE.equals(e.opt("wallet_reward"))));
     }
     JSONObject cap = raw.optJSONObject("cap");
     if (cap != null) ledger.put(decodeCap(cap));
@@ -419,6 +467,30 @@ public final class HabitStore {
     if (edits != null) for (Iterator<String> keys = edits.keys(); keys.hasNext();) {
       ledger.put(decodeCap(edits.getJSONObject(keys.next())));
     }
+    if (wallet) {
+      Long start = integer(raw.opt("wallet_start"));
+      if (start != null && start >= Integer.MIN_VALUE && start <= Integer.MAX_VALUE) ledger.wallet.mergeStart(start.intValue());
+      JSONObject entries = raw.optJSONObject("wallet_entries");
+      if (entries != null) {
+        for (Iterator<String> keys = entries.keys(); keys.hasNext();) {
+          String key = keys.next();
+          JSONObject entry = entries.optJSONObject(key);
+          if (entry == null) continue;
+          Object id = entry.opt("id"), kind = entry.opt("kind"), reference = entry.opt("ref"), reverses = entry.opt("reverses");
+          Long at = integer(entry.opt("at")), day = integer(entry.opt("day")), amount = integer(entry.opt("amount"));
+          if (!(id instanceof String) || !(kind instanceof String) || !(reference instanceof String)
+              || (reverses != null && reverses != JSONObject.NULL && !(reverses instanceof String))
+              || at == null || day == null || day < Integer.MIN_VALUE || day > Integer.MAX_VALUE
+              || amount == null || amount < Integer.MIN_VALUE || amount > Integer.MAX_VALUE) continue;
+          ledger.wallet.mergeEntry(key, new Wallet.Entry((String) id, at, day.intValue(), amount.intValue(),
+              (String) kind, (String) reference, reverses == JSONObject.NULL ? null : (String) reverses));
+        }
+      }
+    }
     return ledger;
+  }
+
+  private static Long integer(Object value) {
+    return value instanceof Integer || value instanceof Long ? ((Number) value).longValue() : null;
   }
 }

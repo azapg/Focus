@@ -49,6 +49,7 @@ impl LaptopHost {
             Arc::new(move |input| {
                 let response = crate::habit_commands::exchange(&habits_core, input)?;
                 let _ = habits_app.emit("habits-updated", ());
+                let _ = habits_app.emit("wallet-updated", ());
                 Ok(response)
             }),
             Arc::new(move |incoming| {
@@ -409,6 +410,7 @@ pub fn build_laptop_snapshot(
         "permissions": { "usage": true, "restrictions": true, "dns": true },
         "tracking_age_ms": 0,
         "habits_sync": 1,
+        "wallet_sync": focus_dns::habits::WALLET_SYNC_VERSION,
         "pause_daily_base": desktop_limit.effective(now),
         "pause_daily_limit": desktop_limit,
         "activity_observed_from": tracker.evidence_start(),
@@ -483,6 +485,8 @@ pub fn sync_habits(
     host: Option<&LaptopServer>,
 ) -> Result<(), String> {
     if peer.snapshot.as_ref().is_none_or(|s| s["habits_sync"] != 1) { return Ok(()); }
+    let wallet_version = focus_dns::habits::WALLET_SYNC_VERSION;
+    let wallet = peer.snapshot.as_ref().is_some_and(|snapshot| snapshot["wallet_sync"] == wallet_version);
     let own = core.habits.read();
     let peers = manager.list();
     let laptop_id = host.map_or_else(|| "windows-laptop".into(), LaptopServer::device_id);
@@ -496,11 +500,12 @@ pub fn sync_habits(
     } else { None };
     while send.is_some() || receive.is_some() {
         let page = send.take().map(|after| {
-            let (page, next) = own.page(&after);
+            let (page, next) = own.page(&after, wallet);
             send = next;
             page
         });
-        let payload = json!({ "habits": page, "after": receive, "screens": screens.take(), "allowance": allowance.take() });
+        let mut payload = json!({ "habits": page, "after": receive, "screens": screens.take(), "allowance": allowance.take() });
+        if wallet { payload["wallet_sync"] = json!(wallet_version); }
         let result = manager.exchange_habits(&peer.id, &payload)?;
         let next = result["next"].as_str().map(str::to_owned);
         if next.is_some() && (receive.is_none() || next <= receive) {
@@ -749,6 +754,7 @@ pub fn sync_loop(
                 core.log(&format!("device connected ({})", old.kind));
             }
             let _ = app.emit("devices", manager.list());
+            let _ = app.emit("wallet-updated", ());
         }
         thread::sleep(Duration::from_secs(20));
     }

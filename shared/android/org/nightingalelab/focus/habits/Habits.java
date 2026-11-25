@@ -182,8 +182,13 @@ public final class Habits {
     public final String id, habit, undo;
     public final long at;
     public final int day, period, reward, away;
+    public final boolean walletReward;
 
     public Event(String id, String habit, long at, int day, int period, int reward, int away, String undo) {
+      this(id, habit, at, day, period, reward, away, undo, false);
+    }
+
+    Event(String id, String habit, long at, int day, int period, int reward, int away, String undo, boolean walletReward) {
       this.id = id;
       this.habit = habit;
       this.at = at;
@@ -192,6 +197,16 @@ public final class Habits {
       this.reward = reward;
       this.away = away;
       this.undo = undo;
+      this.walletReward = walletReward;
+    }
+
+    Event withoutWalletReward() {
+      return walletReward ? new Event(id, habit, at, day, period, reward, away, undo) : this;
+    }
+
+    boolean sameCompletion(Event other) {
+      return id.equals(other.id) && habit.equals(other.habit) && at == other.at && day == other.day
+          && period == other.period && reward == other.reward && away == other.away && Objects.equals(undo, other.undo);
     }
 
     boolean valid() {
@@ -244,6 +259,7 @@ public final class Habits {
   final Map<String, Habit> definitions = new TreeMap<>();
   final Map<String, Event> events = new TreeMap<>();
   Cap cap;
+  public final Wallet wallet = new Wallet(this);
   final Map<String, Cap> capEdits = new TreeMap<>();
 
   private static boolean validId(String id) {
@@ -261,7 +277,15 @@ public final class Habits {
   }
 
   public boolean put(Event event) {
-    return event.valid() && events.putIfAbsent(event.id, event) == null;
+    if (!event.valid()) return false;
+    Event prior = events.putIfAbsent(event.id, event);
+    if (prior == null) return true;
+    // Old peers can relay the completion without the wallet flag.
+    if (event.walletReward && !prior.walletReward && event.sameCompletion(prior)) {
+      events.put(event.id, event);
+      return true;
+    }
+    return false;
   }
 
   public boolean put(Cap candidate) {
@@ -273,6 +297,7 @@ public final class Habits {
   }
 
   public void merge(Habits other) {
+    wallet.merge(other.wallet);
     other.definitions.values().forEach(this::put);
     other.events.values().forEach(this::put);
     other.capEdits.values().forEach(this::put);
@@ -313,6 +338,14 @@ public final class Habits {
       }
     }
     return Math.min(ceiling, effective == null ? 45 : effective.minutes);
+  }
+
+  long habitCoins() {
+    long coins = 0;
+    for (Map<Integer, Event> periods : completions().values()) {
+      for (Event event : periods.values()) if (event.walletReward && wallet.active(event.day)) coins += event.reward;
+    }
+    return coins;
   }
 
   public int credit(int day) {
@@ -389,7 +422,7 @@ public final class Habits {
     int day = day(now);
     for (Status row : status(now)) {
       if (!row.due || !row.habit.id.equals(habit)) continue;
-      Event event = new Event(id, habit, now, day, row.habit.period(day), row.habit.reward, away, null);
+      Event event = new Event(id, habit, now, day, row.habit.period(day), row.habit.reward, away, null, wallet.active(day));
       if (put(event)) return event;
     }
     return null;

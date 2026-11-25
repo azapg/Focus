@@ -11,6 +11,7 @@ import java.util.*;
 import javax.net.ssl.*;
 import javax.security.auth.x500.X500Principal;
 import org.nightingalelab.focus.habits.HabitStore;
+import org.nightingalelab.focus.habits.Wallet;
 import org.json.*;
 
 /**
@@ -370,7 +371,7 @@ public final class LanController {
     }
     result
         .put("scope", "personal")
-        .put("habits_sync", 1).put("activity_observed_from", store.habitObservedFrom())
+        .put("habits_sync", 1).put("wallet_sync", Wallet.SYNC_VERSION).put("activity_observed_from", store.habitObservedFrom())
         .put("pause_daily_base", store.policyConfig().dailyLimitMinutes)
         .put("now", now)
         .put("range_from", start.getTimeInMillis())

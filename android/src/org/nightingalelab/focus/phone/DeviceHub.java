@@ -678,6 +678,7 @@ public final class DeviceHub {
   private void exchangeHabits(PairedDevice device) throws Exception {
     HabitStore store = HabitStore.get(context);
     Habits ledger = store.read();
+    boolean wallet = device.snapshot != null && device.snapshot.optInt("wallet_sync") == Wallet.SYNC_VERSION;
     String send = "", receive = "";
     JSONObject screens = new JSONObject();
     screens.put(LanController.get(context).deviceId(), encodedScreen(HabitScreen.local(context, System.currentTimeMillis())));
@@ -696,9 +697,10 @@ public final class DeviceHub {
         .put("now", now).put("off", used).put("kind", "phone").put("direct", true)
         .put("base", activity.policyConfig().dailyLimitMinutes));
     while (send != null || receive != null) {
-      JSONObject page = send == null ? new JSONObject() : HabitStore.page(ledger, send);
+      JSONObject page = send == null ? new JSONObject() : HabitStore.page(ledger, send, wallet);
       send = page.isNull("next") ? null : page.getString("next");
       page.remove("next");
+      if (wallet) page.put("wallet_sync", Wallet.SYNC_VERSION);
       page.put("after", receive == null ? JSONObject.NULL : receive);
       if (screens != null) {
         page.put("screens", screens).put("allowance", allowance);

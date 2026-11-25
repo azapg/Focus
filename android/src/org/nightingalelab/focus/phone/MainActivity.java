@@ -773,8 +773,10 @@ public final class MainActivity extends Activity {
     LinearLayout ringRow = Theme.row(this);
     ringRow.setPadding(Theme.dp(this, 13), Theme.dp(this, 12), Theme.dp(this, 13), Theme.dp(this, 12));
     Theme.DnsRingView ring = new Theme.DnsRingView(this);
-    int earned = HabitStore.get(this).read().credit(Habits.day(lastNow));
-    int allowance = cfg.dailyLimitMinutes + (v.singleDay && selectedWeekDay < 0 ? earned : 0);
+    Habits ledger = HabitStore.get(this).read();
+    int day = Habits.day(lastNow);
+    int extra = ledger.wallet.extraPauseMinutes(day);
+    int allowance = cfg.dailyLimitMinutes + (v.singleDay && selectedWeekDay < 0 ? extra : 0);
     float ringFrac = FocusStats.ringFraction(v, allowance);
     long limitMs = allowance * FocusStats.MIN;
     long perDayOff = v.offAllMs / Math.max(1, v.nDays);
@@ -793,7 +795,7 @@ public final class MainActivity extends Activity {
     ringRow.addView(ringCol, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
     pzCard.addView(ringRow);
     if (allowance > cfg.dailyLimitMinutes) {
-      TextView credit = Theme.text(this, cfg.dailyLimitMinutes + "m base + " + earned + "m earned", 12, Theme.MUTED, false);
+      TextView credit = Theme.text(this, cfg.dailyLimitMinutes + "m base + " + extra + (ledger.wallet.active(day) ? "m bought" : "m earned"), 12, Theme.MUTED, false);
       credit.setPadding(Theme.dp(this, 13), 0, 0, Theme.dp(this, 9));
       pzCard.addView(credit);
     }
@@ -1033,8 +1035,8 @@ public final class MainActivity extends Activity {
       LinearLayout barStack = Theme.column(this);
       int barW = Theme.dp(this, 22);
       PausePolicy.Config wkCfg = Store.get(this).policyConfig();
-      int wkEarned = d.today ? HabitStore.get(this).read().credit(Habits.day(lastNow)) : 0;
-      long dayLimMs = (wkCfg.dailyLimitMinutes + wkEarned) * FocusStats.MIN;
+      int wkExtra = d.today ? HabitStore.get(this).read().wallet.extraPauseMinutes(Habits.day(lastNow)) : 0;
+      long dayLimMs = (wkCfg.dailyLimitMinutes + wkExtra) * FocusStats.MIN;
       boolean dayOver = dayLimMs > 0 && d.offMs > dayLimMs;
       if (offH > 0) {
         View offSeg = new View(this);

@@ -11,6 +11,7 @@ import java.util.*;
 import javax.net.ssl.*;
 import javax.security.auth.x500.X500Principal;
 import org.nightingalelab.focus.habits.HabitStore;
+import org.nightingalelab.focus.habits.Wallet;
 import org.json.*;
 
 /** Authenticated device API. The TV remains authoritative; connections only carry commands/data. */
@@ -349,7 +350,7 @@ public final class LanController {
     for (Iterator<String> keys = identity.keys(); keys.hasNext();) {
       String key = keys.next(); result.put(key, identity.get(key));
     }
-    result.put("habits_sync", 1)
+    result.put("habits_sync", 1).put("wallet_sync", Wallet.SYNC_VERSION)
         .put("pause_allowance_generation", HabitStore.get(context).allowanceGeneration())
         .put("activity_observed_from", store.habitObservedFrom()).put("scope", "household").put("now", now).put("range_from", start.getTimeInMillis())
         .put("time_zone", TimeZone.getDefault().getID())

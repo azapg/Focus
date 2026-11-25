@@ -285,7 +285,7 @@ impl Recent {
             judge_context::usage(judge_context::day_start(now), now, &pauses, &snapshots);
         let day = focus_dns::habits::local_clock(now).0;
         let daily_limit = u64::from(core.habits.desktop_limit().effective(now))
-            + u64::from(core.habits.read().credit(day));
+            + core.habits.read().extra_pause_minutes(day) as u64;
         let policy = limits.policy(now, count, used_ms, daily_limit);
         Self {
             now,
@@ -1430,6 +1430,7 @@ mod tests {
                         reward: 5,
                         away: None,
                         undo: None,
+                        wallet_reward: false,
                     },
                 );
                 Ok(())

@@ -37,6 +37,7 @@ fn event(id: &str, habit: &str, day: i32, period: i32) -> Event {
         reward: 15,
         away: Some(11),
         undo: None,
+        wallet_reward: false,
     }
 }
 
@@ -130,7 +131,7 @@ fn cap_and_append_only_pages_survive_round_trip() {
     let mut cursor = Some(String::new());
     let mut served = 0;
     while let Some(after) = cursor {
-        let (page, next) = ledger.page(&after);
+        let (page, next) = ledger.page(&after, false);
         assert!(page.cap_edits.len() + page.definitions.len() + page.events.len() <= 512);
         remote.merge(serde_json::from_str(&serde_json::to_string(&page).unwrap()).unwrap());
         cursor = next;
@@ -371,4 +372,168 @@ fn ledger_is_persisted_after_each_mutation() {
     assert!(result.is_err());
     assert_eq!(Store::new(&path).read(), prior);
     std::fs::remove_dir_all(&path).unwrap();
+}
+
+#[test]
+fn wallet_cutover_uses_qualified_habits_and_undo_can_create_debt() {
+    let mut wallet = Ledger::default();
+    wallet.start_wallet(MON).unwrap();
+    let at = MON as u64 * 86_400_000;
+    let day = MON + 1;
+    put(&mut wallet, event("old", "walk", MON, MON));
+    put(&mut wallet, event("legacy-offline", "read", day, day));
+    let mut check = event("new", "walk", day, day);
+    check.wallet_reward = true;
+    put(&mut wallet, check.clone());
+    let mut duplicate = check.clone();
+    duplicate.id = "new-duplicate".into();
+    duplicate.at += 1;
+    put(&mut wallet, duplicate);
+
+    let (legacy_page, _) = wallet.page("", false);
+    assert_eq!(legacy_page.wallet_start, None);
+    assert!(!legacy_page.events["new"].wallet_reward);
+    assert_eq!(wallet.extra_pause_minutes(MON), 15);
+    assert_eq!(wallet.extra_pause_minutes(day), 0);
+    assert_eq!(wallet.balance(), 15);
+
+    let mut relayed = legacy_page;
+    relayed.merge(wallet.clone());
+    assert_eq!(relayed.balance(), 15);
+    assert_eq!(
+        relayed.buy_time_off("first", 15, at, day),
+        Ok(super::Purchase::Bought)
+    );
+    assert_eq!(
+        relayed.buy_time_off("first", 15, at, day + 1),
+        Ok(super::Purchase::AlreadyBought)
+    );
+    assert_eq!(relayed.extra_pause_minutes(day), 15);
+    assert_eq!(relayed.extra_pause_minutes(day + 1), 0);
+
+    let mut undo = event("undo", "walk", day, day);
+    undo.undo = Some(check.id);
+    undo.reward = 0;
+    put(&mut relayed, undo.clone());
+    assert_eq!(relayed.balance(), 0);
+    undo.id = "undo-duplicate".into();
+    undo.undo = Some("new-duplicate".into());
+    put(&mut relayed, undo);
+    assert_eq!(relayed.balance(), -15);
+    assert_eq!(
+        relayed.buy_time_off("second", 5, at, day),
+        Ok(super::Purchase::NotEnough { missing: 20 })
+    );
+    assert_eq!(relayed.time_off_bought(day), 15);
+}
+
+#[test]
+fn wallet_merge_keeps_offline_purchases_and_converges_with_reversals() {
+    use super::Purchase::*;
+    let day = MON + 1;
+    let at = day as u64 * 86_400_000;
+    let mut phone = Ledger::default();
+    phone.start_wallet(MON).unwrap();
+    assert_eq!(
+        phone.earn("first", "future_kind", 40, "", at, day),
+        Ok(true)
+    );
+    assert_eq!(
+        phone.earn("first", "future_kind", 40, "", at, day),
+        Ok(false)
+    );
+    let mut laptop = phone.clone();
+    assert_eq!(phone.buy_time_off("phone", 30, at, day), Ok(Bought));
+    assert_eq!(laptop.buy_time_off("laptop", 30, at, day), Ok(Bought));
+    assert_eq!(
+        laptop.buy_time_off("over-cap", 20, at, day),
+        Ok(LimitReached)
+    );
+
+    let original_phone = phone.clone();
+    phone.merge(laptop.clone());
+    laptop.merge(original_phone);
+    assert_eq!(phone, laptop);
+    assert_eq!(phone.balance(), -20);
+    assert_eq!(phone.time_off_bought(day), 60);
+    assert_eq!(phone.buy_time_off("next", 1, at, day), Ok(LimitReached));
+    assert_eq!(
+        phone.buy_time_off("next", 1, at, day + 1),
+        Ok(NotEnough { missing: 21 })
+    );
+
+    phone.earn("fund", "future_kind", 200, "", at, day).unwrap();
+    laptop
+        .earn("fund", "future_kind", 200, "", at, day)
+        .unwrap();
+    let key = "streak:clean:2024-10-03";
+    assert_eq!(
+        phone.spend(key, "streak_repair", 60, "clean:2024-10-03", at, day),
+        Ok(Bought)
+    );
+    assert_eq!(
+        laptop.spend(key, "streak_repair", 120, "clean:2024-10-03", at, day),
+        Ok(Bought)
+    );
+    let original_phone = phone.clone();
+    phone.merge(laptop.clone());
+    laptop.merge(original_phone);
+    assert_eq!(phone, laptop);
+    assert_eq!(phone.balance(), 60);
+    assert_eq!(phone.entries("streak_repair", day, day)[0].amount, -120); // Tie picks the lower signed amount.
+    assert_eq!(phone.reverse(key, at, day), Ok(true));
+    assert_eq!(phone.reverse(key, at, day), Ok(false));
+    assert!(phone.entries("streak_repair", day, day).is_empty());
+    assert_eq!(phone.balance(), 180);
+    laptop.merge(phone);
+    assert_eq!(laptop.balance(), 180);
+}
+
+#[test]
+fn wallet_pages_validate_entries_and_restore_after_restart() {
+    let mut source = Ledger::default();
+    source.start_wallet(MON).unwrap();
+    let day = MON + 1;
+    let at = day as u64 * 86_400_000;
+    for index in 0..515 {
+        source
+            .earn(&format!("a-{index:03}"), "example", 1, "", at, day)
+            .unwrap();
+    }
+    source.reverse("a-514", at, day).unwrap();
+    let (legacy, next) = source.page("", false);
+    assert!(next.is_none());
+    assert!(serde_json::to_value(legacy)
+        .unwrap()
+        .get("wallet_entries")
+        .is_none());
+    let (first, next) = source.page("", true);
+    assert_eq!(next.as_deref(), Some("w:a-511"));
+    let (second, end) = source.page(&next.unwrap(), true);
+    assert!(end.is_none());
+
+    let mut before_target: Ledger = serde_json::from_value(serde_json::json!({
+        "wallet_entries": {
+            "reverse:a-514": { "id": "reverse:a-514", "at": at, "day": day, "amount": 0,
+                "kind": "reversal", "ref": "", "reverses": "a-514" },
+            "bad": { "id": "bad", "at": at, "day": day, "amount": 4294967296_u64, "kind": "bad", "ref": "" }
+        }
+    })).unwrap();
+    assert_eq!(before_target.balance(), 0);
+    assert_eq!(before_target.wallet_entries.len(), 1);
+    before_target.merge(second);
+    before_target.merge(first);
+    assert_eq!(before_target, source);
+    assert_eq!(before_target.balance(), 514);
+
+    let dir = std::env::temp_dir().join(format!("focus-wallet-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    Store::new(&dir)
+        .update(|ledger| {
+            *ledger = before_target.clone();
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(Store::new(&dir).read(), before_target);
+    std::fs::remove_dir_all(dir).unwrap();
 }
