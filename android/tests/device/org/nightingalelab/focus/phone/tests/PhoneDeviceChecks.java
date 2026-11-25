@@ -42,8 +42,16 @@ public final class PhoneDeviceChecks extends Instrumentation {
     boolean ok = false;
     try {
       Context target = getTargetContext();
-      if ("seed_showcase".equals(mode)) {
+      if ("seed_showcase".equals(mode) || "seed_store_showcase".equals(mode)) {
         seedShowcase(target, report);
+        if ("seed_store_showcase".equals(mode)) {
+          long now = System.currentTimeMillis();
+          int day = org.nightingalelab.focus.habits.Habits.day(now);
+          org.nightingalelab.focus.habits.HabitStore.get(target).updateWallet(wallet -> {
+            wallet.start(day - 1);
+            return wallet.earn("fixture:store", "fixture", 65, "", now, day);
+          });
+        }
         ok = true;
       } else if ("capture_habit_nudge".equals(mode)) {
         captureHabitNudge(target, report);

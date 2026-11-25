@@ -1,6 +1,7 @@
 """Native Focus proof flows. Run only from scripts/screenshot.py."""
 
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -91,7 +92,7 @@ def capture(scenario, sdk, image, work, output):
         "ANDROID_HOME": str(sdk), "ANDROID_USER_HOME": str(home),
         "ANDROID_EMULATOR_HOME": str(home), "ANDROID_AVD_HOME": str(home / "avd"),
         "ANDROID_ADB_SERVER_PORT": "5037", "ADB_USB": "0",
-        "JAVA_TOOL_OPTIONS": "-XX:ActiveProcessorCount=2",
+        "JAVA_TOOL_OPTIONS": f"-XX:ActiveProcessorCount=2 -Djava.io.tmpdir={work}",
     }
     accelerated = os.access("/dev/kvm", os.R_OK | os.W_OK)
     if not accelerated:
@@ -171,6 +172,12 @@ def capture_views(scenario, adb, apks, output):
                 return
         raise RuntimeError(f"Focus view did not appear: {label}")
 
+    def tap(label):
+        node = next(node for node in dump() if node.get("package") == package
+                    and label in node.get("text", "") and node.get("clickable") == "true")
+        left, top, right, bottom = map(int, re.findall(r"\d+", node.get("bounds")))
+        shell("input", "tap", str((left + right) // 2), str((top + bottom) // 2))
+
     def shot(name, label, selected=False):
         wait_for_view(label, selected)
         image_bytes = adb("exec-out", "screencap", "-p", binary=True)
@@ -197,7 +204,8 @@ def capture_views(scenario, adb, apks, output):
         shell("pm", "set-permission-flags", package, "android.permission.POST_NOTIFICATIONS",
               "user-set", "user-fixed")
 
-    selector = ("phase", "seed-screenshot", "DeviceChecks") if tv else ("mode", "seed_showcase", "PhoneDeviceChecks")
+    mode = "seed_store_showcase" if scenario == "phone-store" else "seed_showcase"
+    selector = ("phase", "seed-screenshot", "DeviceChecks") if tv else ("mode", mode, "PhoneDeviceChecks")
     key, mode, runner = selector
     result = adb("shell", "am", "instrument", "-w", "-e", key, mode,
                  f"{package}.tests/.{runner}", timeout=180)
@@ -211,6 +219,17 @@ def capture_views(scenario, adb, apks, output):
         shell("input", "keyevent", "KEYCODE_DPAD_RIGHT")
         shell("input", "keyevent", "KEYCODE_DPAD_CENTER")
         shot("tv-week.png", "Week", selected=True)
+    elif scenario == "phone-store":
+        shell("am", "start", "-W", "-n", activity, "--es", "page", "today")
+        shot("phone-store-today.png", "65 coins")
+        tap("65 coins")
+        shot("phone-store-sheet.png", "15 minutes for today")
+        tap("15 coins")
+        shot("phone-store-confirm.png", "Buy 15 minutes?")
+        tap("Confirm")
+        shot("phone-store-receipt.png", "15 minutes added")
+        tap("Done")
+        shot("phone-store-bought.png", "50 coins")
     else:
         shell("am", "start", "-W", "-n", activity, "--es", "page", "today")
         shot("phone-today.png", "Today")

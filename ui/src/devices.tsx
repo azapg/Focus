@@ -47,6 +47,7 @@ import {
   FieldLegend,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { WalletStore } from "./wallet-store";
 import { PauseJudgeSettings, PauseJudgeSheet, serviceImage, serviceName } from "./pause-judge";
 import {
   Select,
@@ -539,6 +540,7 @@ function Header() {
       </ToggleGroup>
       <span id="pDate" hidden />
       <div className="focus-head-actions">
+        {s.range === "today" && <WalletStore invoke={call} />}
         <DropdownMenu
           modal={false}
           open={s.menu}
@@ -2301,6 +2303,7 @@ const DevicePanel = {
   },
   close() {
     ++renderVersion;
+    window.dispatchEvent(new Event("focus-store-dismiss"));
     Panel.exitExplorer?.();
     if (state.settings) settings(false);
     patch({ menu: false, updatePopover: false });

@@ -174,6 +174,7 @@ pub fn habits_view(core: State<'_, Arc<Core>>) -> Value {
 fn view(ledger: &Ledger, now: u64) -> Value {
     let (day, minute) = local_clock(now);
     json!({ "rows": ledger.status(day, minute), "credit": ledger.extra_pause_minutes(day),
+        "wallet_active": ledger.wallet_active(day),
         "cap": ledger.cap_on(day), "pending_cap": ledger.cap.as_ref()
             .filter(|cap| cap.effective > day).map(|cap| cap.minutes) })
 }
@@ -212,6 +213,7 @@ pub fn wallet_view(core: State<'_, Arc<Core>>, devices: State<'_, Arc<Devices>>)
 pub fn wallet_buy_time(
     request_id: String,
     minutes: u16,
+    expected_day: Option<i32>,
     app: AppHandle,
     core: State<'_, Arc<Core>>,
     devices: State<'_, Arc<Devices>>,
@@ -220,7 +222,8 @@ pub fn wallet_buy_time(
 ) -> Result<Purchase, String> {
     let outcome = core.habits.update(|ledger| {
         let now = now_ms();
-        ledger.buy_time_off(&request_id, minutes, now, local_clock(now).0)
+        let day = local_clock(now).0;
+        ledger.buy_time_off_for_day(&request_id, minutes, now, day, expected_day)
     })?;
     if outcome == Purchase::Bought {
         let _ = app.emit("habits-updated", ());
