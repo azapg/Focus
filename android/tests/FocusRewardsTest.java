@@ -62,7 +62,7 @@ public final class FocusRewardsTest {
     FocusRewards.Rate rate = FocusRewards.Rate.TRIAL_DEFAULT;
     FocusRewards.FinalizedDay baseDay = new FocusRewards.FinalizedDay(
         "2026-11-25", DAY_2026_11_25, 1_795_564_800_000L, 1_795_651_200_000L,
-        true, 135 * MIN, 1_795_651_205_000L);
+        true, 375 * MIN, 1_795_651_205_000L);
 
     // 1. Dormant wallet awards nothing.
     FocusRewards.AwardOutcome dormant = FocusRewards.awardFinalizedDay(wallet, baseDay, rate);
@@ -72,7 +72,7 @@ public final class FocusRewardsTest {
 
     // 2. Incomplete / Pending day awards nothing.
     FocusRewards.FinalizedDay pending = new FocusRewards.FinalizedDay(
-        "2026-11-25", DAY_2026_11_25, baseDay.dayStartMs, baseDay.dayEndMs, false, 135 * MIN, baseDay.atMs);
+        "2026-11-25", DAY_2026_11_25, baseDay.dayStartMs, baseDay.dayEndMs, false, 375 * MIN, baseDay.atMs);
     FocusRewards.AwardOutcome pendingRes = FocusRewards.awardFinalizedDay(wallet, pending, rate);
     check(pendingRes.status == FocusRewards.Status.NOT_FINALIZED && wallet.balance() == 0, "Pending awards nothing");
 
@@ -86,31 +86,31 @@ public final class FocusRewardsTest {
     }
     check(threw && wallet.balance() == 0, "Mismatched date rejected");
 
-    // 4. Complete finalized day awards 4 milestones = 20 coins.
+    // 4. Complete finalized day awards 12 milestones = 60 coins (capped at 6h).
     FocusRewards.AwardOutcome awarded = FocusRewards.awardFinalizedDay(wallet, baseDay, rate);
-    check(awarded.status == FocusRewards.Status.AWARDED && awarded.milestonesAwarded == 4 && awarded.coinsAwarded == 20,
-        "Expected 4 milestones / 20 coins");
-    check(wallet.balance() == 20 && FocusRewards.coinsForDay(wallet, DAY_2026_11_25) == 20, "Balance and day coins match");
+    check(awarded.status == FocusRewards.Status.AWARDED && awarded.milestonesAwarded == 12 && awarded.coinsAwarded == 60,
+        "Expected 12 milestones / 60 coins");
+    check(wallet.balance() == 60 && FocusRewards.coinsForDay(wallet, DAY_2026_11_25) == 60, "Balance and day coins match");
     List<Wallet.Entry> entries = wallet.entries(FocusRewards.FOCUS_KIND, DAY_2026_11_25, DAY_2026_11_25);
-    check(entries.size() == 4
-        && "focus:2026-11-25:1".equals(entries.get(0).id)
-        && "focus:2026-11-25:4".equals(entries.get(3).id)
+    check(entries.size() == 12
+        && entries.stream().anyMatch(e -> "focus:2026-11-25:1".equals(e.id))
+        && entries.stream().anyMatch(e -> "focus:2026-11-25:12".equals(e.id))
         && "focus:2026-11-25".equals(entries.get(0).reference), "Milestone keys and ref match contract");
 
     // 5. Retry is idempotent.
     FocusRewards.AwardOutcome retry = FocusRewards.awardFinalizedDay(wallet, baseDay, rate);
     check(retry.status == FocusRewards.Status.ALREADY_AWARDED && retry.milestonesAwarded == 0
-        && retry.alreadyPresent == 4 && wallet.balance() == 20, "Retry idempotent");
+        && retry.alreadyPresent == 12 && wallet.balance() == 60, "Retry idempotent");
 
     // 6. Peer merge does not double-count.
     Habits peer = new Habits();
     peer.wallet.start(DAY_2026_11_25 - 1);
     FocusRewards.awardFinalizedDay(peer.wallet, baseDay, rate);
     habits.merge(peer);
-    check(wallet.balance() == 20 && FocusRewards.coinsForDay(wallet, DAY_2026_11_25) == 20, "Merge deduplicates milestones");
+    check(wallet.balance() == 60 && FocusRewards.coinsForDay(wallet, DAY_2026_11_25) == 60, "Merge deduplicates milestones");
 
     // 7. Reversal lowers active focus coins for day.
-    check(wallet.reverse("focus:2026-11-25:4", baseDay.atMs + 1000L, DAY_2026_11_25), "Reversal succeeds");
-    check(FocusRewards.coinsForDay(wallet, DAY_2026_11_25) == 15, "Reversal updates active day coins");
+    check(wallet.reverse("focus:2026-11-25:12", baseDay.atMs + 1000L, DAY_2026_11_25), "Reversal succeeds");
+    check(FocusRewards.coinsForDay(wallet, DAY_2026_11_25) == 55, "Reversal updates active day coins");
   }
 }

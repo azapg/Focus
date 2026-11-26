@@ -251,7 +251,7 @@ public final class PhoneCoreTest {
   private static void testPeekLinkRouting() {
     String link = "https://x.com/jack/status/20";
     check(link.equals(PausePolicy.peekLink(" \n" + link + "\u00a0")), "padded bare link routes to Peek");
-    check(PausePolicy.peekLink("Read " + link) == null, "written request routes to Ask");
+    check(link.equals(PausePolicy.peekLink("Read " + link)), "single embedded post link extracts to Peek");
     check(PausePolicy.peekLink(link + " " + link) == null, "multiple links route to Ask");
     check("https://x.com/home".equals(PausePolicy.peekLink("https://x.com/home")), "feed refusal stays local");
   }

@@ -160,7 +160,7 @@ public final class RestrictionService extends AccessibilityService {
     Button allow =
         Ui.button(
             this,
-            "Allow temporarily",
+            "Free time & options",
             () -> {
               try {
                 startActivity(

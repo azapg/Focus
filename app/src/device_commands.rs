@@ -121,6 +121,17 @@ fn ensure_lan_firewall_rule(port: u16, core: &Core) {
         ])
         .creation_flags(NO_WINDOW)
         .output();
+    let public_rule_name = "FocusDNS LAN Sync LocalSubnet";
+    let _ = Command::new("netsh")
+        .args([
+            "advfirewall",
+            "firewall",
+            "delete",
+            "rule",
+            &format!("name={public_rule_name}"),
+        ])
+        .creation_flags(NO_WINDOW)
+        .output();
     let out = Command::new("netsh")
         .args([
             "advfirewall",
@@ -137,7 +148,27 @@ fn ensure_lan_firewall_rule(port: u16, core: &Core) {
         ])
         .creation_flags(NO_WINDOW)
         .output();
-    let success = out.as_ref().is_ok_and(|result| result.status.success());
+    // Allow authenticated paired phone/TV requests from the same local subnet even when
+    // Windows marks a home Wi-Fi or mixed adapter profile as Public.
+    let out_pub = Command::new("netsh")
+        .args([
+            "advfirewall",
+            "firewall",
+            "add",
+            "rule",
+            &format!("name={public_rule_name}"),
+            "dir=in",
+            "action=allow",
+            &format!("program={exe_str}"),
+            "protocol=TCP",
+            &format!("localport={port_str}"),
+            "remoteip=localsubnet",
+            "profile=public",
+        ])
+        .creation_flags(NO_WINDOW)
+        .output();
+    let success = out.as_ref().is_ok_and(|result| result.status.success())
+        && out_pub.as_ref().is_ok_and(|result| result.status.success());
     core.event("lan", "firewall", if success { "ok" } else { "failed" },
         if success { "ok" } else { "firewall_failed" },
         focus_devices::events::elapsed(started), json!({"port": port, "network_category": active_network_category(), "firewall_profiles": "domain_private"}));
@@ -188,6 +219,17 @@ fn handle_remote_laptop_command(
     let action = input["action"].as_str().unwrap_or("");
     match action {
         "streak_view" | "streak_buy_freeze" => crate::streak_runtime::remote(app, core, &input).map(Some),
+        "start_free_time" => {
+            let minutes = input["minutes"]
+                .as_u64()
+                .filter(|&m| (1..=60).contains(&m))
+                .ok_or("Invalid free time duration")?;
+            let request_id = input["request_id"].as_str().unwrap_or("remote");
+            core.start_free_time(minutes, request_id)?;
+            core.publish(app);
+            core.log(&format!("laptop free time started remotely for {minutes}m"));
+            Ok(None)
+        }
         "dns_pause" => {
             let minutes = input["minutes"]
                 .as_u64()

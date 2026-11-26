@@ -2,6 +2,17 @@ import { installGate } from './overlay.js';
 import { publicTlds } from './public-tlds.js';
 
 const MAX_CACHE = 512;
+const SHIELDED_DISTRACTION_HOSTS = [
+  'x.com', 'twitter.com', 'youtube.com', 'youtu.be', 'instagram.com',
+  'tiktok.com', 'reddit.com', 'twitch.tv', 'facebook.com', 'netflix.com',
+  'threads.net', 'bsky.app', 'primevideo.com', 'disneyplus.com', 'kick.com',
+];
+
+export function isShieldedDistractionHost(host) {
+  if (!host) return false;
+  const h = host.toLowerCase();
+  return SHIELDED_DISTRACTION_HOSTS.some((d) => h === d || h.endsWith('.' + d));
+}
 
 function dnsHost(url) {
   try {
@@ -144,9 +155,10 @@ export function createProtection(chrome, fetch) {
         });
       }
       if (!host || desired !== state || !top.documentId) return;
-      // Warm the cache during the pause so the sweep at restoration is usually local.
-      if (desired.paused_until) void verdict(host, desired.profile);
-      const blocked = desired.paused_until ? false : await verdict(host, desired.profile);
+      // During an offline Emergency Shield, keep entertainment domains covered locally even while DNS is off.
+      const shielded = Boolean(desired.paused_until && desired.emergency_shield && isShieldedDistractionHost(host));
+      if (desired.paused_until && !shielded) void verdict(host, desired.profile);
+      const blocked = shielded ? true : (desired.paused_until ? false : await verdict(host, desired.profile));
       if (desired !== state) return;
       if (blocked === null) {
         retries.add(tabId);
@@ -190,13 +202,15 @@ export function createProtection(chrome, fetch) {
         ? next.profile.toLowerCase() : null;
       const profileChanged = state?.profile !== profile;
       const scopeChanged = (state?.scope_revision ?? 0) !== scopeRevision;
-      if (state?.paused_until === next.paused_until && state.ended_at === next.ended_at && !scopeChanged && !profileChanged) return;
+      const emergencyShield = Boolean(next.emergency_shield);
+      const shieldChanged = Boolean(state?.emergency_shield) !== emergencyShield;
+      if (state?.paused_until === next.paused_until && state.ended_at === next.ended_at && !scopeChanged && !profileChanged && !shieldChanged) return;
       if (scopeChanged || profileChanged) cache.clear();
       if (scopeChanged) {
         const now = Date.now();
         scopeRechecks = [now + 5_000, now + 65_000];
       }
-      state = { ...next, profile, scope_revision: scopeRevision };
+      state = { ...next, profile, scope_revision: scopeRevision, emergency_shield: emergencyShield };
       warmed = false;
       retries.clear();
       void scan();

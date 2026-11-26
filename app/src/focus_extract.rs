@@ -548,6 +548,8 @@ mod tests {
             rating_note: None,
             completed_at: Some(end),
             active: false,
+            free_time: false,
+            emergency_shield: false,
         }
     }
 

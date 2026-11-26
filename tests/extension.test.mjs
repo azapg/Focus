@@ -567,3 +567,21 @@ test('Peek checks the final blocked URL while the shortener lookup is pending', 
   reply(ports[2], { opened: true });
   assert.deepEqual(await paused, { opened: true });
 });
+
+test('emergency shield blocks entertainment hosts locally even while DNS is paused', async () => {
+  const w = await worker();
+  w.frames.set(1, [frame('work', 'https://acme-portal.dev/dashboard')]);
+  w.frames.set(2, [frame('social', 'https://x.com/home')]);
+  w.frames.set(3, [frame('video', 'https://www.youtube.com/watch?v=abc')]);
+  w.ports.at(-1).onMessage.fire({
+    type: 'protection',
+    version: 1,
+    state: { paused_until: Date.now() + 600_000, ended_at: null, profile: 'a1b2c3', emergency_shield: true },
+  });
+  await w.settle();
+  const covered = w.injected.map(({ target }) => target.documentIds[0]).sort();
+  assert.deepEqual(covered, ['social', 'video']);
+  assert.equal(w.mutes.get(2)?.muted, true);
+  assert.equal(w.mutes.get(3)?.muted, true);
+  assert.equal(w.mutes.has(1), false);
+});

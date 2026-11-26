@@ -16,16 +16,17 @@ type Purchase = { status: "bought" | "already_bought" | "limit_reached" }
   | { status: "not_enough"; missing: number };
 type FreezeView = { freezeReady: boolean; canBuy: boolean; priceCoins: number; balanceCoins: number };
 type FreezePurchase = { status: "bought" | "already_bought" | "slot_full" | "insufficient_coins" | "unavailable" };
-type Quote = { kind: "time"; day: number; price: number; requestId: string }
+type Quote = { kind: "time"; minutes: number; target: string; targetLabel: string; day: number; price: number; requestId: string }
   | { kind: "freeze"; price: number; requestId: string };
 
-const minutes = 15;
+const PACKS = [5, 10] as const;
 const coins = (amount: number) => `${amount} ${amount === 1 ? "coin" : "coins"}`;
 
-export function WalletStore({ invoke }: { invoke: Invoke }) {
+export function WalletStore({ invoke, devices = [] }: { invoke: Invoke; devices?: Array<{ id: string; name: string; kind?: string }> }) {
   const [wallet, setWallet] = useState<WalletView | null>(null);
   const [freeze, setFreeze] = useState<FreezeView | null>(null);
   const [screen, setScreen] = useState<"closed" | "store" | "confirm" | "receipt">("closed");
+  const [target, setTarget] = useState<string>("laptop");
   const [quote, setQuote] = useState<Quote>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -86,7 +87,8 @@ export function WalletStore({ invoke }: { invoke: Invoke }) {
 
   if (!wallet?.active) return null;
   const remaining = Math.max(0, wallet.time_off_limit - wallet.time_off_bought);
-  const price = wallet.time_off_price_per_minute * minutes;
+  const targets = [{ id: "laptop", label: "Laptop" }, ...devices.map((d) => ({ id: d.id, label: d.name }))];
+  const selectedTarget = targets.find((t) => t.id === target) ?? targets[0];
 
   function close() {
     if (busy) return;
@@ -119,13 +121,16 @@ export function WalletStore({ invoke }: { invoke: Invoke }) {
         return;
       }
       const purchase: Purchase = await invoke("wallet_buy_time", {
-        requestId: quote.requestId, minutes, expectedDay: quote.day,
+        requestId: quote.requestId,
+        minutes: quote.minutes,
+        expectedDay: quote.day,
+        targetDevice: quote.target,
       });
       if (purchase.status === "bought" || purchase.status === "already_bought") {
         setScreen((current) => current === "confirm" ? "receipt" : current);
       } else {
         setMessage(purchase.status === "not_enough"
-          ? `${coins(purchase.missing)} needed to complete this purchase.`
+          ? `${coins(purchase.missing)} needed.`
           : "Today’s purchase limit has been reached.");
         setScreen((current) => current === "confirm" ? "store" : current);
       }
@@ -133,10 +138,10 @@ export function WalletStore({ invoke }: { invoke: Invoke }) {
     } catch {
       const latest = await load();
       if (quote.kind === "time" && latest && latest.day !== quote.day) {
-        setMessage("A new day started. Check today’s allowance before buying.");
+        setMessage("A new day started. Check today’s limit before buying.");
         setScreen((current) => current === "confirm" ? "store" : current);
       } else {
-        setMessage("This purchase couldn’t be confirmed. Try confirming again.");
+        setMessage("This purchase couldn’t be confirmed. Try again.");
       }
     } finally {
       setBusy(false);
@@ -144,8 +149,11 @@ export function WalletStore({ invoke }: { invoke: Invoke }) {
   }
 
   const isFreeze = quote?.kind === "freeze";
-  const title = screen === "confirm" ? (isFreeze ? "Buy a Streak Freeze?" : "Buy 15 minutes?")
-    : screen === "receipt" ? (isFreeze ? "Freeze purchased" : "15 minutes added") : "Store";
+  const title = screen === "confirm"
+    ? (isFreeze ? "Buy a Streak Freeze?" : `Are you sure?`)
+    : screen === "receipt"
+      ? (isFreeze ? "Freeze purchased" : `${quote?.kind === "time" ? quote.minutes : 5} min free started`)
+      : "Store";
 
   return <>
     <Button ref={trigger} variant="text" size="xs" className="dev-trigger-btn"
@@ -172,11 +180,20 @@ export function WalletStore({ invoke }: { invoke: Invoke }) {
       </div>
       {screen === "store" && <>
         <div className="focus-update-popover-sub">{coins(wallet.balance)}</div>
-        <div className="focus-wallet-item">
-          <span><b>Time off</b><small>15 minutes for today</small></span>
-          <Button size="xs" variant="outline" disabled={remaining < minutes || wallet.balance < price}
-            onClick={() => confirm({ kind: "time", day: wallet.day, price, requestId: crypto.randomUUID() })}>{coins(price)}</Button>
-        </div>
+        {targets.length > 1 && <div className="t3-btn-group" style={{ marginBottom: 8 }}>
+          {targets.map((t) => (
+            <button key={t.id} type="button" className={`t3-btn${selectedTarget.id === t.id ? " primary" : ""}`}
+              onClick={() => setTarget(t.id)}>{t.label}</button>
+          ))}
+        </div>}
+        {PACKS.map((mins) => {
+          const price = wallet.time_off_price_per_minute * mins;
+          return <div className="focus-wallet-item" key={mins}>
+            <span><b>{mins} min free</b><small>Starts now on {selectedTarget.label}</small></span>
+            <Button size="xs" variant="outline" disabled={remaining < mins || wallet.balance < price}
+              onClick={() => confirm({ kind: "time", minutes: mins, target: selectedTarget.id, targetLabel: selectedTarget.label, day: wallet.day, price, requestId: crypto.randomUUID() })}>{coins(price)}</Button>
+          </div>;
+        })}
         {freeze && <div className="focus-wallet-item">
           <span><b>Streak Freeze</b><small>{freeze.freezeReady ? "One freeze held"
             : freeze.balanceCoins < freeze.priceCoins ? `${coins(freeze.priceCoins - freeze.balanceCoins)} needed`
@@ -186,17 +203,16 @@ export function WalletStore({ invoke }: { invoke: Invoke }) {
             onClick={() => confirm({ kind: "freeze", price: freeze.priceCoins, requestId: crypto.randomUUID() })}>{coins(freeze.priceCoins)}</Button>}
         </div>}
         <div className="focus-update-popover-sub">
-          {remaining < minutes ? "Today’s purchase limit leaves fewer than 15 minutes."
-            : wallet.balance < price ? `${coins(price - wallet.balance)} needed for 15 minutes off.`
-              : `${remaining} extra minutes available to buy today.`}
+          {remaining < PACKS[0] ? "Today’s free-time limit has been reached."
+            : `${remaining}m left to buy today.`}
         </div>
         {wallet.needs_upgrade.length > 0 && <small>Update paired devices to share purchases.</small>}
       </>}
       {screen === "confirm" && quote && <>
         <div className="focus-update-popover-sub">{isFreeze
-          ? "Starting the day after purchase, a confirmed Drift day can use this freeze automatically and preserve your streak."
-          : "These minutes expire at midnight. Request a pause as usual."}</div>
-        {isFreeze && <div className="focus-update-popover-sub">You can hold one freeze. A clean day must follow before another freeze can apply.</div>}
+          ? "Starting tomorrow, one confirmed Drift day uses this freeze automatically."
+          : `Start ${quote.minutes} min free on ${quote.targetLabel} now for ${coins(quote.price)}?`}</div>
+        {isFreeze && <div className="focus-update-popover-sub">Hold one freeze at a time. A clean day must follow before another applies.</div>}
         <div className="focus-wallet-actions">
           <Button size="xs" variant="outline" disabled={busy} onClick={buy}>Confirm · {coins(quote.price)}</Button>
           <Button size="xs" variant="text" disabled={busy} onClick={() => setScreen("store")}>Cancel</Button>
@@ -204,10 +220,10 @@ export function WalletStore({ invoke }: { invoke: Invoke }) {
       </>}
       {screen === "receipt" && <>
         <div className="focus-update-popover-sub" role="status">{isFreeze
-          ? "A freeze protects one eligible Drift day starting the day after purchase."
-          : wallet.day === quote?.day
-          ? "Your pause limit is higher for the rest of today."
-          : "This purchase applied to the previous day."}</div>
+          ? "Freeze ready for a future Drift day."
+          : quote?.kind === "time"
+            ? `${quote.minutes} min free started on ${quote.targetLabel}. No drift penalty.`
+            : "Done."}</div>
         <div className="focus-wallet-actions"><Button size="xs" variant="outline" onClick={close}>Done</Button></div>
       </>}
       {message && <div className="focus-update-popover-sub" role="status">{message}</div>}

@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { WalletStore } from "./wallet-store";
+import { EmergencyShieldSettings } from "./emergency-shield";
 import { PauseJudgeSettings, PauseJudgeSheet, serviceImage, serviceName } from "./pause-judge";
 import {
   Select,
@@ -540,7 +541,9 @@ function Header() {
       </ToggleGroup>
       <span id="pDate" hidden />
       <div className="focus-head-actions">
-        {s.range === "today" && <WalletStore invoke={call} />}
+        {s.range === "today" && (
+          <WalletStore invoke={call} devices={list.filter((d) => d.id !== "laptop")} />
+        )}
         <DropdownMenu
           modal={false}
           open={s.menu}
@@ -830,6 +833,7 @@ function ProtectionTab() {
         <p className="t3-footnote">Stricter limits start now; looser ones start tomorrow.</p>
       </div>
       <LocalDnsCard />
+      <EmergencyShieldSettings invoke={call} />
     </>
   );
 }

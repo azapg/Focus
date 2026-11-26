@@ -316,6 +316,48 @@ public final class DnsController {
         PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
   }
 
+  public boolean isEmergencyShieldActive() {
+    return deadline() > 0 && prefs.getBoolean("emergency_shield", false);
+  }
+
+  public boolean isFreeTimeActive() {
+    return deadline() > 0 && prefs.getBoolean("free_time", false);
+  }
+
+  public long lastPauseEndedElapsed() {
+    return prefs.getLong("last_pause_ended_elapsed", 0);
+  }
+
+  public synchronized void startFreeTime(int minutes, String requestId) {
+    if (minutes < 1 || minutes > 30) throw new IllegalArgumentException("Invalid free time duration");
+    long started = SystemClock.elapsedRealtime();
+    String cause = DNS_APPLY_FAILED;
+    try {
+      pauseInternal(minutes * 60_000L, "Store free time (" + minutes + "m)", "", null,
+          requestId == null || requestId.isEmpty() ? FocusEvents.newId() : requestId, "store");
+      save(prefs.edit().putBoolean("free_time", true).putBoolean("emergency_shield", false));
+      cause = OK;
+    } finally {
+      record("pause", "pause", cause, FocusEvents.newId(), "store", started, false);
+    }
+  }
+
+  public synchronized void startEmergencyShield(int minutes, String reason) {
+    if (minutes < 1 || minutes > EmergencyShieldStore.SHIELD_MINUTES) {
+      throw new IllegalArgumentException("Invalid emergency shield duration");
+    }
+    long started = SystemClock.elapsedRealtime();
+    String cause = DNS_APPLY_FAILED;
+    try {
+      pauseInternal(minutes * 60_000L, "Emergency shield: " + reason, "", null,
+          FocusEvents.newId(), "emergency_shield");
+      save(prefs.edit().putBoolean("free_time", false).putBoolean("emergency_shield", true));
+      cause = OK;
+    } finally {
+      record("pause", "pause", cause, FocusEvents.newId(), "emergency_shield", started, false);
+    }
+  }
+
   public synchronized void pause(long duration, String reason, String afterPlan) {
     pause(duration, reason, afterPlan, null);
   }
@@ -355,6 +397,7 @@ public final class DnsController {
     long until = Store.get(context).pause(KEY, duration, reason, afterPlan, checkIn);
     try {
       save(prefs.edit().putBoolean("restore_pending", true)
+          .putBoolean("free_time", false).putBoolean("emergency_shield", false)
           .putString("pause_correlation", correlation).putString("pause_route", route));
       if (alarms != null) {
         alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, until, alarmIntent());
@@ -392,10 +435,14 @@ public final class DnsController {
 
   private void resumeInternal(boolean askForRating) {
     requirePermission();
+    boolean wasFreeTime = prefs.getBoolean("free_time", false);
     write(HOST, requireHostname());
     write(MODE, "hostname");
     FocusNotifications.updateDnsPause(context, 0, false);
-    save(prefs.edit().putBoolean("restore_pending", false).remove("pause_correlation").remove("pause_route"));
+    save(prefs.edit().putBoolean("restore_pending", false)
+        .putBoolean("free_time", false).putBoolean("emergency_shield", false)
+        .putLong("last_pause_ended_elapsed", SystemClock.elapsedRealtime())
+        .remove("pause_correlation").remove("pause_route"));
     InsightsEngine.PauseRecord ended = Store.get(context).endPause(KEY, askForRating ? "dns_resumed" : "dns_pause_failed");
     AlarmManager alarms = context.getSystemService(AlarmManager.class);
     if (alarms != null) alarms.cancel(alarmIntent());
@@ -403,7 +450,8 @@ public final class DnsController {
     Store.get(context).diagnostic("nextdns_restored");
     checkAsync(null);
     WidgetUpdater.updateAll(context);
-    if (ended != null && askForRating) FocusNotifications.sendPauseRating(context, ended);
+    FocusAccessibilityService.onProtectionRestored(context);
+    if (ended != null && askForRating && !wasFreeTime) FocusNotifications.sendPauseRating(context, ended);
   }
 
   private void record(String event, String stage, String cause, String correlation, String route,

@@ -17,6 +17,8 @@ struct SavedPause {
     scope_revision: u64,
     #[serde(default)]
     profile: Option<String>,
+    #[serde(default)]
+    emergency_shield: bool,
 }
 
 #[derive(Default, PartialEq, serde::Serialize)]
@@ -25,6 +27,8 @@ struct Protection {
     ended_at: Option<u64>,
     scope_revision: u64,
     profile: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    emergency_shield: bool,
 }
 
 fn read_protection(path: &Path) -> Option<Protection> {
@@ -34,6 +38,7 @@ fn read_protection(path: &Path) -> Option<Protection> {
         ended_at: saved.pause_ended_at,
         scope_revision: saved.scope_revision,
         profile: saved.profile.as_deref().and_then(|profile| configured_nextdns_profile(path.parent()?, profile)),
+        emergency_shield: saved.emergency_shield,
     })
 }
 

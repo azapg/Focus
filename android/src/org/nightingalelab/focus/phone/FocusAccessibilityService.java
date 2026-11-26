@@ -46,12 +46,47 @@ public final class FocusAccessibilityService extends AccessibilityService {
       "com.google.android.packageinstaller",
       "com.samsung.android.packageinstaller"));
 
+  private static volatile FocusAccessibilityService activeInstance;
+  private static final Set<String> SHIELDED_APPS = new HashSet<>(Arrays.asList(
+      "com.twitter.android",
+      "com.google.android.youtube",
+      "com.instagram.android",
+      "com.reddit.frontpage",
+      "com.zhiliaoapp.musically",
+      "com.ss.android.ugc.trill",
+      "tv.twitch.android.app",
+      "com.facebook.katana",
+      "com.netflix.mediaclient"));
+  private static final Set<String> SHIELDED_HOSTS = new HashSet<>(Arrays.asList(
+      "x.com", "twitter.com", "youtube.com", "youtu.be", "instagram.com",
+      "reddit.com", "tiktok.com", "twitch.tv", "facebook.com", "netflix.com"));
+  private static final long POST_PAUSE_GUARD_MS = 5 * 60_000L;
+
+  static boolean isShieldedHost(String host) {
+    if (host == null || host.isEmpty()) return false;
+    String clean = host.trim().toLowerCase(Locale.ROOT);
+    for (String bad : SHIELDED_HOSTS) {
+      if (clean.equals(bad) || clean.endsWith("." + bad)) return true;
+    }
+    return false;
+  }
+
+  static void onProtectionRestored(Context context) {
+    FocusAccessibilityService svc = activeInstance;
+    if (svc != null) {
+      svc.feedHandler.post(svc::enforceShieldNow);
+    }
+  }
+
   private String browserPkg = "";
+  private String foregroundPkg = "";
   private int browserWindowId = -1;
   private long lastGuardBounceMs;
   private final Handler feedHandler = new Handler(Looper.getMainLooper());
   private View feedCover;
   private Rect feedCoverBounds;
+  private View shieldCover;
+  private String shieldCoverPkg = "";
   private boolean lockReceiverRegistered;
   private final Runnable recheckFeed = () -> inspectBrowserWindow(false);
   private final BroadcastReceiver lockReceiver = new BroadcastReceiver() {
@@ -61,6 +96,7 @@ public final class FocusAccessibilityService extends AccessibilityService {
   @Override
   protected void onServiceConnected() {
     connected = true;
+    activeInstance = this;
     if (!lockReceiverRegistered) {
       IntentFilter filter = new IntentFilter(HabitNudges.LOCK_CHANGED);
       if (Build.VERSION.SDK_INT >= 33) registerReceiver(lockReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
@@ -79,6 +115,10 @@ public final class FocusAccessibilityService extends AccessibilityService {
     int type = event.getEventType();
     boolean windowChanged = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED;
+    if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && !pkg.isEmpty()
+        && !pkg.equals("com.android.systemui") && !pkg.equals(getPackageName())) {
+      foregroundPkg = pkg;
+    }
 
     if (BrowserUrlParser.isBrowser(pkg) || (windowChanged && !browserPkg.isEmpty())) {
       inspectBrowserWindow(windowChanged);
@@ -87,6 +127,75 @@ public final class FocusAccessibilityService extends AccessibilityService {
         || type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)) {
       inspectSettingsForTamper(pkg);
     }
+    enforceShieldForPackage(foregroundPkg);
+  }
+
+  private void enforceShieldNow() {
+    AccessibilityNodeInfo root = getRootInActiveWindow();
+    if (root != null) {
+      try {
+        if (root.getPackageName() != null) foregroundPkg = root.getPackageName().toString();
+      } finally {
+        root.recycle();
+      }
+    }
+    enforceShieldForPackage(foregroundPkg);
+  }
+
+  private void enforceShieldForPackage(String pkg) {
+    DnsController dns = DnsController.get(this);
+    boolean emergencyShield = dns.isEmergencyShieldActive();
+    long endedAt = dns.lastPauseEndedElapsed();
+    boolean postPauseKick = dns.enabled() && dns.deadline() == 0 && endedAt > 0
+        && (SystemClock.elapsedRealtime() - endedAt) < POST_PAUSE_GUARD_MS;
+    boolean blockedApp = !pkg.isEmpty() && SHIELDED_APPS.contains(pkg) && (emergencyShield || postPauseKick);
+    if (!blockedApp) {
+      removeShieldCover();
+      return;
+    }
+    showShieldCover(pkg, emergencyShield ? "Shield active" : "Time's up");
+  }
+
+  private void showShieldCover(String pkg, String title) {
+    WindowManager windows = getSystemService(WindowManager.class);
+    if (windows == null) return;
+    if (shieldCover != null && pkg.equals(shieldCoverPkg)) return;
+    removeShieldCover();
+    LinearLayout cover = Theme.column(this);
+    cover.setGravity(Gravity.CENTER);
+    cover.setBackgroundColor(Theme.BG);
+    cover.setPadding(Theme.dp(this, 24), Theme.dp(this, 24), Theme.dp(this, 24), Theme.dp(this, 24));
+    cover.addView(Theme.text(this, title, 20, Theme.FG, true));
+    Theme.gap(cover, 8);
+    cover.addView(Theme.text(this, "Protection is on for distraction apps.", 13, Theme.MUTED, false));
+    Theme.gap(cover, 18);
+    TextView home = Theme.outlinePillButton(this, "Go home", () -> {
+      removeShieldCover();
+      foregroundPkg = "";
+      performGlobalAction(GLOBAL_ACTION_HOME);
+    });
+    cover.addView(home);
+    WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+        WindowManager.LayoutParams.MATCH_PARENT,
+        WindowManager.LayoutParams.MATCH_PARENT,
+        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+        PixelFormat.OPAQUE);
+    try {
+      windows.addView(cover, params);
+      shieldCover = cover;
+      shieldCoverPkg = pkg;
+    } catch (RuntimeException ignored) {}
+  }
+
+  private void removeShieldCover() {
+    if (shieldCover == null) return;
+    WindowManager windows = getSystemService(WindowManager.class);
+    if (windows != null) {
+      try { windows.removeViewImmediate(shieldCover); } catch (IllegalArgumentException ignored) {}
+    }
+    shieldCover = null;
+    shieldCoverPkg = "";
   }
 
   private void inspectBrowserWindow(boolean windowChanged) {
@@ -110,9 +219,11 @@ public final class FocusAccessibilityService extends AccessibilityService {
       boolean sameWindow = pkg.equals(browserPkg) && windowId == browserWindowId;
       browserPkg = pkg;
       browserWindowId = windowId;
-      Rect content = HabitNudges.lockEnabled(this) ? new Rect() : null;
+      Rect content = (HabitNudges.lockEnabled(this) || DnsController.get(this).isEmergencyShieldActive()) ? new Rect() : null;
       BrowserUrlParser.Parsed page = readAddressBar(root, pkg, content);
-      updateFeedCover(pkg, HabitNudgePolicy.isFeed(page), content);
+      boolean emergencyBlockedHost = DnsController.get(this).isEmergencyShieldActive()
+          && page != null && isShieldedHost(page.host);
+      updateFeedCover(pkg, HabitNudgePolicy.isFeed(page) || emergencyBlockedHost, content);
       if (page != null || !sameWindow) {
         Store.get(this).observeBrowserDomain(pkg, page == null ? "" : page.host);
       }
@@ -130,7 +241,8 @@ public final class FocusAccessibilityService extends AccessibilityService {
     feedHandler.removeCallbacks(recheckFeed);
     WindowManager windows = getSystemService(WindowManager.class);
     if (windows == null) return;
-    if (!confirmedFeed || content == null || content.isEmpty() || !HabitNudges.locked(this)) {
+    if (!confirmedFeed || content == null || content.isEmpty()
+        || (!HabitNudges.locked(this) && !DnsController.get(this).isEmergencyShieldActive())) {
       if (feedCover != null) {
         windows.removeViewImmediate(feedCover);
         feedCover = null;
@@ -351,6 +463,7 @@ public final class FocusAccessibilityService extends AccessibilityService {
   @Override
   public void onDestroy() {
     connected = false;
+    activeInstance = null;
     if (HabitNudges.locked(this)) FocusNotifications.clearHabitNudge(this);
     HabitNudges.setLocked(this, false);
     if (lockReceiverRegistered) {
@@ -358,6 +471,7 @@ public final class FocusAccessibilityService extends AccessibilityService {
       lockReceiverRegistered = false;
     }
     updateFeedCover("", false, null);
+    removeShieldCover();
     Store.get(this).clearBrowserDomain();
     Store.get(this).diagnostic("accessibility_disconnected");
     super.onDestroy();

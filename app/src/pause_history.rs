@@ -24,6 +24,10 @@ pub struct PauseRec {
     pub check_in: Option<CheckIn>,
     pub rating: Option<u8>,
     pub rating_note: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub free_time: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub emergency_shield: bool,
     // Only an explicitly linked completion can recover a saved live pause.
     #[serde(skip)]
     pub completed_at: Option<u64>,
@@ -97,6 +101,10 @@ fn read(
                     check_in: serde_json::from_value(v["check_in"].clone()).ok(),
                     rating: None,
                     rating_note: None,
+                    free_time: v["free_time"].as_bool().unwrap_or(false)
+                        || v["kind"].as_str() == Some("free_time"),
+                    emergency_shield: v["emergency_shield"].as_bool().unwrap_or(false)
+                        || v["kind"].as_str() == Some("emergency_shield"),
                     completed_at: None,
                     active: false,
                 }, scoped));

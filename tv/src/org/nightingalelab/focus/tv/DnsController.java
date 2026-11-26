@@ -211,6 +211,7 @@ public final class DnsController {
       write(MODE, "hostname");
       verifiedAt = 0;
       MonitorService.ensure(context);
+      Store.get(context).ensureDefaultYouTubeBlock();
       Store.get(context).diagnostic("nextdns_connected");
     } catch (RuntimeException failure) {
       // The snapshot survives a partial failure so Restore previous DNS remains available.
@@ -229,6 +230,42 @@ public final class DnsController {
         731,
         new Intent(context, DnsExpiryReceiver.class),
         PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+  }
+
+  public synchronized void startFreeTime(int minutes, String requestId, String appPkg) {
+    if (minutes < 1 || minutes > 30) throw new IllegalArgumentException("Invalid free time duration");
+    long duration = minutes * 60_000L;
+    String reason = "Store free time (" + minutes + "m)";
+    Store store = Store.get(context);
+    if (appPkg != null && !appPkg.isEmpty() && AppCatalog.allowed(context, appPkg)) {
+      store.pause(appPkg, duration, reason);
+    } else {
+      for (AppCatalog.App app : AppCatalog.apps(context)) {
+        if (store.rule(app.pkg).blocked) {
+          store.pause(app.pkg, duration, reason);
+        }
+      }
+    }
+    if (enabled() && permitted() && !prefs.getBoolean("restore_pending", false) && deadline() == 0) {
+      try {
+        network();
+        AlarmManager alarms = context.getSystemService(AlarmManager.class);
+        if (Build.VERSION.SDK_INT < 31 || (alarms != null && alarms.canScheduleExactAlarms())) {
+          long until = store.pause(KEY, duration, reason, null);
+          save(prefs.edit().putBoolean("restore_pending", true));
+          if (alarms != null) {
+            alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, until, alarmIntent());
+            Metric.DNS_ALARM_SCHEDULED.count(1);
+          }
+          write(MODE, "off");
+          verifiedAt = 0;
+          MonitorService.ensure(context);
+          store.diagnostic("free_time_dns_paused");
+        }
+      } catch (RuntimeException ignored) {
+        // App free time pass stays active even if DNS pause wasn't needed.
+      }
+    }
   }
 
   public synchronized void pause(long duration, String reason) {

@@ -199,6 +199,12 @@ fn reason_terms(reason: &str, catalog: &Catalog) -> BTreeSet<String> {
     terms
 }
 
+pub struct ContextMeta {
+    pub habits_due: usize,
+    pub wallet_balance_coins: i64,
+    pub dns_check: Option<Value>,
+}
+
 pub fn build(
     request: &Request,
     now: u64,
@@ -208,6 +214,7 @@ pub fn build(
     tracker: &Tracker,
     catalog: &Catalog,
     has_peek_target: bool,
+    meta: &ContextMeta,
 ) -> Value {
     let local = Local.timestamp_millis_opt(now as i64).unwrap();
     let terms = reason_terms(&request.text, catalog);
@@ -241,18 +248,28 @@ pub fn build(
         .filter_map(|pause| pause.rating)
         .take(8)
         .collect::<Vec<_>>();
-    json!({
+    let mut payload = json!({
         "request": summary_text(&request.text),
         "has_peek_target": has_peek_target,
         "check_in": request.check_in,
         "local_time": local.format("%Y-%m-%d %A %H:%M %:z").to_string(),
-        "pauses_today": { "count": policy.count, "total_minutes": policy.used_ms as f64 / MINUTE_MS as f64, "reasons": reasons },
+        "today": {
+            "count": policy.count,
+            "total_minutes": policy.used_ms as f64 / MINUTE_MS as f64,
+            "reasons": reasons,
+            "habits_due": meta.habits_due,
+            "wallet_balance_coins": meta.wallet_balance_coins,
+        },
         "last_hour": activity(tracker, now.saturating_sub(60 * MINUTE_MS), now, &BTreeSet::new(), catalog),
         "similar_pauses": similar,
         "recent_ratings": recent_ratings,
         "services": catalog.entries(),
-        "max_minutes": policy.cap(),
-    })
+        "max_minutes": 10,
+    });
+    if let Some(check) = &meta.dns_check {
+        payload["dns_check"] = check.clone();
+    }
+    payload
 }
 
 #[cfg(test)]
@@ -341,6 +358,11 @@ mod tests {
             &tracker,
             &Catalog::load(&scratch).unwrap(),
             false,
+            &ContextMeta {
+                habits_due: 2,
+                wallet_balance_coins: 15,
+                dns_check: None,
+            },
         );
         let serialized = context.to_string();
         for private in [
@@ -355,6 +377,10 @@ mod tests {
             assert!(!serialized.contains(private), "{serialized}");
         }
         assert_eq!(context["check_in"], "tired");
+        assert_eq!(context["today"]["habits_due"], 2);
+        assert_eq!(context["today"]["wallet_balance_coins"], 15);
+        assert_eq!(context["today"]["reasons"][0], "check Discord");
+        assert_eq!(context["recent_ratings"][0], 2);
         assert_eq!(context["similar_pauses"][0]["rating"], 2);
         assert_eq!(
             context["similar_pauses"][0]["foreground"]["matched_percent"],

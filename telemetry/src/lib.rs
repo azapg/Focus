@@ -70,10 +70,11 @@ impl Component {
     }
 
     fn counters(&self) -> impl Iterator<Item = (&'static str, &'static Counter)> + '_ {
+        let browser_host = matches!(self, Self::BrowserHost);
         COUNTERS
             .iter()
             .copied()
-            .filter(|(name, _)| name.starts_with("native_") == matches!(self, Self::BrowserHost))
+            .filter(move |(name, _)| name.starts_with("native_") == browser_host)
     }
 }
 

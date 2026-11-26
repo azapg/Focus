@@ -6,7 +6,8 @@ public final class Wallet {
   public static final int SYNC_VERSION = 1;
   private static final int MAX_AMOUNT = 10_000;
   private static final int MAX_TIME_OFF = 60;
-  public static final int TIME_OFF_PRICE_PER_MINUTE = 1;
+  public static final int DEFAULT_FREE_TIME_CAP = 15;
+  public static final int TIME_OFF_PRICE_PER_MINUTE = 3;
   private static final java.util.regex.Pattern TOKEN = java.util.regex.Pattern.compile("[A-Za-z0-9_.:-]+");
   private static final String TIME_OFF = "time_off", TIME_PREFIX = "time:";
   private static final String REVERSAL = "reversal", REVERSE_PREFIX = "reverse:";
@@ -159,8 +160,12 @@ public final class Wallet {
     return minutes;
   }
 
+  public int timeOffLimit(int day) {
+    return habits.cap == null && habits.capEdits.isEmpty() ? DEFAULT_FREE_TIME_CAP : habits.capOn(day);
+  }
+
   public int timeOffLimitRemaining(int day) {
-    return (int) Math.max(0, habits.capOn(day) - timeOffBought(day));
+    return (int) Math.max(0, timeOffLimit(day) - timeOffBought(day));
   }
 
   public int extraPauseMinutes(int day) {

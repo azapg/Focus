@@ -1597,6 +1597,13 @@ public final class MainActivity extends Activity {
         PauseGatewaySettings.configured(this) ? "Gateway key saved" : "",
         Theme.IconView.Kind.CHEVRON, null,
         () -> PauseGatewaySettings.show(this, this::render)));
+    protCard.addView(Theme.divider(this, 14, 14));
+    EmergencyShieldStore emergencyShield = new EmergencyShieldStore(this);
+    long shieldCooldown = emergencyShield.offlineCooldownLeftMs(System.currentTimeMillis());
+    protCard.addView(settingsCardRow("Emergency shield", null,
+        dns.isEmergencyShieldActive() ? "Active" : shieldCooldown > 0 ? "Cooldown" : "Ready",
+        Theme.IconView.Kind.CHEVRON, null,
+        () -> SettingsDialogs.showEmergencyShieldSheet(this, this::render)));
     scrollContent.addView(protCard);
 
     // Card 2: Devices

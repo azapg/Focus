@@ -61,12 +61,27 @@ pub fn desktop_evidence(
 ) -> Result<DeviceEvidence, String> {
     let spans = tracker.spans(start_ms, end_ms);
     let extracted = extractor.extract_desktop_spans(device, &spans, pauses, start_ms, end_ms)?;
+    let free_windows: Vec<(u64, u64)> = pauses
+        .iter()
+        .filter(|p| p.free_time && p.end > p.t)
+        .map(|p| (p.t.max(start_ms), p.end.min(end_ms)))
+        .filter(|(s, e)| e > s)
+        .collect();
+    let covered_by_free_time = |bounds: (u64, u64)| {
+        free_windows
+            .iter()
+            .any(|&(fs, fe)| bounds.0 >= fs && bounds.1 <= fe)
+    };
     let mut confirmed_drift = false;
     let mut classified = BTreeSet::new();
     let mut cuts = Vec::new();
     for span in &spans {
         let bounds = (span.s.max(start_ms), span.e.min(end_ms));
         if bounds.1 > bounds.0 {
+            if covered_by_free_time(bounds) {
+                classified.insert(bounds);
+                continue;
+            }
             if let Some(drift) = strict_browser_disposition(span) {
                 classified.insert(bounds);
                 confirmed_drift |= drift;
@@ -159,6 +174,40 @@ pub fn paired_phone_evidence(
         confirmed_drift: false,
         verified_focus: extracted.verified_focus_intervals,
     }))
+}
+
+/// Evaluate a paired TV snapshot for personal Clean Streak drift.
+/// Any TV entertainment usage (YouTube, Twitch, Netflix, etc.) outside a legal Store
+/// `free_time` window counts as confirmed drift.
+pub fn paired_tv_drift(
+    snapshot: &serde_json::Value,
+    extractor: &mut crate::focus_extract::FocusExtractor,
+    start_ms: u64,
+    end_ms: u64,
+) -> Result<bool, String> {
+    if snapshot["kind"] != "tv" {
+        return Ok(false);
+    }
+    let free_windows: Vec<(u64, u64)> = snapshot["pauses"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|p| p["kind"].as_str() == Some("free_time") || p["free_time"].as_bool() == Some(true))
+        .filter_map(|p| {
+            let s = p["t"].as_u64()?.max(start_ms);
+            let e = p["end"].as_u64()?.min(end_ms);
+            (e > s).then_some((s, e))
+        })
+        .collect();
+    let device_id = snapshot["device_id"].as_str().unwrap_or("tv");
+    let extracted = extractor.extract_peer_snapshot(device_id, "tv", snapshot, start_ms, end_ms)?;
+    let drift = extracted.stream.spans.iter().any(|span| {
+        span.category.is_waste()
+            && !free_windows
+                .iter()
+                .any(|&(fs, fe)| span.start_ms >= fs && span.end_ms <= fe)
+    });
+    Ok(drift)
 }
 
 fn parse_peer_coverage(

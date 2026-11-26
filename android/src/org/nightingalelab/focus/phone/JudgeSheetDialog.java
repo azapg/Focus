@@ -272,7 +272,14 @@ final class JudgeSheetDialog {
     startButton.setOnClickListener(v -> openScoped());
     dismissButton.setOnClickListener(v -> dialog.dismiss());
     editRequestButton.setOnClickListener(v -> editRequest());
-    retryButton.setOnClickListener(v -> ask());
+    retryButton.setOnClickListener(v -> {
+      if (isRefused()) {
+        dialog.dismiss();
+        StoreSheet.show(activity, onApplied, () -> {});
+      } else {
+        ask();
+      }
+    });
     headerAction.setOnClickListener(v -> {
       if (isOfflineHold()) ask();
       else editRequest();
@@ -603,7 +610,8 @@ final class JudgeSheetDialog {
   }
 
   private boolean isScopedOffer() {
-    return decision != null && decision.is("allow_services") && OK.equals(decision.scopeEligibility);
+    return decision != null && (decision.is("allow_services") || decision.is("allow_domains"))
+        && OK.equals(decision.scopeEligibility);
   }
 
   private boolean isFullPauseOffer() {
@@ -700,12 +708,20 @@ final class JudgeSheetDialog {
     chipsRow.setVisibility(View.GONE);
 
     if (scoped) {
-      int count = decision.services.size();
+      List<String> items = decision.is("allow_domains") ? decision.domains : decision.services;
+      int count = items.size();
       cardTitle.setTextColor(Theme.FG);
-      if (count == 1) {
-        String only = decision.services.get(0);
+      if (decision.is("allow_domains")) {
+        String label = count == 1 ? items.get(0) : count + " sites";
+        cardTitle.setText(label + " \u00b7 " + decision.minutes + " min");
+        String body = nonEmpty(decision.message)
+            ? decision.message
+            : "Only " + label + " opens; DNS protection stays on.";
+        cardBody.setText(body);
+      } else if (count == 1) {
+        String only = items.get(0);
         singleIconHost.setVisibility(View.VISIBLE);
-        setServiceLogos(activity, singleIconHost, decision.services);
+        setServiceLogos(activity, singleIconHost, items);
         cardTitle.setText(serviceName(only) + " \u00b7 " + decision.minutes + " min");
         String body = nonEmpty(decision.message)
             ? decision.message
@@ -714,7 +730,7 @@ final class JudgeSheetDialog {
       } else {
         cardTitle.setText(count + " apps \u00b7 " + decision.minutes + " min");
         chipsRow.setVisibility(View.VISIBLE);
-        for (String svc : decision.services) {
+        for (String svc : items) {
           if (!svc.isEmpty()) chipsRow.addView(makeServiceChip(svc));
         }
         String body = nonEmpty(decision.message)
@@ -774,7 +790,7 @@ final class JudgeSheetDialog {
       String msg = transientError;
       if (!nonEmpty(msg) && decision != null) {
         if (decision.is("peek")) msg = "Peek is unavailable in this build.";
-        else if (decision.is("allow_services")) msg = PhonePauseJudge.causeMessage(decision.scopeEligibility);
+        else if (decision.is("allow_services") || decision.is("allow_domains")) msg = PhonePauseJudge.causeMessage(decision.scopeEligibility);
         else msg = decision.message;
       }
       cardBody.setText(nonEmpty(msg) ? msg : "Try again.");
@@ -813,9 +829,12 @@ final class JudgeSheetDialog {
       editRequestButton.setVisibility(View.VISIBLE);
       editRequestButton.setEnabled(editable);
       boolean canRetry = (offlineNoHold || errorOnly) && reasonValid;
-      retryButton.setVisibility(canRetry ? View.VISIBLE : View.GONE);
+      boolean showStore = refused && org.nightingalelab.focus.habits.HabitStore.get(activity)
+          .read().wallet.active(org.nightingalelab.focus.habits.Habits.day(System.currentTimeMillis()));
+      retryButton.setVisibility((canRetry || showStore) ? View.VISIBLE : View.GONE);
+      retryButton.setText(showStore ? "Store" : "Try again");
       retryButton.setEnabled(editable);
-      editRequestButton.setText(canRetry ? "Edit" : "Edit request");
+      editRequestButton.setText((canRetry || showStore) ? "Edit" : "Edit request");
     }
   }
 
