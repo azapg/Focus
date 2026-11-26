@@ -28,6 +28,11 @@ the services you need.
 5. Submit a single post link in **Ask** to open [Peek](browser-activity.md#peek-at-a-blocked-post).
    This path works without a Gateway key.
 
+If an ordinary site fails on one device and DNS filtering might be involved,
+name the site and describe what failed. The assistant can propose a one-minute
+test. It prefers temporary access for a catalog service when available.
+Otherwise, it can propose a full pause with the usual hold to confirm.
+
 The default model on both devices is `anthropic/claude-haiku-5.5`. Enter a
 different model ID in the same settings, such as `openai/gpt-6-luna`. Luna can
 take longer to respond. Windows protects stored keys with DPAPI and Android
