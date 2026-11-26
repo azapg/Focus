@@ -6,6 +6,7 @@ import android.view.Gravity;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.util.UUID;
+import org.json.JSONObject;
 import org.nightingalelab.focus.habits.HabitStore;
 import org.nightingalelab.focus.habits.Habits;
 import org.nightingalelab.focus.habits.Wallet;
@@ -31,13 +32,7 @@ final class StoreSheet {
     body.addView(Theme.text(activity, coins(wallet.balance()), 24, Theme.FG, true));
     Theme.gap(body, 12);
 
-    LinearLayout item = Theme.row(activity);
-    item.setPadding(Theme.dp(activity, 12), Theme.dp(activity, 8), Theme.dp(activity, 8), Theme.dp(activity, 8));
-    item.setBackground(Theme.roundRect(activity, Theme.CARD, Theme.LINE, 14));
-    LinearLayout copy = Theme.column(activity);
-    copy.addView(Theme.text(activity, "Time off", 14, Theme.FG, true));
-    copy.addView(Theme.text(activity, "15 minutes for today", 12, Theme.MUTED, false));
-    item.addView(copy, new LinearLayout.LayoutParams(0, -2, 1f));
+    LinearLayout item = item(activity, "Time off", "15 minutes for today");
 
     int price = TIME_OFF_MINUTES * Wallet.TIME_OFF_PRICE_PER_MINUTE;
     TextView buy = pill(activity, coins(price));
@@ -59,9 +54,120 @@ final class StoreSheet {
       body.addView(Theme.text(activity, "Update paired devices to share purchases.", 12, Theme.EXPLAIN, false));
     }
     Dialog sheet = SettingsDialogs.sheetDialog(activity, "Store", body);
+    loadFreeze(activity, sheet, body, refresh, openPause);
     buy.setOnClickListener(view -> {
       sheet.dismiss();
       confirm(activity, price, day, refresh, openPause);
+    });
+  }
+
+  private static void loadFreeze(Activity activity, Dialog sheet, LinearLayout body, Runnable refresh, Runnable openPause) {
+    new Thread(() -> {
+      final JSONObject view;
+      try {
+        view = StreakAuthority.view(activity);
+      } catch (Exception unavailable) {
+        return;
+      }
+      if (view == null || view.optInt("priceCoins") <= 0) return;
+      activity.runOnUiThread(() -> {
+        if (!sheet.isShowing() || activity.isFinishing() || activity.isDestroyed()) return;
+        int price = view.optInt("priceCoins");
+        boolean held = view.optBoolean("freezeReady");
+        long missing = price - view.optLong("balanceCoins");
+        boolean canBuy = view.optBoolean("canBuy");
+        String detail = held ? "One freeze held" : missing > 0 ? coins(missing) + " needed"
+            : canBuy ? "Protect one future Drift day" : "Unavailable right now";
+        LinearLayout row = item(activity, "Streak Freeze", detail);
+        if (!held) {
+          TextView buy = pill(activity, coins(price));
+          buy.setContentDescription("Streak Freeze, " + coins(price));
+          buy.setOnClickListener(button -> {
+            sheet.dismiss();
+            confirmFreeze(activity, price, refresh, openPause);
+          });
+          buy.setEnabled(canBuy);
+          buy.setAlpha(buy.isEnabled() ? 1f : .5f);
+          row.addView(buy);
+        }
+        Theme.gap(body, 8);
+        body.addView(row);
+      });
+    }, "focus-freeze-view").start();
+  }
+
+  private static void confirmFreeze(Activity activity, int price, Runnable refresh, Runnable openPause) {
+    LinearLayout body = Theme.column(activity);
+    body.addView(Theme.text(activity,
+        "Starting the day after purchase, a confirmed Drift day can use this freeze automatically and preserve your streak.",
+        14, Theme.EXPLAIN, false));
+    Theme.gap(body, 8);
+    body.addView(Theme.text(activity, "You can hold one freeze. A clean day must follow before another freeze can apply.",
+        12, Theme.MUTED, false));
+    Theme.gap(body, 12);
+    TextView confirm = pill(activity, "Confirm · " + coins(price));
+    TextView cancel = pill(activity, "Cancel");
+    addActions(activity, body, confirm, cancel);
+    TextView message = Theme.text(activity, "", 12, Theme.MUTED, false);
+    body.addView(message);
+    Dialog sheet = SettingsDialogs.sheetDialog(activity, "Buy a Streak Freeze?", body);
+    cancel.setOnClickListener(button -> {
+      sheet.dismiss();
+      show(activity, refresh, openPause);
+    });
+    String requestId = UUID.randomUUID().toString();
+    confirm.setOnClickListener(button -> {
+      confirm.setEnabled(false);
+      cancel.setEnabled(false);
+      sheet.setCancelable(false);
+      message.setText("");
+      new Thread(() -> {
+        String status;
+        try {
+          status = StreakAuthority.buyFreeze(activity, requestId).optString("status", "unavailable");
+        } catch (Exception unconfirmed) {
+          status = "unconfirmed";
+        }
+        final String outcome = status;
+        if ("bought".equals(outcome) || "already_bought".equals(outcome)) {
+          DeviceHub.get(activity).refreshOne(StreakAuthority.trialAuthority(activity));
+        }
+        activity.runOnUiThread(() -> {
+          if (!sheet.isShowing() || activity.isFinishing() || activity.isDestroyed()) return;
+          if ("unconfirmed".equals(outcome)) {
+            message.setText("This purchase couldn’t be confirmed. Try confirming again.");
+            confirm.setEnabled(true);
+            cancel.setEnabled(true);
+            sheet.setCancelable(true);
+            return;
+          }
+          sheet.dismiss();
+          refresh.run();
+          LinearLayout result = Theme.column(activity);
+          boolean bought = "bought".equals(outcome) || "already_bought".equals(outcome);
+          String detail;
+          switch (outcome) {
+            case "bought":
+            case "already_bought":
+              detail = "A freeze protects one eligible Drift day starting the day after purchase.";
+              break;
+            case "slot_full":
+              detail = "You already have a freeze.";
+              break;
+            case "insufficient_coins":
+              detail = "More coins are needed for a Streak Freeze.";
+              break;
+            default:
+              detail = "Streak Freeze is unavailable right now.";
+          }
+          result.addView(Theme.text(activity, detail, 14, Theme.EXPLAIN, false));
+          TextView done = pill(activity, "Done");
+          Theme.gap(result, 8);
+          result.addView(done);
+          Dialog receipt = SettingsDialogs.sheetDialog(activity, bought ? "Freeze purchased" : "Streak Freeze", result);
+          done.setOnClickListener(view -> receipt.dismiss());
+        });
+      }, "focus-freeze-buy").start();
     });
   }
 
@@ -142,6 +248,17 @@ final class StoreSheet {
     Theme.gap(row, 8);
     row.addView(secondary);
     body.addView(row);
+  }
+
+  private static LinearLayout item(Activity activity, String title, String detail) {
+    LinearLayout row = Theme.row(activity);
+    row.setPadding(Theme.dp(activity, 12), Theme.dp(activity, 8), Theme.dp(activity, 8), Theme.dp(activity, 8));
+    row.setBackground(Theme.roundRect(activity, Theme.CARD, Theme.LINE, 14));
+    LinearLayout copy = Theme.column(activity);
+    copy.addView(Theme.text(activity, title, 14, Theme.FG, true));
+    copy.addView(Theme.text(activity, detail, 12, Theme.MUTED, false));
+    row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1f));
+    return row;
   }
 
   private static TextView pill(Activity activity, String label) {
