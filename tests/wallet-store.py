@@ -107,7 +107,9 @@ async def main(output=None):
         await page.evaluate("""() => {
             window.__streak = {freezeReady: false, priceCoins: 60};
             window.__handlers['wallet-updated']({});
+            window.__handlers['habits-updated']({});
         }""")
+        await page.wait_for_function("window.focusHabitCredit === 0")
         freeze = store.get_by_role("button", name="Streak Freeze, 60 coins")
         await freeze.wait_for()
         assert await freeze.is_disabled()
