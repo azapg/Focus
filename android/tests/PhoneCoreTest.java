@@ -21,7 +21,26 @@ public final class PhoneCoreTest {
     }
   }
 
+  private static void testScreenOffCoverage() {
+    UsageTimeline.ScreenOff screen = new UsageTimeline.ScreenOff();
+    java.util.List<String> spans = new java.util.ArrayList<>();
+    java.util.function.BiConsumer<Long, Long> record = (start, end) -> spans.add(start + ":" + end);
+    screen.event(10, 15, record);
+    screen.event(20, 16, record);
+    screen.event(100, 15, record);
+    screen.event(110, 16, record);
+    screen.event(120, 26, record);
+    screen.event(130, 27, record);
+    screen.event(140, 15, record);
+    screen.event(150, 16, record);
+    screen.event(160, 16, record);
+    screen.event(170, 15, record);
+    screen.event(180, 16, record);
+    check(spans.equals(java.util.Arrays.asList("20:100", "160:170")), "only paired screen-off events count");
+  }
+
   public static void main(String[] args) {
+    testScreenOffCoverage();
     pauseBudgetIncludesLiveUse();
     testBrowserUrlParser();
     testClassifierAndHonesty();
@@ -33,6 +52,7 @@ public final class PhoneCoreTest {
     testTimelineAndBrowserCarryover();
     testApprovalPairing();
     testUpdateManifest();
+    testDeepFocusSessions();
     testApkDownloadBounds();
     testUpdateManifestReleaseNotes();
     testPauseCapsAndDailyLimit();
@@ -643,5 +663,47 @@ public final class PhoneCoreTest {
     FocusStats.View sat = FocusStats.compute(spans, pauses, Collections.emptyList(), now, tz, true, 5, null);
     check(sat.singleDay && sat.totalMs == 2 * H && sat.pauses.size() == 1 && sat.pauses.get(0).drift,
         "Selecting a day narrows the view; X during a docs pause drifted");
+  }
+
+  private static void testDeepFocusSessions() {
+    TimeZone tz = TimeZone.getTimeZone("UTC");
+    Calendar cal = Calendar.getInstance(tz);
+    cal.set(2026, Calendar.NOVEMBER, 23, 18, 0, 0);
+    cal.set(Calendar.MILLISECOND, 0);
+    long now = cal.getTimeInMillis();
+    long t0 = InsightsEngine.dayStart(now, tz);
+    long M = FocusStats.MIN, S = 1000L;
+
+    List<InsightsEngine.SpanRecord> spans = Arrays.asList(
+        // T3 Code: 15m + 30s glance to Terminal + 15m -> 30m unbroken focus
+        new InsightsEngine.SpanRecord(t0 + 9 * 60 * M, t0 + (9 * 60 + 15) * M, "T3 Code", "T3 Code", "", "laptop", "Laptop"),
+        new InsightsEngine.SpanRecord(t0 + (9 * 60 + 15) * M, t0 + (9 * 60 + 15) * M + 30 * S, "Terminal", "Terminal", "", "laptop", "Laptop"),
+        new InsightsEngine.SpanRecord(t0 + (9 * 60 + 15) * M + 30 * S, t0 + (9 * 60 + 30) * M + 30 * S, "T3 Code", "T3 Code", "", "laptop", "Laptop"),
+        // NotebookLM: 16m on phone overlapping T3 Code -> qualifies (15m learning min), union deduplicates overlap
+        new InsightsEngine.SpanRecord(t0 + (9 * 60 + 10) * M, t0 + (9 * 60 + 26) * M, "com.android.chrome", "NotebookLM", "notebooklm.google.com", "phone", "Phone"),
+        // 20m Notion interrupted by 10s X -> breaks immediately, neither side hits 25m
+        new InsightsEngine.SpanRecord(t0 + 11 * 60 * M, t0 + (11 * 60 + 20) * M, "Notion", "Notion", "", "laptop", "Laptop"),
+        new InsightsEngine.SpanRecord(t0 + (11 * 60 + 20) * M, t0 + (11 * 60 + 20) * M + 10 * S, "com.android.chrome", "X", "x.com", "laptop", "Laptop"),
+        new InsightsEngine.SpanRecord(t0 + (11 * 60 + 20) * M + 10 * S, t0 + (11 * 60 + 30) * M + 10 * S, "Notion", "Notion", "", "laptop", "Laptop"),
+        // 60m YouTube -> never eligible
+        new InsightsEngine.SpanRecord(t0 + 13 * 60 * M, t0 + 14 * 60 * M, "com.google.android.youtube", "YouTube", "", "phone", "Phone"),
+        // 40m T3 Code split by a 5m DNS pause -> 18m + 17m, neither qualifies
+        new InsightsEngine.SpanRecord(t0 + 15 * 60 * M, t0 + (15 * 60 + 40) * M, "T3 Code", "T3 Code", "", "laptop", "Laptop"));
+    List<InsightsEngine.PauseRecord> pauses = Collections.singletonList(
+        new InsightsEngine.PauseRecord("laptop", "laptop", "Laptop",
+            t0 + (15 * 60 + 18) * M, t0 + (15 * 60 + 23) * M, false, 5, "quick check", ""));
+
+    FocusStats.View v = FocusStats.compute(spans, pauses, Collections.emptyList(), now, tz, false, -1, null);
+    check(v.focusRuns.size() == 2, "Expected 2 focus runs (T3 Code 30m, NotebookLM 16m), got " + v.focusRuns.size());
+    check("T3 Code".equals(v.focusRuns.get(0).app) && v.focusRuns.get(0).ms == 30 * M, "T3 Code 30m run");
+    check("NotebookLM".equals(v.focusRuns.get(1).app) && v.focusRuns.get(1).ms == 16 * M, "NotebookLM 16m run");
+    check(v.focusMs == 46 * M, "Total focus 46m");
+    check(v.focusUnionMs == 30 * M + 30 * S, "Union focus deduplicates phone/laptop overlap: " + v.focusUnionMs);
+    check(v.barCategories().get(0).fine.id.equals("focus") && v.barCategories().get(0).ms == 46 * M,
+        "barCategories prepends Ice Deep focus");
+    for (FocusStats.AppStat a : v.apps) {
+      if ("YouTube".equals(a.name)) check(a.focusMs == 0, "YouTube never gets focus credit");
+      if ("Notion".equals(a.name)) check(a.focusMs == 0, "Notion broken by X gets 0 focus");
+    }
   }
 }

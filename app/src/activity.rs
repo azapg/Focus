@@ -53,8 +53,115 @@ pub struct BrowserContext {
 pub struct Tracker {
     dir: PathBuf,
     cur: Mutex<Option<Span>>,
+    coverage: Mutex<Coverage>,
+    coverage_enabled: std::sync::atomic::AtomicBool,
     data_dir: PathBuf,
     started_at: u64,
+}
+
+#[derive(Default)]
+struct Coverage {
+    previous_sample_ms: Option<u64>,
+    interval: Option<(u64, u64)>,
+}
+
+impl Coverage {
+    fn observe(&mut self, now: u64, verified: bool) -> Option<(u64, u64)> {
+        let prior = self.previous_sample_ms.take();
+        if verified {
+            self.previous_sample_ms = Some(now);
+        }
+        let continuous = verified && prior.is_some_and(|at| now > at && now - at < 4 * TICK_MS);
+        if !continuous {
+            return self.interval.take();
+        }
+        let start = prior.unwrap();
+        if let Some((_, end)) = self.interval.as_mut() {
+            *end = now;
+        } else {
+            self.interval = Some((start, now));
+        }
+        if self.interval.is_some_and(|(start, end)| end - start >= 60_000 || day_of(start) != day_of(end)) {
+            return self.interval.take();
+        }
+        None
+    }
+}
+
+#[cfg(any(windows, test))]
+#[derive(Default)]
+struct SleepCoverage {
+    suspended: Option<(u64, u64)>,
+}
+
+#[cfg(any(windows, test))]
+impl SleepCoverage {
+    fn transition(&mut self, sleeping: bool, wall_ms: u64, tick_ms: u64) -> Option<(u64, u64)> {
+        if sleeping {
+            self.suspended = Some((wall_ms, tick_ms));
+            return None;
+        }
+        let (start, start_tick) = self.suspended.take()?;
+        let wall_gap = wall_ms.checked_sub(start)?;
+        let tick_gap = tick_ms.checked_sub(start_tick)?;
+        (wall_gap > 0 && wall_gap.abs_diff(tick_gap) <= 5_000).then_some((start, wall_ms))
+    }
+}
+
+#[cfg(windows)]
+mod power_events {
+    use std::{ffi::c_void, sync::{mpsc, OnceLock}};
+    use windows_sys::Win32::{
+        System::{Power::{PowerRegisterSuspendResumeNotification, PowerUnregisterSuspendResumeNotification, DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS}, SystemInformation::GetTickCount64},
+        UI::WindowsAndMessaging::{DEVICE_NOTIFY_CALLBACK, PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND},
+    };
+
+    type Event = (bool, u64, u64);
+    static REPORTER: OnceLock<mpsc::Sender<Event>> = OnceLock::new();
+
+    pub struct Subscription {
+        handle: *mut c_void,
+        pub reports: mpsc::Receiver<Event>,
+    }
+
+    unsafe extern "system" fn callback(_: *const c_void, event: u32, _: *const c_void) -> u32 {
+        let sleeping = match event {
+            PBT_APMSUSPEND => true,
+            PBT_APMRESUMEAUTOMATIC => false,
+            _ => return 0,
+        };
+        if let Some(reporter) = REPORTER.get() {
+            let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
+            let _ = reporter.send((sleeping, now, unsafe { GetTickCount64() }));
+        }
+        0
+    }
+
+    impl Subscription {
+        pub fn register() -> Option<Self> {
+            let (sender, reports) = mpsc::channel();
+            REPORTER.set(sender).ok()?;
+            let mut params = DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
+                Callback: Some(callback),
+                Context: std::ptr::null_mut(),
+            };
+            let mut handle = std::ptr::null_mut();
+            let code = unsafe {
+                PowerRegisterSuspendResumeNotification(
+                    DEVICE_NOTIFY_CALLBACK, (&mut params as *mut DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS).cast(), &mut handle,
+                )
+            };
+            (code == 0).then_some(Self { handle, reports })
+        }
+    }
+
+    impl Drop for Subscription {
+        fn drop(&mut self) {
+            if !self.handle.is_null() {
+                unsafe { PowerUnregisterSuspendResumeNotification(self.handle as isize); }
+            }
+        }
+    }
 }
 
 fn day_of(ms: u64) -> NaiveDate {
@@ -71,7 +178,7 @@ impl Tracker {
     pub fn new(data_dir: &Path) -> Self {
         let dir = data_dir.join("activity");
         let _ = fs::create_dir_all(&dir);
-        Tracker { dir, cur: Mutex::new(None), data_dir: data_dir.to_owned(), started_at: chrono::Utc::now().timestamp_millis() as u64 }
+        Tracker { dir, cur: Mutex::new(None), coverage: Mutex::default(), coverage_enabled: Default::default(), data_dir: data_dir.to_owned(), started_at: chrono::Utc::now().timestamp_millis() as u64 }
     }
 
     pub fn evidence_start(&self) -> u64 { self.started_at }
@@ -112,10 +219,62 @@ impl Tracker {
         out
     }
 
+    pub fn enable_coverage(&self) {
+        self.coverage_enabled.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn disable_coverage(&self) {
+        if self.coverage_enabled.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            *self.coverage.lock().unwrap() = Coverage::default();
+        }
+    }
+
+    /// Explicit intervals observed by the local tracker. Missing samples and
+    /// unverified foreground routes stay gaps, even when other spans exist.
+    pub fn coverage_intervals(&self, from: u64, to: u64) -> Vec<(u64, u64)> {
+        let coverage = self.coverage.lock().unwrap();
+        let mut intervals = Vec::new();
+        // A sample just before midnight can close an interval in the next day.
+        let mut day = day_of(from.saturating_sub(4 * TICK_MS));
+        let last = day_of(to);
+        while day <= last {
+            if let Ok(text) = fs::read_to_string(self.dir.join(format!("{day}.coverage.jsonl"))) {
+                intervals.extend(text.lines().filter_map(|line| serde_json::from_str::<(u64, u64)>(line).ok()));
+            }
+            day = day.succ_opt().unwrap();
+        }
+        if let Ok(text) = fs::read_to_string(self.dir.join("suspend.coverage.jsonl")) {
+            intervals.extend(text.lines().filter_map(|line| serde_json::from_str::<(u64, u64)>(line).ok()));
+        }
+        intervals.extend(coverage.interval);
+        intervals.into_iter().filter_map(|(start, end)| {
+            let start = start.max(from);
+            let end = end.min(to);
+            (end > start).then_some((start, end))
+        }).collect()
+    }
+
+    fn record_coverage(&self, now: u64, verified: bool) {
+        let mut coverage = self.coverage.lock().unwrap();
+        if let Some((start, end)) = coverage.observe(now, verified) {
+            let path = self.dir.join(format!("{}.coverage.jsonl", day_of(start)));
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+                if let Ok(row) = serde_json::to_string(&(start, end)) {
+                    if writeln!(file, "{row}").is_ok() {
+                        telemetry::ACTIVITY_WRITE.count(1);
+                        telemetry::ACTIVITY_WRITE_BYTES.count(row.len() as u64 + 1);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn run(&self, now_ms: fn() -> u64, mut observe: impl FnMut(u64, Option<Span>, Option<Span>, Option<u64>)) {
         let live = self.data_dir.join("browser");
         let _ = fs::create_dir_all(&live);
         let mut resources = telemetry::Sampler::new(&self.data_dir, telemetry::Component::Desktop);
+        #[cfg(windows)]
+        let (mut subscribed, mut subscription, mut sleep) = (false, None, SleepCoverage::default());
         loop {
             thread::sleep(Duration::from_millis(TICK_MS));
             telemetry::ACTIVITY_TICK.count(1);
@@ -126,7 +285,33 @@ impl Tracker {
                 telemetry::ACTIVITY_WRITE.count(1);
                 telemetry::ACTIVITY_WRITE_BYTES.count(seen.len() as u64);
             }
-            let (sample, idle_ms) = sample(now, &self.data_dir);
+            #[cfg(windows)]
+            if self.coverage_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+                if !subscribed {
+                    subscribed = true;
+                    subscription = power_events::Subscription::register();
+                }
+                if let Some(subscription) = &subscription {
+                    for (sleeping, wall, ticks) in subscription.reports.try_iter() {
+                        if sleeping {
+                            self.record_coverage(wall, true);
+                        }
+                        if let Some((start, end)) = sleep.transition(sleeping, wall, ticks) {
+                            let _ = OpenOptions::new().create(true).append(true)
+                                .open(self.dir.join("suspend.coverage.jsonl"))
+                                .and_then(|mut file| writeln!(file, "[{start},{end}]"));
+                            self.record_coverage(end, true);
+                        }
+                    }
+                }
+            } else if let Some(subscription) = &subscription {
+                subscription.reports.try_iter().for_each(drop);
+                sleep = SleepCoverage::default();
+            }
+            let (sample, idle_ms, verified) = sample(now, &self.data_dir);
+            if self.coverage_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+                self.record_coverage(now, verified);
+            }
             let closed = self.record(now, sample);
             let current = self.cur.lock().unwrap().clone();
             observe(now, closed, current, idle_ms);
@@ -169,7 +354,7 @@ impl Tracker {
 }
 
 #[cfg(windows)]
-fn sample(now: u64, data_dir: &Path) -> (Sample, Option<u64>) {
+fn sample(now: u64, data_dir: &Path) -> (Sample, Option<u64>, bool) {
     use windows_sys::Win32::{
         System::SystemInformation::GetTickCount,
         UI::{
@@ -180,13 +365,13 @@ fn sample(now: u64, data_dir: &Path) -> (Sample, Option<u64>) {
     unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.is_null() {
-            return (Sample::Away(None), None);
+            return (Sample::Away(None), None, false);
         }
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, &mut pid);
         let exe = exe_name(pid).unwrap_or_default();
         if exe.eq_ignore_ascii_case("LockApp.exe") {
-            return (Sample::Away(None), None); // the Windows lock screen
+            return (Sample::Away(None), None, true); // the Windows lock screen
         }
         let mut buf = [0u16; 512];
         let n = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32).max(0) as usize;
@@ -201,10 +386,17 @@ fn sample(now: u64, data_dir: &Path) -> (Sample, Option<u64>) {
             // Windows limit. Do not infer watching from a page title or audible tab.
             let limit = if browser.is_none() && VIDEO.contains(&label.as_str()) { VIDEO_IDLE_MS } else { IDLE_MS };
             if idle > limit {
-                return (Sample::Away(Some(now.saturating_sub(idle))), idle_ms);
+                return (Sample::Away(Some(now.saturating_sub(idle))), idle_ms, true);
             }
         }
-        (enrich(app, label, browser), idle_ms)
+        let needs_route = BROWSERS.iter().any(|browser_name| exe.to_ascii_lowercase().trim_end_matches(".exe").eq_ignore_ascii_case(browser_name));
+        let active = enrich(app, label, browser);
+        let verified = idle_ms.is_some() && !exe.is_empty() && match &active {
+            Sample::Active(_, _, browser) => !needs_route
+                || browser.as_ref().is_some_and(|context| context.url.is_some()),
+            Sample::Away(_) => false,
+        };
+        (active, idle_ms, verified)
     }
 }
 
@@ -225,7 +417,7 @@ fn enrich(app: String, fallback: String, snapshot: Option<focus_browser_host::Sn
 fn url_host(raw: &str) -> Option<String> { focus_browser_host::url_host(raw) }
 
 #[cfg(not(windows))]
-fn sample(_now: u64, _data_dir: &Path) -> (Sample, Option<u64>) { (Sample::Away(None), None) }
+fn sample(_now: u64, _data_dir: &Path) -> (Sample, Option<u64>, bool) { (Sample::Away(None), None, false) }
 
 #[cfg(windows)]
 fn exe_name(pid: u32) -> Option<String> {
@@ -310,6 +502,31 @@ mod tests {
     use super::*;
     fn label(exe: &str, title: &str) -> String {
         classify(exe, title).1
+    }
+
+    #[test]
+    fn sleep_coverage_requires_paired_boundaries_and_a_stable_clock() {
+        let mut sleep = SleepCoverage::default();
+        assert_eq!(sleep.transition(false, 200, 100), None);
+        assert_eq!(sleep.transition(true, 300, 200), None);
+        assert_eq!(sleep.transition(false, 60_300, 60_200), Some((300, 60_300)));
+        assert_eq!(sleep.transition(false, 60_301, 60_201), None);
+        sleep.transition(true, 61_300, 61_200);
+        assert_eq!(sleep.transition(false, 90_300, 62_200), None);
+    }
+
+    #[test]
+    fn coverage_does_not_bridge_missing_samples_or_routes() {
+        let mut coverage = Coverage::default();
+        let t = 1_728_000_000_000;
+        assert_eq!(coverage.observe(t, true), None);
+        assert_eq!(coverage.observe(t + 1_000, true), None);
+        assert_eq!(coverage.observe(t + 2_000, false), Some((t, t + 1_000)));
+        assert_eq!(coverage.observe(t + 3_000, true), None);
+        assert_eq!(coverage.observe(t + 4_000, true), None);
+        assert_eq!(coverage.observe(t + 12_000, true), Some((t + 3_000, t + 4_000)));
+        assert_eq!(coverage.observe(t + 13_000, true), None);
+        assert_eq!(coverage.interval, Some((t + 12_000, t + 13_000)));
     }
 
     #[test]

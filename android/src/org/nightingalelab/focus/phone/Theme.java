@@ -26,10 +26,26 @@ public final class Theme {
   public static final int DARK_ACTIVE = 0xFF222225;
   public static final int CARD = 0xFF060607;
   public static final int SHEET = 0xFF0A0A0C;
-  public static final int GLASS_FILL = 0xD908080A;
+  public static final int GLASS_FILL = 0xF00E0E11;
   public static final int GLASS_SHEET_FILL = 0xF208080B;
   public static final int GLASS_PILL_ACTIVE = 0xFF222225;
   public static final int GLASS_ICON_BG = 0x14FFFFFF;
+  public static final int ASK_SURFACE = 0xFF131317;
+  public static final int ASK_BORDER = 0xFF2D2D34;
+  public static final int ASK_BORDER_WARN = 0x61F59E0B;
+  public static final int ASK_BORDER_BAD = 0x6BEF4444;
+  public static final int ASK_PRIMARY_FILL = 0xFF27272E;
+  public static final int ASK_PRIMARY_BORDER = 0xFF3D3D47;
+  public static final int ASK_SECONDARY_FILL = 0xFF1D1D22;
+  public static final int ASK_SECONDARY_BORDER = 0xFF303038;
+  public static final int ASK_CHIP_FILL = 0xFF1B1B20;
+  public static final int ASK_CHIP_BORDER = 0xFF2B2B32;
+  public static final int ASK_HOLD_FILL = 0xFF1B1710;
+  public static final int ASK_HOLD_BORDER = 0x73F59E0B;
+  public static final int ASK_HOLD_PROGRESS = 0x3DF59E0B;
+  public static final int ASK_HOLD_TEXT = 0xFFFBBF24;
+  public static final int ASK_DOCK_WARN_FILL = 0xFF14110B;
+  public static final int ASK_MUTED_TEXT = 0xFF9E9EA6;
   public static final int HOLD_FILL = 0xFF222225;
   public static final int CREATE = 0xFFD4D4D8;
   public static final int CONSUME = 0xFF46464D;
@@ -42,6 +58,8 @@ public final class Theme {
   public static final int WARN = 0xFFF59E0B; // Orange for slips, drift, and approaching limits
   public static final int BAD = 0xFFEF4444; // Red for rings, bars, and hard breaches
   public static final int BAD_TEXT = 0xFFF87171; // Red text on pure OLED black
+  public static final int ICE = 0xFFCBE2FF; // Ice blue-white for earned long single-app focus
+  public static final int ICE_SOFT = 0xFF9BB8DC; // Muted ice for secondary focus text
   public static final int GREEN = 0xFF8A8A8A; // Keep monochrome on OLED
   /** Neutral emphasis for non-breach notes. */
   public static final int ATTN = 0xFFD4D4D8;
@@ -71,6 +89,29 @@ public final class Theme {
         w.setBackgroundBlurRadius(32);
       } catch (RuntimeException ignored) {}
     }
+  }
+
+  /** Dim + Android 12+ blur backdrop for solid floating Ask surfaces. */
+  public static void applyAskBackdrop(Window w) {
+    if (w == null) return;
+    w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+    WindowManager.LayoutParams lp = w.getAttributes();
+    if (Build.VERSION.SDK_INT >= 31) {
+      try {
+        w.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
+        lp.setBlurBehindRadius(28);
+        lp.dimAmount = 0.56f;
+        w.setAttributes(lp);
+        return;
+      } catch (RuntimeException ignored) {}
+    }
+    lp.dimAmount = 0.72f;
+    w.setAttributes(lp);
+  }
+
+  /** Solid dark OLED Ask surface with crisp 1dp border. */
+  public static GradientDrawable askSurface(Context c, int borderColor, float radiusDp) {
+    return roundRect(c, ASK_SURFACE, borderColor, radiusDp);
   }
 
   public static GradientDrawable roundRect(Context c, int fill, int border, float radiusDp) {
@@ -442,7 +483,7 @@ public final class Theme {
   public static final class IconView extends View {
     public enum Kind {
       PHONE, TV, LAPTOP, GEAR, BACK, CHEVRON, PLUS, UPDATE_CIRCLE, CLOSE,
-      GLOBE, SEARCH, UPDOWN, CARET_RIGHT, CARET_DOWN
+      GLOBE, SEARCH, UPDOWN, CARET_RIGHT, CARET_DOWN, FLAME
     }
 
     private final Kind kind;
@@ -466,6 +507,19 @@ public final class Theme {
       canvas.save();
       canvas.scale(s, s);
       switch (kind) {
+        case FLAME: {
+          Path flame = new Path();
+          flame.moveTo(12, 22);
+          flame.cubicTo(6, 22, 4, 18, 5, 14);
+          flame.cubicTo(6, 11, 8, 10, 8, 7);
+          flame.cubicTo(10, 8, 11, 10, 11, 11);
+          flame.cubicTo(13, 8, 14, 6, 13, 2);
+          flame.cubicTo(18, 6, 20, 11, 20, 15);
+          flame.cubicTo(20, 19, 17, 22, 12, 22);
+          flame.close();
+          canvas.drawPath(flame, paint);
+          break;
+        }
         case PHONE:
           canvas.drawRoundRect(7, 2.5f, 17, 21.5f, 2.5f, 2.5f, paint);
           canvas.drawLine(11, 18.5f, 13, 18.5f, paint);

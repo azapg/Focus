@@ -35,6 +35,7 @@ const Panel = (() => {
   let expSearch = '';
   let openPause = null;
   let lastRange = 'today';
+  let walletView = null;
 
   const TOP_APPS = 5;
   const TOP_PAUSES = 3;
@@ -120,13 +121,26 @@ const Panel = (() => {
     }
     const building = fine.groups.create || 0;
     const drift = fine.groups.drift || 0;
+    const focus = fine.focus || { totalMs: 0, unionMs: 0, runs: [] };
+    const focusMs = focus.totalMs || 0;
     const heavyDrift = drift / days >= 90 * Stats.MIN
       || (total >= 30 * Stats.MIN && drift / total >= 0.35)
       || (overLimit && drift >= 30 * Stats.MIN);
-    const topCats = fine.categories.slice(0, TOP_CATS);
-    const restCats = fine.categories.slice(TOP_CATS);
-    const major = fine.categories.filter((c) => c.ms / total >= 0.03);
-    const minor = fine.categories.filter((c) => c.ms / total < 0.03);
+
+    // Build bar & legend categories: prepend earned Ice Deep focus segment and subtract focused share from base categories.
+    const baseCats = focusMs > 0
+      ? [
+          { id: 'focus', label: 'Deep focus', group: 'focus', color: '#cbe2ff', ms: focusMs, off: 0 },
+          ...fine.categories
+            .map((c) => ({ ...c, ms: Math.max(0, c.ms - (c.focusMs || 0)) }))
+            .filter((c) => c.ms >= 30e3),
+        ]
+      : fine.categories;
+
+    const topCats = baseCats.slice(0, TOP_CATS);
+    const restCats = baseCats.slice(TOP_CATS);
+    const major = baseCats.filter((c) => c.ms / total >= 0.03);
+    const minor = baseCats.filter((c) => c.ms / total < 0.03);
     const minorSeg = (list, bg, label) => {
       const ms = list.reduce((n, c) => n + c.ms, 0);
       if (!list.length) return '';
@@ -139,10 +153,28 @@ const Panel = (() => {
       const cls = [catFilter === c.id ? 'on' : catFilter ? 'dim' : '', tone].filter(Boolean).join(' ');
       return `<button type="button" class="${cls}" data-dcat="${esc(c.id)}"><i style="background:${col}"></i>${esc(c.label)} <span class="m">${Stats.fmt(c.ms)}</span></button>`;
     };
+    const maxLogRuns = 5;
+    const shownRuns = (focus.runs || []).slice(0, maxLogRuns);
+    const extraRuns = Math.max(0, (focus.runs || []).length - shownRuns.length);
+    const focusCoins = !lastRenderArgs?.scoped && walletView?.active
+      ? (range === 'week' && selectedDay == null
+          ? Number(walletView.focus_coins_week || 0)
+          : selectedDay == null
+            ? Number(walletView.focus_coins_today || 0)
+            : 0)
+      : 0;
+    const focusCoinsText = focusCoins > 0 ? `+${focusCoins} ${focusCoins === 1 ? 'coin' : 'coins'}` : '';
+    const focusLogHtml = shownRuns.length
+      ? `<div class="focus-log" data-focus-log>
+          <span class="focus-log-lbl">Long runs</span>
+          ${shownRuns.map((r, i) => `${i ? '<span class="focus-log-sep">·</span>' : ''}<span class="focus-log-item">${esc(r.app)} <b>${Stats.fmt(r.ms)}</b></span>`).join('')}
+          ${extraRuns ? `<span class="focus-log-more">+${extraRuns} more</span>` : ''}
+        </div>`
+      : '';
     statsEl.innerHTML = `
       <div class="hero-line">
         <span class="hero-total v" data-total>${Stats.fmt(total)}</span>
-        <span class="hero-sent">on screens, <b data-build-pct>${Stats.fmt(building)} building</b>${drift >= 60e3 ? `, <span class="hero-drift${heavyDrift ? ' bad' : ''}">${Stats.fmt(drift)} drifting</span>` : ''}.</span>
+        <span class="hero-sent">on screens, <b data-build-pct>${Stats.fmt(building)} building</b>${focusMs >= 60e3 ? `, <span class="hero-focus" data-deep-focus>${Stats.fmt(focusMs)} deep focus</span>${focusCoinsText ? ` <span class="hero-focus-coins" data-focus-coins>· ${esc(focusCoinsText)}</span>` : ''}` : ''}${drift >= 60e3 ? `, <span class="hero-drift${heavyDrift ? ' bad' : ''}">${Stats.fmt(drift)} drifting</span>` : ''}.</span>
       </div>
       <div class="thin-bar">
         ${major.map((c) => {
@@ -158,7 +190,8 @@ const Panel = (() => {
         ${topCats.map(legBtn).join('')}
         ${restCats.length ? `<button type="button" class="cat-more" data-fine-more>${showMoreCats ? 'Less' : `+${restCats.length} more`}</button>` : ''}
       </div>
-      ${restCats.length && showMoreCats ? `<div class="cat-leg rest">${restCats.map(legBtn).join('')}</div>` : ''}`;
+      ${restCats.length && showMoreCats ? `<div class="cat-leg rest">${restCats.map(legBtn).join('')}</div>` : ''}
+      ${focusLogHtml}`;
   }
 
   function renderAppRow(a, multiDevice, openSet, showOffOnly = false, { days = 1, overLimit = false } = {}) {
@@ -171,12 +204,15 @@ const Panel = (() => {
       : a.category === 'video' && a.ms / days >= 30 * Stats.MIN;
     const heavyWaste = WASTE_CATS.has(a.category) && a.ms / days >= 60 * Stats.MIN;
     const isBad = (mostlyOff && overLimit) || (overLimit && a.off >= 15 * Stats.MIN && WASTE_CATS.has(a.category)) || heavyWaste || a.category === 'adult';
+    const hasFocus = !showOffOnly && !mostlyOff && !wasteWarn && !isBad && (a.focusMs || 0) > 0;
     const offBad = overLimit && a.off >= 60e3;
     const offText = a.off >= 30e3 ? `${Stats.fmt(a.off)} with DNS off` : '';
-    const dotColor = isBad ? '#ef4444' : a.color;
+    const focusText = hasFocus ? `${Stats.fmt(a.focusMs)} deep focus` : '';
+    const dotColor = isBad ? '#ef4444' : hasFocus ? '#cbe2ff' : a.color;
     const tipParts = [
       `<span class='tip-dot' style='background:${dotColor}'></span>${esc(esc(a.categoryLabel))}`,
       dev ? `<span class='k'>· ${esc(esc(dev))}</span>` : '',
+      focusText ? `<span class='tip-focus'>· ${esc(focusText)}</span>` : '',
       offText ? `<span class='tip-off${offBad ? ' bad' : ''}'>· ${esc(offText)}</span>` : '',
     ].filter(Boolean).join(' ');
     const detailMeta = `
@@ -185,18 +221,23 @@ const Panel = (() => {
         ${dev ? `<span class="st-meta-sep">·</span><span>${esc(dev)}</span>` : ''}
         ${offText ? `<span class="st-meta-sep">·</span><span class="st-meta-off${offBad ? ' bad' : ''}">${esc(offText)}</span>` : ''}
       </div>`;
+    const runsHtml = hasFocus && a.focusRuns?.length
+      ? `<div class="focus-sessions">${a.focusRuns.slice(0, 5).map((r) =>
+          `<div class="focus-session"><span class="fs-dur">${Stats.fmt(r.ms)} unbroken${r.active ? ' · active' : ''}</span><span class="fs-time">${days > 1 ? `${wday(r.start)} ` : ''}${time(r.start)}–${time(r.end)}</span></div>`
+        ).join('')}</div>`
+      : '';
     const pagesHtml = pages.length >= 2
       ? `<div class="cat-pages">${pages.slice(0, 6).map((p) =>
           `<div class="cat-page"><span class="cat-page-title">${esc(p.title)}</span><span class="n">${Stats.fmt(p.ms)}</span></div>`
         ).join('')}</div>`
       : '';
-    const timeCls = ['n', mostlyOff ? 'dns-off' : '', !mostlyOff && wasteWarn ? 'waste-warn' : '', isBad ? 'dns-bad' : ''].filter(Boolean).join(' ');
+    const timeCls = ['n', mostlyOff ? 'dns-off' : '', !mostlyOff && wasteWarn ? 'waste-warn' : '', isBad ? 'dns-bad' : '', hasFocus ? 'focus-ice' : ''].filter(Boolean).join(' ');
     return `<details class="site st d-app-item" data-fit data-site="${esc(a.app)}"${openSet.has(a.app) ? ' open' : ''}>
       <summary class="st-row d-app-row" data-tip="${tipParts}">
         <span class="st-left">${appIcon(a.app)}<span class="st-name">${esc(a.app)}</span>${srcIcon(a, multiDevice)}</span>
-        <span class="${timeCls}" data-dns-off="${Math.round(a.off)}">${Stats.fmt(showOffOnly ? a.off : a.ms)}</span>
+        <span class="${timeCls}" data-dns-off="${Math.round(a.off)}"${hasFocus ? ` data-focus-ms="${Math.round(a.focusMs)}"` : ''}>${Stats.fmt(showOffOnly ? a.off : a.ms)}</span>
       </summary>
-      <div class="st-detail">${detailMeta}${pagesHtml}</div>
+      <div class="st-detail">${detailMeta}${runsHtml}${pagesHtml}</div>
     </details>`;
   }
 
@@ -205,9 +246,14 @@ const Panel = (() => {
     const lblEl = $('pAppsLbl');
     const footEl = $('pAppsFoot');
     const allList = fine.apps.filter((a) => a.ms >= 30e3);
-    const activeCat = catFilter ? fine.categories.find((c) => c.id === catFilter) : null;
+    const isFocusFilter = catFilter === 'focus' && (fine.focus?.totalMs || 0) > 0;
+    const activeCat = isFocusFilter
+      ? { id: 'focus', label: 'Deep focus' }
+      : catFilter ? fine.categories.find((c) => c.id === catFilter) : null;
     if (catFilter && !activeCat) catFilter = null;
-    const list = catFilter ? allList.filter((a) => a.category === catFilter) : allList;
+    const list = isFocusFilter
+      ? allList.filter((a) => (a.focusMs || 0) > 0)
+      : catFilter ? allList.filter((a) => a.category === catFilter) : allList;
 
     lblEl.innerHTML = `<span class="bento-title">Screen time${activeCat ? `<button type="button" class="filter-chip" data-clear-cat>${esc(activeCat.label)} ×</button>` : ''}</span>`;
     if (!list.length) {
@@ -239,8 +285,11 @@ const Panel = (() => {
     if (!explorerOpen) return;
 
     const allList = fine.apps.filter((a) => a.ms >= 30e3);
+    const hasAnyFocus = allList.some((a) => (a.focusMs || 0) > 0);
+    if (expFilter === 'focus' && !hasAnyFocus) expFilter = 'all';
     const q = expSearch.trim().toLowerCase();
     let list = allList.filter((a) => {
+      if (expFilter === 'focus' && !(a.focusMs > 0)) return false;
       if (expFilter === 'create' && a.group !== 'create') return false;
       if (expFilter === 'drift' && a.group !== 'drift') return false;
       if (expFilter === 'off' && a.off < 30e3) return false;
@@ -248,6 +297,7 @@ const Panel = (() => {
       return true;
     });
     if (expFilter === 'off') list = [...list].sort((a, b) => b.off - a.off);
+    if (expFilter === 'focus') list = [...list].sort((a, b) => (b.focusMs || 0) - (a.focusMs || 0));
 
     const open = new Set([...expEl.querySelectorAll('details[open]')].map((d) => d.dataset.site));
     const scopeText = selectedDay != null ? wday(selectedDay) : range === 'week' ? 'This week' : 'Today';
@@ -268,6 +318,7 @@ const Panel = (() => {
       <div class="exp-filters">
         <div class="exp-chips">
           <button type="button" class="exp-chip${expFilter === 'all' ? ' on' : ''}" data-ef="all">All (${allList.length})</button>
+          ${hasAnyFocus ? `<button type="button" class="exp-chip${expFilter === 'focus' ? ' on' : ''}" data-ef="focus">Deep focus</button>` : ''}
           <button type="button" class="exp-chip${expFilter === 'create' ? ' on' : ''}" data-ef="create">Building</button>
           <button type="button" class="exp-chip${expFilter === 'drift' ? ' on' : ''}" data-ef="drift">Drifting</button>
           <button type="button" class="exp-chip${expFilter === 'off' ? ' on' : ''}" data-ef="off">DNS off</button>
@@ -406,6 +457,11 @@ const Panel = (() => {
       end.setDate(end.getDate() + 1);
       return ActivityClassifier.summarizeClassified(sources, d, end.getTime(), { userRules: rulesDoc });
     });
+    const dayFocus = days.map((d) => {
+      const end = new Date(d);
+      end.setDate(end.getDate() + 1);
+      return ActivityClassifier.detectFocusSessions(sources, d, end.getTime(), { userRules: rulesDoc, cache: fineCache });
+    });
     const max = Math.max(...daySums.map((s) => s.active), 60 * Stats.MIN);
     const avgMs = daySums.reduce((n, s) => n + s.active, 0) / 7;
     const H = 72;
@@ -416,6 +472,7 @@ const Panel = (() => {
       return limMs > 0 && daySums[i].off > limMs;
     });
     const anyOver = dayOver.some(Boolean);
+    const anyFocus = dayFocus.some((f) => f.unionMs >= 60e3);
     const selChip = selectedDayIdx != null
       ? `<button type="button" class="filter-chip" data-clear-day>${wday(days[selectedDayIdx])} · Back to 7 days ×</button>`
       : '';
@@ -423,7 +480,7 @@ const Panel = (() => {
     $('pChart').innerHTML = `
       <div class="bento-card wk-card">
         <div class="bento-head">
-          <span class="bento-title">Last 7 days <span class="wk-key"><i></i>DNS off</span>${anyOver ? '<span class="wk-key"><i class="bad"></i>Over limit</span>' : ''}${selChip}</span>
+          <span class="bento-title">Last 7 days${anyFocus ? ' <span class="wk-key"><i class="focus"></i>Deep focus</span>' : ''} <span class="wk-key"><i></i>DNS off</span>${anyOver ? '<span class="wk-key"><i class="bad"></i>Over limit</span>' : ''}${selChip}</span>
           <span class="wk-avg">Avg ${Stats.fmt(avgMs)}/day</span>
         </div>
         <div class="wk-bars simple-week">${days.map((d, i) => {
@@ -431,13 +488,17 @@ const Panel = (() => {
           const over = dayOver[i];
           const offH = s.off >= 30e3 ? Math.max(3, (H * Math.min(s.active || s.off, s.off)) / max) : 0;
           const onMs = Math.max(0, s.active - Math.min(s.active, s.off));
-          const onH = s.active >= 30e3 ? Math.max(3, (H * onMs) / max) : 0;
-          const tip = `${wday(d)} <span class='k'>${Stats.fmt(s.active)}</span>${s.off >= 30e3 ? ` <span class='tip-off${over ? ' bad' : ''}'>· ${Stats.fmt(s.off)} DNS off${over ? ' (over limit)' : ''}</span>` : ''}`;
+          const focusMs = Math.min(onMs, dayFocus[i].unionMs || 0);
+          const restOnMs = Math.max(0, onMs - focusMs);
+          const focusH = focusMs >= 60e3 ? Math.max(3, (H * focusMs) / max) : 0;
+          const onH = restOnMs >= 30e3 ? Math.max(3, (H * restOnMs) / max) : 0;
+          const tip = `${wday(d)} <span class='k'>${Stats.fmt(s.active)}</span>${focusMs >= 60e3 ? ` <span class='tip-focus'>· ${Stats.fmt(focusMs)} deep focus</span>` : ''}${s.off >= 30e3 ? ` <span class='tip-off${over ? ' bad' : ''}'>· ${Stats.fmt(s.off)} DNS off${over ? ' (over limit)' : ''}</span>` : ''}`;
           return `<button type="button" class="col wk-col${selectedDayIdx === i ? ' sel' : ''}" data-dday="${i}" data-tip="${tip}">
             <span class="wk-v">${s.active >= 60e3 ? fmtBar(s.active) : '—'}</span>
             <div class="wk-stack">
               ${offH ? `<i class="wk-off${over ? ' bad' : ''}" style="height:${offH.toFixed(1)}px"></i>` : ''}
               ${onH ? `<i class="wk-on" style="height:${onH.toFixed(1)}px"></i>` : ''}
+              ${focusH ? `<i class="wk-focus" style="height:${focusH.toFixed(1)}px"></i>` : ''}
             </div>
             <span class="wk-d${d === today ? ' today' : ''}">${wday(d)}${over ? '<i class="wk-dot" aria-hidden="true"></i>' : ''}</span>
           </button>`;
@@ -621,6 +682,10 @@ const Panel = (() => {
   async function renderSources(invoke, range, sources, allSources = null, scoped = false) {
     await ensureRules(invoke);
     await ensureFineData(invoke);
+    try {
+      const wv = await invoke('wallet_view');
+      walletView = wv && typeof wv === 'object' ? wv : null;
+    } catch { walletView = null; }
     const now = Date.now();
     const today = Stats.dayStart(now);
     const days = Array.from({ length: 7 }, (_, i) => {

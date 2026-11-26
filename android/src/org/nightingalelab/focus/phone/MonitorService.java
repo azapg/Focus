@@ -121,6 +121,7 @@ public final class MonitorService extends Service {
   @Override
   public void onCreate() {
     super.onCreate();
+    Store.get(this).loadStreakCoverageOptIn();
     promote();
     telemetry = new LocalTelemetry(this, "android-phone");
     habitNudges = new HabitNudges(this);

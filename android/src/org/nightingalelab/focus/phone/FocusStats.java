@@ -17,10 +17,38 @@ public final class FocusStats {
   public static final long FRESH_MS = 10 * MIN;
   /** An unmentioned drifting app counts as "drifted from the reason" after this long. */
   public static final long DRIFT_MIN_MS = 2 * MIN;
+  /** Short non-wasting glance grace before a single-app focus run breaks. */
+  public static final long FOCUS_GLANCE_MS = 45_000L;
+  /** Idle gap that breaks an ongoing single-app focus run. */
+  public static final long FOCUS_AWAY_MS = 2 * MIN;
+
+  public static final class FocusRun {
+    public final String app;
+    public final String categoryId;
+    public final String device;
+    public final long start;
+    public final long end;
+    public final long ms;
+    public final boolean active;
+    final List<long[]> intervals;
+
+    FocusRun(String app, String categoryId, String device, long start, long end, long ms,
+        boolean active, List<long[]> intervals) {
+      this.app = app;
+      this.categoryId = categoryId;
+      this.device = device;
+      this.start = start;
+      this.end = end;
+      this.ms = ms;
+      this.active = active;
+      this.intervals = intervals;
+    }
+  }
 
   public static final class Category {
     public final ActivityClassifier.Fine fine;
     public long ms;
+    public long focusMs;
 
     Category(ActivityClassifier.Fine fine) {
       this.fine = fine;
@@ -31,6 +59,8 @@ public final class FocusStats {
     public final String name;
     public long ms;
     public long offMs;
+    public long focusMs;
+    public List<FocusRun> focusRuns = new ArrayList<>();
     long webMs;
     final Map<String, Long> catMs = new HashMap<>();
     final Map<String, Long> deviceMs = new HashMap<>();
@@ -101,7 +131,24 @@ public final class FocusStats {
     private long dayEnd;
     public boolean today;
     public long totalMs;
+    public long focusMs;
     public long offMs;
+  }
+
+  public static final class CleanStreak {
+    public enum Status { CLEAN, PENDING, FROZEN, DRIFT, UNVERIFIED }
+
+    public final int count;
+    public final boolean freezeReady;
+    public final Map<java.time.LocalDate, Status> days;
+
+    public CleanStreak(int count, boolean freezeReady, Map<java.time.LocalDate, Status> days) {
+      this.count = count;
+      this.freezeReady = freezeReady;
+      Map<java.time.LocalDate, Status> newestFirst = new TreeMap<>(Comparator.reverseOrder());
+      newestFirst.putAll(days);
+      this.days = Collections.unmodifiableMap(newestFirst);
+    }
   }
 
   public static final class View {
@@ -112,10 +159,32 @@ public final class FocusStats {
     public long totalMs;
     public long buildMs;
     public long driftMs;
+    public long focusMs;
+    public long focusUnionMs;
     /** DNS-off in range across ALL devices (the limit is shared, so the ring ignores the device filter). */
     public long offAllMs;
     public List<Category> categories = new ArrayList<>();
+    public List<FocusRun> focusRuns = new ArrayList<>();
     public List<AppStat> apps = new ArrayList<>();
+
+    /** Bar & legend categories with Ice Deep focus prepended and subtracted from base categories. */
+    public List<Category> barCategories() {
+      if (focusMs < 30_000L) return categories;
+      List<Category> out = new ArrayList<>();
+      Category deep = new Category(ActivityClassifier.FOCUS_FINE);
+      deep.ms = focusMs;
+      deep.focusMs = focusMs;
+      out.add(deep);
+      for (Category c : categories) {
+        long rem = Math.max(0L, c.ms - c.focusMs);
+        if (rem >= 30_000L) {
+          Category copy = new Category(c.fine);
+          copy.ms = rem;
+          out.add(copy);
+        }
+      }
+      return out;
+    }
     /** Pauses in range (device filter applied), newest first. */
     public List<PauseStat> pauses = new ArrayList<>();
     public String ratingSummary;
@@ -186,6 +255,36 @@ public final class FocusStats {
 
   private static String devKey(String kind, String name) {
     return kind + "|" + name;
+  }
+
+  /** Pure cross-device unioned single-app focus duration in [dayStartMs, dayEndMs), excluding pauses & waste. */
+  public static long unionFocusMs(
+      List<InsightsEngine.SpanRecord> spans,
+      List<InsightsEngine.PauseRecord> pauses,
+      List<ActivityClassifier.UserRule> rules,
+      long dayStartMs,
+      long dayEndMs,
+      long now) {
+    if (dayEndMs <= dayStartMs || spans == null || spans.isEmpty()) return 0L;
+    Map<String, List<long[]>> offByDevice = new HashMap<>();
+    if (pauses != null) {
+      for (InsightsEngine.PauseRecord p : pauses) {
+        long end = effectiveEnd(p, now);
+        if (end <= p.started) continue;
+        offByDevice.computeIfAbsent(devKey(p.deviceKind, p.deviceName), k -> new ArrayList<>())
+            .add(new long[] {p.started, end});
+      }
+      for (List<long[]> list : offByDevice.values()) merge(list);
+    }
+    List<ClassifiedSpan> classified = new ArrayList<>();
+    for (InsightsEngine.SpanRecord sp : spans) {
+      if (sp.e <= sp.s) continue;
+      ActivityClassifier.Result c = ActivityClassifier.classify(sp.app, sp.label, sp.domain, rules);
+      if (c.noise) continue;
+      String dev = deviceLabel(sp.deviceKind, sp.deviceName);
+      classified.add(new ClassifiedSpan(sp, c, ActivityClassifier.fineCategory(c, sp.deviceKind), dev));
+    }
+    return detectFocusRuns(classified, offByDevice, dayStartMs, dayEndMs, now, null).unionMs;
   }
 
   /** DNS-off used today across every device: what the shared daily limit counts. */
@@ -295,12 +394,30 @@ public final class FocusStats {
       }
     }
 
+    // Detect sustained single-app deep focus runs in the active range and for each week day.
+    FocusSummary focusSummary = detectFocusRuns(classified, offByDevice, v.from, v.to, now, scope);
+    v.focusMs = focusSummary.totalMs;
+    v.focusUnionMs = focusSummary.unionMs;
+    v.focusRuns = focusSummary.runs;
+    for (Map.Entry<String, Long> e : focusSummary.byCat.entrySet()) {
+      Category c = cats.get(e.getKey());
+      if (c != null) c.focusMs = e.getValue();
+    }
+    for (DayStat d : v.week) {
+      d.focusMs = detectFocusRuns(classified, offByDevice, d.dayStart, Math.min(now, d.dayEnd), now, scope).unionMs;
+    }
+
     for (Category c : cats.values()) if (c.ms >= 30_000L) v.categories.add(c);
     v.categories.sort((x, y) -> Long.compare(y.ms, x.ms));
 
     for (AppStat a : apps.values()) {
       if (a.ms < 24_000L) continue;
       a.category = ActivityClassifier.fineById(topKey(a.catMs));
+      List<FocusRun> appRuns = focusSummary.byApp.get(a.name);
+      if (appRuns != null) {
+        a.focusRuns = appRuns;
+        for (FocusRun fr : appRuns) a.focusMs += fr.ms;
+      }
       List<Map.Entry<String, Long>> devs = new ArrayList<>(a.deviceMs.entrySet());
       devs.sort((x, y) -> Long.compare(y.getValue(), x.getValue()));
       for (Map.Entry<String, Long> e : devs) a.devices.add(e.getKey());
@@ -428,6 +545,221 @@ public final class FocusStats {
       }
       if (consuming && !mentioned && e.getValue() >= DRIFT_MIN_MS) ps.drift = true;
     }
+  }
+
+  private static final class FocusSummary {
+    final long totalMs;
+    final long unionMs;
+    final List<FocusRun> runs;
+    final Map<String, List<FocusRun>> byApp;
+    final Map<String, Long> byCat;
+
+    FocusSummary(long totalMs, long unionMs, List<FocusRun> runs,
+        Map<String, List<FocusRun>> byApp, Map<String, Long> byCat) {
+      this.totalMs = totalMs;
+      this.unionMs = unionMs;
+      this.runs = runs;
+      this.byApp = byApp;
+      this.byCat = byCat;
+    }
+  }
+
+  private static final class FocusEvent {
+    final long s;
+    final long e;
+    final String app;
+    final String catId;
+    final long minMs;
+    final boolean waste;
+    final boolean isBreak;
+
+    FocusEvent(long s, long e, String app, String catId, long minMs, boolean waste, boolean isBreak) {
+      this.s = s;
+      this.e = e;
+      this.app = app;
+      this.catId = catId;
+      this.minMs = minMs;
+      this.waste = waste;
+      this.isBreak = isBreak;
+    }
+  }
+
+  private static final class OpenRun {
+    final String app;
+    final String catId;
+    final long minMs;
+    final long start;
+    long end;
+    long ms;
+    final List<long[]> intervals = new ArrayList<>();
+
+    OpenRun(FocusEvent ev) {
+      this.app = ev.app;
+      this.catId = ev.catId;
+      this.minMs = ev.minMs;
+      this.start = ev.s;
+      this.end = ev.e;
+      this.ms = ev.e - ev.s;
+      this.intervals.add(new long[] {ev.s, ev.e});
+    }
+  }
+
+  private static List<long[]> subtractIntervals(long a, long b, List<long[]> cuts) {
+    List<long[]> out = new ArrayList<>();
+    if (b <= a) return out;
+    out.add(new long[] {a, b});
+    if (cuts == null || cuts.isEmpty()) return out;
+    for (long[] cut : cuts) {
+      long cx = cut[0], cy = cut[1];
+      if (cy <= a) continue;
+      if (cx >= b) break;
+      List<long[]> next = new ArrayList<>();
+      for (long[] iv : out) {
+        long x = iv[0], y = iv[1];
+        if (cy <= x || cx >= y) {
+          next.add(iv);
+        } else {
+          if (cx > x) next.add(new long[] {x, cx});
+          if (cy < y) next.add(new long[] {cy, y});
+        }
+      }
+      out = next;
+      if (out.isEmpty()) break;
+    }
+    return out;
+  }
+
+  private static FocusSummary detectFocusRuns(
+      List<ClassifiedSpan> classified,
+      Map<String, List<long[]>> offByDevice,
+      long from,
+      long to,
+      long now,
+      String scope) {
+    Map<String, List<ClassifiedSpan>> byDev = new LinkedHashMap<>();
+    Map<String, String> devLabelMap = new HashMap<>();
+    for (ClassifiedSpan cs : classified) {
+      if (scope != null && !scope.equals(cs.device)) continue;
+      long a = Math.max(cs.span.s, from);
+      long b = Math.min(cs.span.e, to);
+      if (b <= a) continue;
+      String dk = devKey(cs.span.deviceKind, cs.span.deviceName);
+      byDev.computeIfAbsent(dk, k -> new ArrayList<>()).add(cs);
+      devLabelMap.putIfAbsent(dk, cs.device);
+    }
+
+    List<FocusRun> runs = new ArrayList<>();
+    Map<String, List<FocusRun>> byApp = new HashMap<>();
+    Map<String, Long> byCat = new HashMap<>();
+    List<long[]> allIntervals = new ArrayList<>();
+
+    for (Map.Entry<String, List<ClassifiedSpan>> devEntry : byDev.entrySet()) {
+      String dk = devEntry.getKey();
+      String devLbl = devLabelMap.get(dk);
+      List<long[]> rawOff = offByDevice.get(dk);
+      List<long[]> offs = new ArrayList<>();
+      if (rawOff != null) {
+        for (long[] iv : rawOff) {
+          long px = Math.max(iv[0], from), py = Math.min(iv[1], to);
+          if (py > px) offs.add(new long[] {px, py});
+        }
+      }
+      List<FocusEvent> events = new ArrayList<>();
+      for (long[] iv : offs) {
+        events.add(new FocusEvent(iv[0], iv[1], "", "", 0L, false, true));
+      }
+      for (ClassifiedSpan cs : devEntry.getValue()) {
+        long a = Math.max(cs.span.s, from);
+        long b = Math.min(cs.span.e, to);
+        if (b <= a) continue;
+        long minMs = ActivityClassifier.focusMinMs(cs.fine.id);
+        boolean waste = ActivityClassifier.isWasteFine(cs.fine.id);
+        for (long[] piece : subtractIntervals(a, b, offs)) {
+          events.add(new FocusEvent(piece[0], piece[1], cs.result.app, cs.fine.id, minMs, waste, false));
+        }
+      }
+      events.sort((x, y) -> {
+        int cmp = Long.compare(x.s, y.s);
+        if (cmp != 0) return cmp;
+        return Boolean.compare(y.isBreak, x.isBreak);
+      });
+
+      final OpenRun[] cur = new OpenRun[1];
+      final List<FocusEvent> pending = new ArrayList<>();
+      final class Runner {
+        void emit(OpenRun run, boolean active) {
+          if (run == null || run.ms < run.minMs) return;
+          FocusRun fr = new FocusRun(run.app, run.catId, devLbl, run.start, run.end, run.ms, active, run.intervals);
+          runs.add(fr);
+          byApp.computeIfAbsent(run.app, k -> new ArrayList<>()).add(fr);
+          byCat.merge(run.catId, run.ms, Long::sum);
+          allIntervals.addAll(run.intervals);
+        }
+
+        void process(FocusEvent ev) {
+          if (ev.isBreak || ev.waste) {
+            emit(cur[0], false);
+            cur[0] = null;
+            pending.clear();
+            return;
+          }
+          if (cur[0] == null) {
+            cur[0] = ev.minMs > 0 ? new OpenRun(ev) : null;
+            pending.clear();
+            return;
+          }
+          long gap = ev.s - cur[0].end;
+          if (ev.app.equals(cur[0].app) && ev.minMs > 0) {
+            boolean ok = pending.isEmpty() ? gap <= FOCUS_AWAY_MS : gap <= FOCUS_GLANCE_MS;
+            if (ok) {
+              long addS = Math.max(ev.s, cur[0].end);
+              if (ev.e > addS) {
+                cur[0].ms += ev.e - addS;
+                cur[0].end = ev.e;
+                cur[0].intervals.add(new long[] {addS, ev.e});
+              }
+              pending.clear();
+              return;
+            }
+            List<FocusEvent> saved = new ArrayList<>(pending);
+            emit(cur[0], false);
+            cur[0] = null;
+            pending.clear();
+            for (FocusEvent p : saved) process(p);
+            process(ev);
+            return;
+          }
+          if (ev.e - cur[0].end <= FOCUS_GLANCE_MS && gap <= FOCUS_GLANCE_MS) {
+            pending.add(ev);
+            return;
+          }
+          List<FocusEvent> saved = new ArrayList<>(pending);
+          emit(cur[0], false);
+          cur[0] = null;
+          pending.clear();
+          for (FocusEvent p : saved) process(p);
+          process(ev);
+        }
+      }
+      Runner runner = new Runner();
+      for (FocusEvent ev : events) runner.process(ev);
+      boolean ongoing = cur[0] != null && pending.isEmpty() && to >= now - 1000L && now - cur[0].end <= FOCUS_AWAY_MS;
+      runner.emit(cur[0], ongoing);
+    }
+
+    runs.sort((a, b) -> {
+      int cmp = Long.compare(b.ms, a.ms);
+      return cmp != 0 ? cmp : Long.compare(b.start, a.start);
+    });
+    for (List<FocusRun> list : byApp.values()) {
+      list.sort((a, b) -> Long.compare(b.start, a.start));
+    }
+    merge(allIntervals);
+    long unionMs = 0L;
+    for (long[] iv : allIntervals) unionMs += Math.max(0L, iv[1] - iv[0]);
+    long totalMs = 0L;
+    for (FocusRun r : runs) totalMs += r.ms;
+    return new FocusSummary(totalMs, unionMs, runs, byApp, byCat);
   }
 
   private static final class ClassifiedSpan {

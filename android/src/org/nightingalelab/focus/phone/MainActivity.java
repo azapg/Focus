@@ -60,8 +60,10 @@ public final class MainActivity extends Activity {
   private LinearLayout scopedDock;
   private LinearLayout scopedLogos;
   private TextView scopedClock;
+  private TextView scopedMeta;
   private Button scopedEnd;
   private List<String> scopedServices = Collections.emptyList();
+  private boolean askSheetOpen;
   private TextView todayTabBtn;
   private TextView weekTabBtn;
   private LinearLayout searchBar;
@@ -71,6 +73,8 @@ public final class MainActivity extends Activity {
 
   private final Map<String, Drawable> iconCache = new HashMap<>();
   private FocusStats.View lastView;
+  private FocusStats.CleanStreak cleanStreak;
+  private long nextStreakRefresh;
   private List<InsightsEngine.PauseRecord> lastAllPauses = Collections.emptyList();
   private long lastNow;
 
@@ -156,18 +160,25 @@ public final class MainActivity extends Activity {
     scopedDock = Theme.row(this);
     scopedDock.setGravity(Gravity.CENTER_VERTICAL);
     JudgeSheetDialog.styleCapsule(this, scopedDock);
+    scopedDock.setElevation(Theme.dp(this, 10));
     scopedLogos = Theme.row(this);
     scopedDock.addView(scopedLogos);
-    scopedClock = Theme.text(this, "", 14, Theme.FG, true);
-    scopedClock.setPadding(Theme.dp(this, 6), 0, Theme.dp(this, 8), 0);
-    scopedDock.addView(scopedClock, new LinearLayout.LayoutParams(0, -2, 1));
+    scopedClock = Theme.text(this, "", 13.5f, Theme.FG, true);
+    scopedClock.setPadding(Theme.dp(this, 8), 0, Theme.dp(this, 6), 0);
+    scopedDock.addView(scopedClock);
+    scopedMeta = Theme.text(this, "", 12f, Theme.MUTED, false);
+    scopedMeta.setSingleLine(true);
+    scopedMeta.setEllipsize(TextUtils.TruncateAt.END);
+    scopedMeta.setPadding(0, 0, Theme.dp(this, 8), 0);
+    scopedDock.addView(scopedMeta, new LinearLayout.LayoutParams(0, -2, 1));
     scopedEnd = new Button(this);
     scopedEnd.setAllCaps(false);
     scopedEnd.setText("End");
-    scopedEnd.setTextSize(13);
-    scopedEnd.setTextColor(Theme.FG);
-    scopedEnd.setBackground(Theme.roundRect(this, Theme.DARK_ACTIVE, Theme.LINE, 999));
-    scopedDock.addView(scopedEnd, new LinearLayout.LayoutParams(Theme.dp(this, 62), Theme.dp(this, 38)));
+    scopedEnd.setTextSize(12.5f);
+    scopedEnd.setTextColor(0xFFE4E4E7);
+    scopedEnd.setStateListAnimator(null);
+    scopedEnd.setBackground(Theme.roundRect(this, Theme.ASK_SECONDARY_FILL, Theme.ASK_SECONDARY_BORDER, 999));
+    scopedDock.addView(scopedEnd, new LinearLayout.LayoutParams(Theme.dp(this, 58), Theme.dp(this, 36)));
     bottomDock.addView(scopedDock, new LinearLayout.LayoutParams(
         Math.min(Theme.dp(this, 360), getResources().getDisplayMetrics().widthPixels - Theme.dp(this, 36)),
         Theme.dp(this, 46)));
@@ -335,9 +346,33 @@ public final class MainActivity extends Activity {
   private final BroadcastReceiver syncReceiver = new BroadcastReceiver() {
     @Override
     public void onReceive(Context context, Intent intent) {
+      refreshStreak();
       render();
     }
   };
+
+  private void refreshStreak() {
+    String authority = Store.get(this).streakAuthority();
+    if (authority.isEmpty()) {
+      cleanStreak = null;
+      return;
+    }
+    long now = SystemClock.elapsedRealtime();
+    if (now < nextStreakRefresh) return;
+    nextStreakRefresh = now + 30_000;
+    new Thread(() -> {
+      try {
+        FocusStats.CleanStreak latest = StreakAuthority.history(this);
+        runOnUiThread(() -> {
+          if (isDestroyed() || !authority.equals(Store.get(this).streakAuthority())) return;
+          cleanStreak = latest;
+          if (page == Page.TODAY) render();
+        });
+      } catch (Exception ignored) {
+        // A temporary LAN outage leaves the latest known history available.
+      }
+    }, "focus-streak-history").start();
+  }
 
   @Override
   protected void onResume() {
@@ -357,6 +392,7 @@ public final class MainActivity extends Activity {
       requestPermissions(new String[] {android.Manifest.permission.POST_NOTIFICATIONS}, 42);
     }
     PhoneUpdater.get(this).checkIfDue();
+    refreshStreak();
     new Thread(() -> {
       Store.get(this).collect();
       DnsController.get(this).tick();
@@ -456,6 +492,9 @@ public final class MainActivity extends Activity {
     if (!access.services.equals(scopedServices)) {
       scopedServices = access.services;
       JudgeSheetDialog.setServiceLogos(this, scopedLogos, scopedServices);
+      scopedMeta.setText(scopedServices.size() == 1
+          ? JudgeSheetDialog.serviceName(scopedServices.get(0))
+          : scopedServices.size() + " apps");
     }
     scopedClock.setText(FocusStats.fmtClock(access.remaining()));
     scopedEnd.setOnClickListener(v -> {
@@ -480,12 +519,17 @@ public final class MainActivity extends Activity {
     }
     if (scoped) return;
     if (active != null) {
-      pauseButton.setText("Turn on " + active.label + " · " + FocusStats.fmtClock(active.remainingMs));
+      String label = "Phone".equals(active.label)
+          ? "\u25cf Turn on \u00b7 " + FocusStats.fmtClock(active.remainingMs)
+          : "\u25cf Turn on " + active.label + " \u00b7 " + FocusStats.fmtClock(active.remainingMs);
+      pauseButton.setText(label);
       pauseButton.setTextColor(Theme.WARN);
+      pauseButton.setBackground(Theme.roundRect(this, Theme.ASK_DOCK_WARN_FILL, Theme.ASK_BORDER_WARN, 999));
       pauseButton.setOnClickListener(v -> active.resume.run());
     } else {
       pauseButton.setText("Ask");
       pauseButton.setTextColor(Theme.FG);
+      pauseButton.setBackground(Theme.obsidianGlass(this, 999));
       pauseButton.setOnClickListener(v -> openPauseSheet());
     }
   }
@@ -526,7 +570,7 @@ public final class MainActivity extends Activity {
         Theme.dp(this, 18),
         Theme.dp(this, isStats ? 104 : isAllApps ? 96 : 28));
 
-    bottomDock.setVisibility(isStats ? View.VISIBLE : View.GONE);
+    bottomDock.setVisibility(isStats ? (askSheetOpen ? View.INVISIBLE : View.VISIBLE) : View.GONE);
     searchBar.setVisibility(isAllApps ? View.VISIBLE : View.GONE);
     edgeScrim.setVisibility((isStats || isAllApps) ? View.VISIBLE : View.GONE);
 
@@ -594,7 +638,10 @@ public final class MainActivity extends Activity {
     View spacer = new View(this);
     top.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
 
-    if (!isWeek) StoreSheet.addHeader(this, top, this::render, this::openPauseSheet);
+    if (!isWeek) {
+      StoreSheet.addHeader(this, top, this::render, this::openPauseSheet);
+      if (cleanStreak != null) top.addView(CleanStreakView.headerButton(this, cleanStreak));
+    }
 
     PhoneUpdater.Snapshot upd = PhoneUpdater.get(this).snapshot();
     if (upd.available != null) {
@@ -667,16 +714,25 @@ public final class MainActivity extends Activity {
       }
     }
 
-    // Thin category bar + unclipped legend
+    // Thin category bar + unclipped legend (prepends Ice Deep focus segment when present)
+    List<FocusStats.Category> barCats = v.barCategories();
     Theme.gap(scrollContent, 11);
     Theme.CategoryBarView catBar = new Theme.CategoryBarView(this);
-    catBar.setData(v.categories, selectedCategoryId);
+    catBar.setData(barCats, selectedCategoryId);
     scrollContent.addView(catBar, new LinearLayout.LayoutParams(
         LinearLayout.LayoutParams.MATCH_PARENT, Theme.dp(this, 9)));
 
-    if (!v.categories.isEmpty()) {
+    if (!barCats.isEmpty()) {
       Theme.gap(scrollContent, 8);
-      scrollContent.addView(buildCategoryLegend(v.categories));
+      scrollContent.addView(buildCategoryLegend(barCats));
+    }
+
+    // Option C: one quiet plain-text log line for today's unbroken focus runs (no badges).
+    if (!v.focusRuns.isEmpty()) {
+      Theme.gap(scrollContent, 8);
+      scrollContent.addView(Theme.divider(this, 0, 0));
+      Theme.gap(scrollContent, 7);
+      scrollContent.addView(buildFocusLogLine(v.focusRuns));
     }
 
     // Week 7-day chart card
@@ -689,7 +745,9 @@ public final class MainActivity extends Activity {
     Theme.gap(scrollContent, 16);
     List<FocusStats.AppStat> visibleApps = new ArrayList<>();
     for (FocusStats.AppStat a : v.apps) {
-      if (selectedCategoryId == null || (a.category != null && selectedCategoryId.equals(a.category.id))) {
+      if (selectedCategoryId == null
+          || ("focus".equals(selectedCategoryId) && a.focusMs > 0)
+          || (a.category != null && selectedCategoryId.equals(a.category.id))) {
         visibleApps.add(a);
       }
     }
@@ -832,7 +890,12 @@ public final class MainActivity extends Activity {
     LinearLayout pill = Theme.row(this);
     pill.setPadding(Theme.dp(this, 11), Theme.dp(this, 5), Theme.dp(this, 10), Theme.dp(this, 5));
     pill.setBackground(Theme.roundRect(this, Theme.CARD, Theme.LINE, 999));
-    pill.addView(Theme.text(this, label, 12f, Theme.EXPLAIN, true));
+    TextView filterLabel = Theme.text(this, label, 12f, Theme.EXPLAIN, true);
+    filterLabel.setMaxWidth(Theme.dp(this, 96));
+    filterLabel.setSingleLine(true);
+    filterLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    pill.setContentDescription("Device filter, " + label);
+    pill.addView(filterLabel);
     Theme.gap(pill, 4);
     pill.addView(new Theme.IconView(this, Theme.IconView.Kind.CARET_DOWN, Theme.MUTED, 11));
     pill.setOnClickListener(this::showDevicePicker);
@@ -898,6 +961,19 @@ public final class MainActivity extends Activity {
     sb.append(FocusStats.fmt(v.buildMs)).append(" building");
     sb.setSpan(new ForegroundColorSpan(Theme.FG), bStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     sb.setSpan(new StyleSpan(Typeface.BOLD), bStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    if (v.focusMs >= 60_000L) {
+      sb.append(", ");
+      int fStart = sb.length();
+      sb.append(FocusStats.fmt(v.focusMs)).append(" deep focus");
+      sb.setSpan(new ForegroundColorSpan(Theme.ICE), fStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      sb.setSpan(new StyleSpan(Typeface.BOLD), fStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      long coins = focusCoinsForView(v);
+      if (coins > 0) {
+        int cStart = sb.length();
+        sb.append(" · +").append(Long.toString(coins)).append(coins == 1 ? " coin" : " coins");
+        sb.setSpan(new ForegroundColorSpan(Theme.ICE_SOFT), cStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      }
+    }
     if (v.driftMs >= 30_000L) {
       sb.append(", ");
       int dStart = sb.length();
@@ -909,6 +985,37 @@ public final class MainActivity extends Activity {
     }
     sb.append(".");
     return Theme.text(this, sb, 13f, Theme.MUTED, false);
+  }
+
+  private long focusCoinsForView(FocusStats.View v) {
+    org.nightingalelab.focus.habits.Wallet wallet = HabitStore.get(this).read().wallet;
+    int todayDay = Habits.day(lastNow);
+    if (!wallet.active(todayDay)) return 0L;
+    int fromDay = Habits.day(v.from);
+    int toDay = v.singleDay ? fromDay : todayDay;
+    return org.nightingalelab.focus.habits.FocusRewards.coinsInRange(wallet, fromDay, toDay);
+  }
+
+  private TextView buildFocusLogLine(List<FocusStats.FocusRun> runs) {
+    SpannableStringBuilder sb = new SpannableStringBuilder();
+    int lblStart = sb.length();
+    sb.append("Long runs  ");
+    sb.setSpan(new ForegroundColorSpan(Theme.ICE), lblStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    int shown = Math.min(5, runs.size());
+    for (int i = 0; i < shown; i++) {
+      if (i > 0) sb.append(" · ");
+      FocusStats.FocusRun r = runs.get(i);
+      int appStart = sb.length();
+      sb.append(r.app).append(" ");
+      sb.setSpan(new ForegroundColorSpan(Theme.SUB), appStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      int durStart = sb.length();
+      sb.append(FocusStats.fmt(r.ms));
+      sb.setSpan(new ForegroundColorSpan(Theme.ICE), durStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+    if (runs.size() > shown) {
+      sb.append("  +").append(String.valueOf(runs.size() - shown)).append(" more");
+    }
+    return Theme.text(this, sb, 11.5f, Theme.MUTED, false);
   }
 
   private View buildCategoryLegend(List<FocusStats.Category> cats) {
@@ -964,6 +1071,16 @@ public final class MainActivity extends Activity {
     LinearLayout sec = Theme.column(this);
     LinearLayout head = Theme.row(this);
     head.addView(Theme.text(this, "Last 7 days", 12f, Theme.MUTED, false));
+    boolean anyFocus = false;
+    for (FocusStats.DayStat d : v.week) if (d.focusMs >= 60_000L) anyFocus = true;
+    if (anyFocus) {
+      Theme.gap(head, 10);
+      View focusSw = new View(this);
+      focusSw.setBackground(Theme.roundRect(this, Theme.ICE, 0, 2));
+      head.addView(focusSw, new LinearLayout.LayoutParams(Theme.dp(this, 7), Theme.dp(this, 7)));
+      Theme.gap(head, 5);
+      head.addView(Theme.text(this, "Deep focus", 11.5f, Theme.MUTED, false));
+    }
     Theme.gap(head, 10);
     View keySw = new View(this);
     keySw.setBackground(Theme.roundRect(this, Theme.WARN, 0, 2));
@@ -1017,7 +1134,12 @@ public final class MainActivity extends Activity {
       int offH = d.offMs >= 30_000L && d.totalMs > 0
           ? Math.max(Theme.dp(this, 3), Math.min(totalH, (int) (maxBarPx * Math.min(d.totalMs, d.offMs) / (float) maxMs)))
           : 0;
-      int onH = Math.max(0, totalH - offH);
+      int nonOffH = Math.max(0, totalH - offH);
+      long cappedFocus = Math.min(Math.max(0L, d.totalMs - Math.min(d.totalMs, d.offMs)), d.focusMs);
+      int focusH = cappedFocus >= 60_000L && nonOffH > 0
+          ? Math.max(Theme.dp(this, 3), Math.min(nonOffH, (int) (maxBarPx * cappedFocus / (float) maxMs)))
+          : 0;
+      int onH = Math.max(0, nonOffH - focusH);
 
       LinearLayout barStack = Theme.column(this);
       int barW = Theme.dp(this, 22);
@@ -1036,6 +1158,13 @@ public final class MainActivity extends Activity {
             ? Theme.roundRect(this, Theme.BAR_GRAY, 0, 0)
             : Theme.topRounded(this, Theme.BAR_GRAY, 0, 3));
         barStack.addView(onSeg, new LinearLayout.LayoutParams(barW, onH));
+      }
+      if (focusH > 0) {
+        View focusSeg = new View(this);
+        focusSeg.setBackground((offH > 0 || onH > 0)
+            ? Theme.roundRect(this, Theme.ICE, 0, 0)
+            : Theme.topRounded(this, Theme.ICE, 0, 3));
+        barStack.addView(focusSeg, new LinearLayout.LayoutParams(barW, focusH));
       }
       stackWrap.addView(barStack);
       col.addView(stackWrap, new LinearLayout.LayoutParams(
@@ -1095,7 +1224,8 @@ public final class MainActivity extends Activity {
         : "video".equals(catId) && a.ms >= 30L * FocusStats.MIN);
     boolean heavyWaste = singleDayView && ("adult".equals(catId)
         || (a.category != null && ActivityClassifier.FG_DRIFT.equals(a.category.group) && a.ms >= 60L * FocusStats.MIN));
-    int timeColor = heavyWaste ? Theme.BAD_TEXT : (a.mostlyDnsOff() || wasteWarn) ? Theme.WARN : Theme.FG;
+    boolean hasFocus = a.focusMs > 0 && !heavyWaste && !a.mostlyDnsOff() && !wasteWarn;
+    int timeColor = heavyWaste ? Theme.BAD_TEXT : (a.mostlyDnsOff() || wasteWarn) ? Theme.WARN : hasFocus ? Theme.ICE : Theme.FG;
     row.addView(Theme.text(this, FocusStats.fmt(a.ms), 13.5f, timeColor, true));
 
     row.setOnClickListener(view -> {
@@ -1106,7 +1236,7 @@ public final class MainActivity extends Activity {
     wrap.addView(row);
 
     if (a.name.equals(expandedAppName)) {
-      LinearLayout detail = Theme.row(this);
+      LinearLayout detail = Theme.column(this);
       detail.setPadding(Theme.dp(this, icoDp + 24), 0, Theme.dp(this, 13), Theme.dp(this, 10));
       SpannableStringBuilder sb = new SpannableStringBuilder();
       if (a.category != null) sb.append(a.category.label);
@@ -1121,6 +1251,19 @@ public final class MainActivity extends Activity {
         sb.setSpan(new ForegroundColorSpan(Theme.WARN), offStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
       }
       detail.addView(Theme.text(this, sb, 11.5f, Theme.MUTED, false));
+      if (hasFocus && !a.focusRuns.isEmpty()) {
+        java.text.SimpleDateFormat hhmm = new java.text.SimpleDateFormat("HH:mm", Locale.ROOT);
+        int limitRuns = Math.min(5, a.focusRuns.size());
+        for (int ri = 0; ri < limitRuns; ri++) {
+          FocusStats.FocusRun fr = a.focusRuns.get(ri);
+          Theme.gap(detail, 4);
+          LinearLayout frRow = Theme.row(this);
+          frRow.addView(Theme.text(this, FocusStats.fmt(fr.ms) + " unbroken" + (fr.active ? " · active" : ""), 11f, Theme.ICE, true),
+              new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+          frRow.addView(Theme.text(this, hhmm.format(new Date(fr.start)) + "–" + hhmm.format(new Date(fr.end)), 11f, Theme.MUTED, false));
+          detail.addView(frRow);
+        }
+      }
       wrap.addView(detail);
     }
     return wrap;
@@ -1616,13 +1759,23 @@ public final class MainActivity extends Activity {
   // =========================================================================
 
   private void openPauseSheet() {
-    JudgeSheetDialog.show(this, this::render);
+    askSheetOpen = true;
+    bottomDock.setVisibility(View.INVISIBLE);
+    JudgeSheetDialog.show(this, this::render, () -> {
+      askSheetOpen = false;
+      if (page == Page.TODAY || page == Page.WEEK) bottomDock.setVisibility(View.VISIBLE);
+    });
   }
 
   private void openRemotePauseSheet(DeviceHub.PairedDevice device) {
     JSONObject remoteDns = device.snapshot == null ? null : device.snapshot.optJSONObject("dns");
     if ("laptop".equals(device.kind) && remoteDns != null && remoteDns.optBoolean("pause_assistant")) {
-      JudgeSheetDialog.show(this, device, this::render);
+      askSheetOpen = true;
+      bottomDock.setVisibility(View.INVISIBLE);
+      JudgeSheetDialog.show(this, device, this::render, () -> {
+        askSheetOpen = false;
+        if (page == Page.TODAY || page == Page.WEEK) bottomDock.setVisibility(View.VISIBLE);
+      });
       return;
     }
     long now = System.currentTimeMillis();

@@ -92,14 +92,18 @@ public final class ActivityClassifier {
     PACKAGES.put("com.google.android.apps.docs.editors.sheets", new Entry("Google Sheets", "writing"));
     PACKAGES.put("com.google.android.keep", new Entry("Google Keep", "writing"));
     PACKAGES.put("com.samsung.android.app.notes", new Entry("Samsung Notes", "writing"));
+    PACKAGES.put("com.microsoft.office.onenote", new Entry("OneNote", "writing"));
+    PACKAGES.put("com.logseq.app", new Entry("Logseq", "writing"));
     PACKAGES.put("com.figma.mirror", new Entry("Figma", "designing"));
     PACKAGES.put("com.canva.editor", new Entry("Canva", "designing"));
-    PACKAGES.put("com.anki.android", new Entry("Anki", "writing"));
-    PACKAGES.put("com.ichi2.anki", new Entry("Anki", "writing"));
 
     // Reading and learning
     PACKAGES.put("com.bilingify.readest", new Entry("Readest", "reading"));
+    PACKAGES.put("com.amazon.kindle", new Entry("Kindle", "reading"));
     PACKAGES.put("com.duolingo", new Entry("Duolingo", "learning"));
+    PACKAGES.put("com.google.android.apps.labs.language.tailwind", new Entry("NotebookLM", "learning"));
+    PACKAGES.put("com.anki.android", new Entry("Anki", "learning"));
+    PACKAGES.put("com.ichi2.anki", new Entry("Anki", "learning"));
 
     // Consuming (Phone)
     PACKAGES.put("com.google.android.videos", new Entry("Google TV", "watching"));
@@ -167,7 +171,12 @@ public final class ActivityClassifier {
 
     // Web Hosts
     HOSTS.put("web.readest.com", new Entry("Readest", "reading"));
+    HOSTS.put("read.amazon.com", new Entry("Kindle", "reading"));
     HOSTS.put("duolingo.com", new Entry("Duolingo", "learning"));
+    HOSTS.put("notebooklm.google.com", new Entry("NotebookLM", "learning"));
+    HOSTS.put("apps.ankiweb.net", new Entry("Anki", "learning"));
+    HOSTS.put("ankiweb.net", new Entry("Anki", "learning"));
+    HOSTS.put("keep.google.com", new Entry("Google Keep", "writing"));
     HOSTS.put("github.com", new Entry("GitHub", "building"));
     HOSTS.put("claude.ai", new Entry("Claude", "building"));
     HOSTS.put("chatgpt.com", new Entry("ChatGPT", "building"));
@@ -234,6 +243,13 @@ public final class ActivityClassifier {
     DESKTOP_APPS.put("excel", new Entry("Excel", "writing"));
     DESKTOP_APPS.put("powerpnt", new Entry("PowerPoint", "designing"));
     DESKTOP_APPS.put("google docs", new Entry("Google Docs", "writing"));
+    DESKTOP_APPS.put("google keep", new Entry("Google Keep", "writing"));
+    DESKTOP_APPS.put("onenote", new Entry("OneNote", "writing"));
+    DESKTOP_APPS.put("notepad", new Entry("Notepad", "writing"));
+    DESKTOP_APPS.put("stickynotes", new Entry("Sticky Notes", "writing"));
+    DESKTOP_APPS.put("notes", new Entry("Notes", "writing"));
+    DESKTOP_APPS.put("logseq", new Entry("Logseq", "writing"));
+    DESKTOP_APPS.put("craft", new Entry("Craft", "writing"));
     DESKTOP_APPS.put("figma", new Entry("Figma", "designing"));
     DESKTOP_APPS.put("photoshop", new Entry("Photoshop", "designing"));
     DESKTOP_APPS.put("blender", new Entry("Blender", "designing"));
@@ -268,7 +284,10 @@ public final class ActivityClassifier {
 
     // Pause reason matching hints
     DESKTOP_APPS.put("readest", new Entry("Readest", "reading"));
+    DESKTOP_APPS.put("kindle", new Entry("Kindle", "reading"));
     DESKTOP_APPS.put("duolingo", new Entry("Duolingo", "learning"));
+    DESKTOP_APPS.put("notebooklm", new Entry("NotebookLM", "learning"));
+    DESKTOP_APPS.put("anki", new Entry("Anki", "learning"));
     DESKTOP_APPS.put("remote atv", new Entry("Remote ATV", "system"));
     DESKTOP_APPS.put("google tv", new Entry("Google TV", "watching"));
 
@@ -356,7 +375,11 @@ public final class ActivityClassifier {
       String host = lowLabel.startsWith("www.") ? lowLabel.substring(4) : lowLabel;
       Entry known = host.equals("web.readest.com") || host.endsWith(".web.readest.com")
           ? HOSTS.get("web.readest.com")
-          : host.equals("duolingo.com") || host.endsWith(".duolingo.com") ? HOSTS.get("duolingo.com") : null;
+          : host.equals("duolingo.com") || host.endsWith(".duolingo.com") ? HOSTS.get("duolingo.com")
+          : host.equals("notebooklm.google.com") ? HOSTS.get("notebooklm.google.com")
+          : host.equals("keep.google.com") ? HOSTS.get("keep.google.com")
+          : host.equals("read.amazon.com") ? HOSTS.get("read.amazon.com")
+          : null;
       if (known != null) {
         Result base = new Result(known.app, known.category, known.noise, "host", host, false);
         return applyUserRule(base, findRule(rules, lowLabel, "", base.app, label));
@@ -472,9 +495,44 @@ public final class ActivityClassifier {
     fine("unsorted", "Not sure", FG_NEUTRAL, 0xFF3F3F46);
   }
 
+  public static final Fine FOCUS_FINE = new Fine("focus", "Deep focus", "focus", 0xFFCBE2FF);
+
   public static Fine fineById(String id) {
+    if ("focus".equals(id)) return FOCUS_FINE;
     Fine f = FINE.get(id);
     return f != null ? f : FINE.get("unsorted");
+  }
+
+  /** Minimum unbroken single-app focus duration in ms (0 = not eligible). */
+  public static long focusMinMs(String fineId) {
+    if (fineId == null) return 0L;
+    switch (fineId) {
+      case "coding":
+      case "business":
+      case "writing":
+      case "design":
+        return 25L * 60_000L;
+      case "reading":
+      case "learning":
+        return 15L * 60_000L;
+      default:
+        return 0L;
+    }
+  }
+
+  /** Wasting categories that immediately break a single-app focus run. */
+  public static boolean isWasteFine(String fineId) {
+    if (fineId == null) return false;
+    switch (fineId) {
+      case "social":
+      case "video":
+      case "tv":
+      case "games":
+      case "adult":
+        return true;
+      default:
+        return false;
+    }
   }
 
   /**

@@ -60,6 +60,13 @@ const ActivityClassifier = (() => {
     'notion': { app: 'Notion', category: 'writing' },
     'google docs': { app: 'Google Docs', category: 'writing' },
     'google sheets': { app: 'Google Sheets', category: 'writing' },
+    'google keep': { app: 'Google Keep', category: 'writing' },
+    'onenote': { app: 'OneNote', category: 'writing' },
+    'notepad': { app: 'Notepad', category: 'writing' },
+    'stickynotes': { app: 'Sticky Notes', category: 'writing' },
+    'notes': { app: 'Notes', category: 'writing' },
+    'logseq': { app: 'Logseq', category: 'writing' },
+    'craft': { app: 'Craft', category: 'writing' },
     'discord': { app: 'Discord', category: 'messaging' },
     'whatsapp': { app: 'WhatsApp', category: 'messaging' },
     'slack': { app: 'Slack', category: 'messaging' },
@@ -97,7 +104,10 @@ const ActivityClassifier = (() => {
     'google drive': { app: 'Google Drive', category: 'system' },
     'google calendar': { app: 'Google Calendar', category: 'system' },
     'readest': { app: 'Readest', category: 'reading' },
+    'kindle': { app: 'Kindle', category: 'reading' },
     'duolingo': { app: 'Duolingo', category: 'learning' },
+    'notebooklm': { app: 'NotebookLM', category: 'learning' },
+    'anki': { app: 'Anki', category: 'learning' },
     'remote atv': { app: 'Remote ATV', category: 'system' },
     'google tv': { app: 'Google TV', category: 'watching' },
     'nextdns': { app: 'NextDNS', category: 'system' },
@@ -149,7 +159,17 @@ const ActivityClassifier = (() => {
     'com.android.vending': { app: 'Play Store', category: 'system' },
     // Phone apps
     'com.bilingify.readest': { app: 'Readest', category: 'reading' },
+    'com.amazon.kindle': { app: 'Kindle', category: 'reading' },
     'com.duolingo': { app: 'Duolingo', category: 'learning' },
+    'com.google.android.apps.labs.language.tailwind': { app: 'NotebookLM', category: 'learning' },
+    'com.anki.android': { app: 'Anki', category: 'learning' },
+    'com.ichi2.anki': { app: 'Anki', category: 'learning' },
+    'com.google.android.keep': { app: 'Google Keep', category: 'writing' },
+    'com.samsung.android.app.notes': { app: 'Samsung Notes', category: 'writing' },
+    'com.microsoft.office.onenote': { app: 'OneNote', category: 'writing' },
+    'com.logseq.app': { app: 'Logseq', category: 'writing' },
+    'com.google.android.apps.docs': { app: 'Google Docs', category: 'writing' },
+    'com.google.android.apps.docs.editors.docs': { app: 'Google Docs', category: 'writing' },
     'tech.simha.androidtvremote': { app: 'Remote ATV', category: 'system' },
     'com.instagram.android': { app: 'Instagram', category: 'browsing' },
     'com.twitter.android': { app: 'X', category: 'browsing' },
@@ -336,9 +356,15 @@ const ActivityClassifier = (() => {
     }
 
     const readingOrLearning = base === 'web.readest.com' || base.endsWith('.web.readest.com') ? DESKTOP_APPS.readest
-      : base === 'duolingo.com' || base.endsWith('.duolingo.com') ? DESKTOP_APPS.duolingo : null;
+      : base === 'read.amazon.com' ? DESKTOP_APPS.kindle
+      : base === 'duolingo.com' || base.endsWith('.duolingo.com') ? DESKTOP_APPS.duolingo
+      : base === 'notebooklm.google.com' ? DESKTOP_APPS.notebooklm
+      : base === 'apps.ankiweb.net' || base === 'ankiweb.net' ? DESKTOP_APPS.anki
+      : base === 'keep.google.com' ? DESKTOP_APPS['google keep']
+      : null;
     if (readingOrLearning) {
-      return { ...readingOrLearning, itemKey: `web:${base}${path}`, itemTitle: title || readingOrLearning.app, itemKind: 'page', matchType: 'host', matchValue: base };
+      const clean = stripSuffix(title, [' - NotebookLM', ' | NotebookLM', ' - Google Keep', ' - Duolingo', ' | Duolingo']);
+      return { ...readingOrLearning, itemKey: `web:${base}${path}`, itemTitle: clean || readingOrLearning.app, itemKind: 'page', matchType: 'host', matchValue: base };
     }
 
     if (base === 'notion.com' || base === 'app.notion.com' || base === 'notion.so' || host.endsWith('.notion.site')) {
@@ -992,6 +1018,171 @@ const ActivityClassifier = (() => {
     return merged;
   }
 
+  // Deep single-app focus session rules:
+  // Coding, Business, Writing, and Design need 25m unbroken; Reading and Learning need 15m.
+  // Wasting categories (social, video, tv, games, adult) and DNS-off pauses immediately break a run.
+  const FOCUS_THRESHOLDS = Object.freeze({
+    coding: 25 * MIN,
+    business: 25 * MIN,
+    writing: 25 * MIN,
+    design: 25 * MIN,
+    reading: 15 * MIN,
+    learning: 15 * MIN,
+  });
+  const FOCUS_WASTE_CATS = new Set(['social', 'video', 'tv', 'games', 'adult']);
+  const FOCUS_GLANCE_MS = 45e3;
+  const FOCUS_AWAY_MS = 2 * MIN;
+
+  function subtractIntervals(a, b, cuts) {
+    if (b <= a) return [];
+    if (!cuts.length) return [[a, b]];
+    let out = [[a, b]];
+    for (const [cx, cy] of cuts) {
+      if (cy <= a) continue;
+      if (cx >= b) break;
+      const next = [];
+      for (const [x, y] of out) {
+        if (cy <= x || cx >= y) {
+          next.push([x, y]);
+        } else {
+          if (cx > x) next.push([x, cx]);
+          if (cy < y) next.push([cy, y]);
+        }
+      }
+      out = next;
+      if (!out.length) break;
+    }
+    return out;
+  }
+
+  /** Detect sustained single-app focus runs across sources (excluding DNS-off pauses and wasting apps). */
+  function detectFocusSessions(sources, from, to, { userRules = null, cache = null } = {}) {
+    const runs = [];
+    const byApp = Object.create(null);
+    const byCat = Object.create(null);
+    const allIntervals = [];
+
+    for (const src of sources) {
+      const h = src.history;
+      const boundTo = Math.min(to, h.now || to);
+      const dev = src.kind === 'phone' ? 'Phone' : src.kind === 'tv' ? 'TV' : src.name;
+      const offs = mergeIntervals((h.pauses || []).map((p) => [Math.max(p.t, from), Math.min(p.end, boundTo)]));
+      const events = [];
+
+      for (const [px, py] of offs) {
+        if (py > px) events.push({ s: px, e: py, isBreak: true });
+      }
+      for (const s of h.spans || []) {
+        if (s.label === 'FocusDNS') continue;
+        const a = Math.max(s.s, from);
+        const b = Math.min(s.e, boundTo);
+        if (b <= a) continue;
+        const c = classifySpan(s, src.kind, userRules);
+        const f = fineCategory(s, c, src.kind, cache);
+        const explicit = cache?.items?.[`app:${c.app}`];
+        if (c.noise && !explicit) continue;
+        const minMs = FOCUS_THRESHOLDS[f.id] || 0;
+        const isWaste = FOCUS_WASTE_CATS.has(f.id);
+        for (const [pa, pb] of subtractIntervals(a, b, offs)) {
+          events.push({ s: pa, e: pb, app: f.app, category: f.id, minMs, isWaste, isBreak: false });
+        }
+      }
+      events.sort((x, y) => x.s - y.s || (x.isBreak ? -1 : y.isBreak ? 1 : 0));
+
+      let cur = null;
+      let pending = [];
+
+      const emitIfQualified = (run, active) => {
+        if (!run || run.ms < run.minMs) return;
+        const entry = {
+          app: run.app,
+          category: run.category,
+          device: dev,
+          start: run.start,
+          end: run.end,
+          ms: run.ms,
+          minMs: run.minMs,
+          active,
+          intervals: run.intervals,
+        };
+        runs.push(entry);
+        (byApp[run.app] ??= []).push(entry);
+        byCat[run.category] = (byCat[run.category] || 0) + run.ms;
+        for (const iv of run.intervals) allIntervals.push(iv);
+      };
+
+      const startFrom = (ev) => (ev.minMs ? {
+        app: ev.app,
+        category: ev.category,
+        minMs: ev.minMs,
+        start: ev.s,
+        end: ev.e,
+        ms: ev.e - ev.s,
+        intervals: [[ev.s, ev.e]],
+      } : null);
+
+      const processEvent = (ev) => {
+        if (ev.isBreak || ev.isWaste) {
+          emitIfQualified(cur, false);
+          cur = null;
+          pending = [];
+          return;
+        }
+        if (!cur) {
+          cur = startFrom(ev);
+          pending = [];
+          return;
+        }
+        const gapFromCur = ev.s - cur.end;
+        if (ev.app === cur.app && ev.minMs) {
+          const ok = pending.length === 0
+            ? gapFromCur <= FOCUS_AWAY_MS
+            : gapFromCur <= FOCUS_GLANCE_MS;
+          if (ok) {
+            const addS = Math.max(ev.s, cur.end);
+            if (ev.e > addS) {
+              cur.ms += ev.e - addS;
+              cur.end = ev.e;
+              cur.intervals.push([addS, ev.e]);
+            }
+            pending = [];
+            return;
+          }
+          const saved = pending;
+          emitIfQualified(cur, false);
+          cur = null;
+          pending = [];
+          for (const p of saved) processEvent(p);
+          processEvent(ev);
+          return;
+        }
+        // Different non-wasting app: allow a short glance (<= 45s) before breaking `cur`.
+        if (ev.e - cur.end <= FOCUS_GLANCE_MS && gapFromCur <= FOCUS_GLANCE_MS) {
+          pending.push(ev);
+          return;
+        }
+        const saved = pending;
+        emitIfQualified(cur, false);
+        cur = null;
+        pending = [];
+        for (const p of saved) processEvent(p);
+        processEvent(ev);
+      };
+
+      for (const ev of events) processEvent(ev);
+      const isOngoing = Boolean(cur && pending.length === 0 && (h.now || 0) >= from && boundTo - cur.end <= FOCUS_AWAY_MS);
+      emitIfQualified(cur, isOngoing);
+    }
+
+    runs.sort((a, b) => b.ms - a.ms || b.start - a.start);
+    for (const list of Object.values(byApp)) list.sort((a, b) => b.start - a.start);
+    const merged = mergeIntervals(allIntervals);
+    const unionMs = merged.reduce((n, [x, y]) => n + (y - x), 0);
+    const totalMs = runs.reduce((n, r) => n + r.ms, 0);
+    const activeRun = runs.find((r) => r.active) || null;
+    return { totalMs, unionMs, runs, activeRun, byApp, byCat };
+  }
+
   /** Screen time per fine category and per app, across all selected devices. */
   function summarizeFine(sources, from, to, { userRules = null, cache = null } = {}) {
     const cats = Object.create(null);
@@ -1035,18 +1226,23 @@ const ActivityClassifier = (() => {
         }
       }
     }
+    const focus = detectFocusSessions(sources, from, to, { userRules, cache });
     const top = (o) => Object.entries(o).sort((x, y) => y[1] - x[1]);
-    const catList = top(cats).map(([id, ms]) => ({ ...FINE_MAP[id], ms, off: catOff[id] || 0 }));
+    const catList = top(cats).map(([id, ms]) => ({ ...FINE_MAP[id], ms, off: catOff[id] || 0, focusMs: focus.byCat[id] || 0 }));
     const groups = Object.create(null);
     for (const c of catList) groups[c.group] = (groups[c.group] || 0) + c.ms;
     const appList = Object.values(apps)
       .map((e) => {
         const cat = FINE_MAP[top(e.cats)[0][0]];
+        const focusRuns = focus.byApp[e.app] || [];
+        const focusMs = focusRuns.reduce((n, r) => n + r.ms, 0);
         return {
           app: e.app,
           ms: e.ms,
           off: e.off,
           offRatio: e.ms ? Math.min(1, e.off / e.ms) : 0,
+          focusMs,
+          focusRuns,
           category: cat.id,
           categoryLabel: cat.label,
           group: cat.group,
@@ -1057,7 +1253,7 @@ const ActivityClassifier = (() => {
         };
       })
       .sort((x, y) => y.ms - x.ms);
-    return { total, totalOff, categories: catList, groups, apps: appList };
+    return { total, totalOff, categories: catList, groups, apps: appList, focus };
   }
 
   /** Build the compact agent-readable inbox written to %LOCALAPPDATA%\FocusDNS\uncategorized.json. */
@@ -1093,7 +1289,9 @@ const ActivityClassifier = (() => {
     upsertUserRule,
     buildUncategorizedInbox,
     FINE,
+    FOCUS_THRESHOLDS,
     fineCategory,
+    detectFocusSessions,
     summarizeFine,
   };
 })();
