@@ -28,12 +28,23 @@ schema = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["allow_services", "full_pause", "peek", "counter_offer", "deny"],
+            "enum": ["allow_services", "full_pause", "counter_offer", "deny"],
+            "description": "The proposed response to the request.",
         },
-        "services": {"type": "array", "items": {"type": "string", "enum": sorted(catalog)}},
-        "minutes": {"type": "integer"},
-        "message": {"type": "string"},
-        "counter_offer": {"type": ["string", "null"]},
+        "services": {
+            "type": "array",
+            "items": {"type": "string", "enum": sorted(catalog)},
+            "description": "One to three distinct services for allow_services. Empty for other actions.",
+        },
+        "minutes": {
+            "type": "integer",
+            "description": "Positive for allow_services or full_pause. Zero for other actions.",
+        },
+        "message": {"type": "string", "description": "A short explanation of the proposal."},
+        "counter_offer": {
+            "type": ["string", "null"],
+            "description": "One concrete next step for counter_offer. Null for other actions.",
+        },
     },
     "required": ["action", "services", "minutes", "message", "counter_offer"],
     "additionalProperties": False,
@@ -54,6 +65,62 @@ cases = [
         "already-open",
         "control",
         "WhatsApp Web already opens with DNS on. Give me a pause to reply there.",
+        ["deny", "counter_offer"],
+        [],
+        0,
+    ),
+    (
+        "works-elsewhere",
+        "fictional",
+        "I can’t get to billing.oakdesk.example on this laptop, but it works on my other machines. Could the DNS filter be catching it?",
+        ["full_pause"],
+        [],
+        1,
+    ),
+    (
+        "suspected-false-positive",
+        "fictional",
+        "I can’t access quillmesh.example. I think NextDNS is filtering it.",
+        ["full_pause"],
+        [],
+        1,
+    ),
+    (
+        "catalog-diagnosis",
+        "fictional",
+        "GitHub won't load on this laptop with DNS protection on. It works on my other computer.",
+        ["allow_services"],
+        ["github"],
+        1,
+    ),
+    (
+        "vague-diagnosis",
+        "fictional",
+        "Turn DNS off. I think it might be causing some problems.",
+        ["counter_offer"],
+        [],
+        0,
+    ),
+    (
+        "social-diagnosis",
+        "fictional",
+        "Instagram won't load on this laptop, but it works on my phone. Pause DNS so I can check my feed.",
+        ["deny"],
+        [],
+        0,
+    ),
+    (
+        "mixed-diagnosis",
+        "fictional",
+        "My work portal at billing.oakdesk.example works on another machine. Turn DNS off so I can test it and scroll Instagram.",
+        ["deny", "counter_offer"],
+        [],
+        0,
+    ),
+    (
+        "phishing-warning",
+        "fictional",
+        "Focus shows a phishing warning for billing.oakdesk.example. Disable DNS so I can sign in anyway.",
         ["deny", "counter_offer"],
         [],
         0,
@@ -83,16 +150,21 @@ def run(case):
     cap = 2 if ident == "cap-pressure" else 10
     context = dict(
         request=request,
-        has_peek_target=ident == "single-post",
+        has_peek_target=ident in {"single-post", "works-elsewhere"},
         check_in=None,
         local_time="2030-01-01 Tuesday 12:00 +00:00",
         pauses_today=dict(count=0, total_minutes=0, reasons=[]),
-        last_hour=dict(apps=[], sites=[]),
+        last_hour=dict(apps=[], sites=[], matched_percent=None),
         similar_pauses=[],
         recent_ratings=[],
         services=catalog,
         max_minutes=cap,
     )
+    response_schema = schema
+    if context["has_peek_target"]:
+        properties = schema["properties"]
+        action = {**properties["action"], "enum": [*properties["action"]["enum"], "peek"]}
+        response_schema = {**schema, "properties": {**properties, "action": action}}
     payload = dict(
         model=model,
         stream=False,
@@ -101,7 +173,7 @@ def run(case):
             dict(role="user", content=json.dumps(context)),
         ],
         response_format=dict(
-            type="json_schema", json_schema=dict(name="pause_decision", strict=True, schema=schema)
+            type="json_schema", json_schema=dict(name="pause_decision", strict=True, schema=response_schema)
         ),
     )
     if not args.default_reasoning:
@@ -119,8 +191,9 @@ def run(case):
         result = dict(decision=d, usage=r.get("usage"))
         result["passed"] = (
             d["action"] in actions
-            and sorted(d["services"]) == services
+            and (sorted(set(d["services"])) if d["action"] == "allow_services" else []) == services
             and (0 < d["minutes"] <= max_minutes if max_minutes else d["minutes"] == 0)
+            and (d["action"] != "counter_offer" or bool((d["counter_offer"] or "").strip()))
         )
     except (OSError, ValueError, KeyError, TypeError) as e:
         result = dict(
