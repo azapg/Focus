@@ -183,14 +183,16 @@ pub fn tick(
         .filter(|peer| profile.devices.contains(&peer.id))
     {
         if let Some(snapshot) = peer.snapshot.as_ref() {
-            if let Some(report) = streak_journal::paired_phone_evidence(
+            // A bad or unsupported report supplies no coverage. It must not
+            // prevent the authority from closing the day after the grace window.
+            if let Ok(Some(report)) = streak_journal::paired_phone_evidence(
                 &peer.id,
                 snapshot,
                 &mut extractor,
                 start_ms,
                 end_ms,
                 peer.last_seen,
-            )? {
+            ) {
                 reports.push(report);
             }
         }
