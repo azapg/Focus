@@ -135,6 +135,22 @@ public final class FocusStats {
     public long offMs;
   }
 
+  public static final class CleanStreak {
+    public enum Status { CLEAN, PENDING, FROZEN, DRIFT, UNVERIFIED }
+
+    public final int count;
+    public final boolean freezeReady;
+    public final Map<java.time.LocalDate, Status> days;
+
+    public CleanStreak(int count, boolean freezeReady, Map<java.time.LocalDate, Status> days) {
+      this.count = count;
+      this.freezeReady = freezeReady;
+      Map<java.time.LocalDate, Status> newestFirst = new TreeMap<>(Comparator.reverseOrder());
+      newestFirst.putAll(days);
+      this.days = Collections.unmodifiableMap(newestFirst);
+    }
+  }
+
   public static final class View {
     public long from;
     public long to;

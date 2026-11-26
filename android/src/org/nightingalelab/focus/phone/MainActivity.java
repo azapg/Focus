@@ -73,6 +73,8 @@ public final class MainActivity extends Activity {
 
   private final Map<String, Drawable> iconCache = new HashMap<>();
   private FocusStats.View lastView;
+  private FocusStats.CleanStreak cleanStreak;
+  private long nextStreakRefresh;
   private List<InsightsEngine.PauseRecord> lastAllPauses = Collections.emptyList();
   private long lastNow;
 
@@ -344,9 +346,33 @@ public final class MainActivity extends Activity {
   private final BroadcastReceiver syncReceiver = new BroadcastReceiver() {
     @Override
     public void onReceive(Context context, Intent intent) {
+      refreshStreak();
       render();
     }
   };
+
+  private void refreshStreak() {
+    String authority = Store.get(this).streakAuthority();
+    if (authority.isEmpty()) {
+      cleanStreak = null;
+      return;
+    }
+    long now = SystemClock.elapsedRealtime();
+    if (now < nextStreakRefresh) return;
+    nextStreakRefresh = now + 30_000;
+    new Thread(() -> {
+      try {
+        FocusStats.CleanStreak latest = StreakAuthority.history(this);
+        runOnUiThread(() -> {
+          if (isDestroyed() || !authority.equals(Store.get(this).streakAuthority())) return;
+          cleanStreak = latest;
+          if (page == Page.TODAY) render();
+        });
+      } catch (Exception ignored) {
+        // A temporary LAN outage leaves the latest known history available.
+      }
+    }, "focus-streak-history").start();
+  }
 
   @Override
   protected void onResume() {
@@ -366,6 +392,7 @@ public final class MainActivity extends Activity {
       requestPermissions(new String[] {android.Manifest.permission.POST_NOTIFICATIONS}, 42);
     }
     PhoneUpdater.get(this).checkIfDue();
+    refreshStreak();
     new Thread(() -> {
       Store.get(this).collect();
       DnsController.get(this).tick();
@@ -611,7 +638,10 @@ public final class MainActivity extends Activity {
     View spacer = new View(this);
     top.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
 
-    if (!isWeek) StoreSheet.addHeader(this, top, this::render, this::openPauseSheet);
+    if (!isWeek) {
+      StoreSheet.addHeader(this, top, this::render, this::openPauseSheet);
+      if (cleanStreak != null) top.addView(CleanStreakView.headerButton(this, cleanStreak));
+    }
 
     PhoneUpdater.Snapshot upd = PhoneUpdater.get(this).snapshot();
     if (upd.available != null) {
@@ -860,7 +890,12 @@ public final class MainActivity extends Activity {
     LinearLayout pill = Theme.row(this);
     pill.setPadding(Theme.dp(this, 11), Theme.dp(this, 5), Theme.dp(this, 10), Theme.dp(this, 5));
     pill.setBackground(Theme.roundRect(this, Theme.CARD, Theme.LINE, 999));
-    pill.addView(Theme.text(this, label, 12f, Theme.EXPLAIN, true));
+    TextView filterLabel = Theme.text(this, label, 12f, Theme.EXPLAIN, true);
+    filterLabel.setMaxWidth(Theme.dp(this, 96));
+    filterLabel.setSingleLine(true);
+    filterLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    pill.setContentDescription("Device filter, " + label);
+    pill.addView(filterLabel);
     Theme.gap(pill, 4);
     pill.addView(new Theme.IconView(this, Theme.IconView.Kind.CARET_DOWN, Theme.MUTED, 11));
     pill.setOnClickListener(this::showDevicePicker);

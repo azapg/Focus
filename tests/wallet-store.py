@@ -13,8 +13,27 @@ MOCK = r"""(() => {
     time_off_limit: 45, time_off_price_per_minute: 1, needs_upgrade: [],
   };
   const receipts = new Set();
+  window.__streak = null;
   window.__TAURI__.core.invoke = async (command, args) => {
     if (command === 'wallet_view') return structuredClone(wallet);
+    if (command === 'streak_view') {
+      const streak = window.__streak;
+      return streak && {...streak, balanceCoins: wallet.balance,
+        canBuy: !streak.freezeReady && wallet.balance >= streak.priceCoins};
+    }
+    if (command === 'streak_buy_freeze') {
+      window.__calls.push({c: command, args});
+      if (receipts.has(args.requestId)) return {status: 'already_bought'};
+      const streak = window.__streak;
+      if (!streak) return {status: 'unavailable'};
+      if (streak.freezeReady) return {status: 'slot_full'};
+      if (wallet.balance < streak.priceCoins) return {status: 'insufficient_coins'};
+      wallet.balance -= streak.priceCoins;
+      streak.freezeReady = true;
+      receipts.add(args.requestId);
+      if (window.__loseReceipt) throw Error('Response lost');
+      return {status: 'bought'};
+    }
     if (command === 'habits_view') return {
       rows: [{habit: {id: 'read', name: 'Read 10 pages', reward: 5, weekdays: 0, interval: 1,
                       time: null}, due: true, streak: 3, week: []}],
@@ -54,6 +73,7 @@ async def main(output=None):
         }""")
         await coins.click()
         await store.get_by_text("15 minutes for today").wait_for()
+        assert not await store.get_by_text("Streak Freeze").count()
         await page.locator("#panel .habit-reward").get_by_text("+5 coins", exact=True).wait_for()
         await capture_panel(page, output, "desktop-store.png")
         await page.keyboard.press("Escape")
@@ -84,8 +104,41 @@ async def main(output=None):
         await confirm.get_by_role("button", name="Confirm · 15 coins").click()
         await store.get_by_text("A new day started. Check today’s allowance before buying.").wait_for()
         assert await page.evaluate("window.__wallet.balance") == 50
+        await page.evaluate("""() => {
+            window.__streak = {freezeReady: false, priceCoins: 60};
+            window.__handlers['wallet-updated']({});
+            window.__handlers['habits-updated']({});
+        }""")
+        await page.wait_for_function("window.focusHabitCredit === 0")
+        freeze = store.get_by_role("button", name="Streak Freeze, 60 coins")
+        await freeze.wait_for()
+        assert await freeze.is_disabled()
+        await store.get_by_text("10 coins needed", exact=True).wait_for()
+        await page.evaluate("""() => {
+            window.__wallet.balance = 65;
+            window.__handlers['wallet-updated']({});
+        }""")
+        await page.get_by_role("button", name="Store, 65 coins").wait_for()
+        await capture_panel(page, output, "desktop-freeze-store.png")
+        await freeze.click()
+        confirm_freeze = page.get_by_role("dialog", name="Buy a Streak Freeze?")
+        await confirm_freeze.get_by_text("Starting the day after purchase", exact=False).wait_for()
+        await capture_panel(page, output, "desktop-freeze-confirm.png")
+        await confirm_freeze.get_by_role("button", name="Confirm · 60 coins").click()
+        await confirm_freeze.get_by_text("This purchase couldn’t be confirmed. Try confirming again.").wait_for()
+        await confirm_freeze.get_by_role("button", name="Confirm · 60 coins").click()
+        freeze_receipt = page.get_by_role("dialog", name="Freeze purchased")
+        await freeze_receipt.wait_for()
+        await page.get_by_role("button", name="Store, 5 coins").wait_for()
+        await capture_panel(page, output, "desktop-freeze-receipt.png")
+        await freeze_receipt.get_by_role("button", name="Done").click()
+        await page.get_by_role("button", name="Store, 5 coins").click()
+        await store.get_by_text("One freeze held").wait_for()
+        assert not await freeze.count()
+        freeze_requests = await page.evaluate("window.__calls.filter(c => c.c === 'streak_buy_freeze').map(c => c.args)")
+        assert len(freeze_requests) == 2 and freeze_requests[0] == freeze_requests[1]
         assert not errors, errors
-        print("PASS: desktop Store activation, keyboard dismissal, purchase, lost receipt retry, allowance and midnight.")
+        print("PASS: desktop Store activation, time-off and freeze purchases, retry, allowance, midnight and one-slot inventory.")
 
 
 if __name__ == "__main__":

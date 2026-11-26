@@ -187,6 +187,7 @@ fn handle_remote_laptop_command(
     let invalid = |_| "Invalid pause judge command".to_string();
     let action = input["action"].as_str().unwrap_or("");
     match action {
+        "streak_view" | "streak_buy_freeze" => crate::streak_runtime::remote(app, core, &input).map(Some),
         "dns_pause" => {
             let minutes = input["minutes"]
                 .as_u64()
@@ -446,6 +447,12 @@ fn build_phone_sync_payload(
         .into_iter()
         .filter(|other| other.id != phone.id && other.snapshot.is_some())
         .filter_map(|other| other.snapshot)
+        .map(|mut snapshot| {
+            if let Some(object) = snapshot.as_object_mut() {
+                object.remove("streak_coverage");
+            }
+            snapshot
+        })
         .collect();
     let mut payload = json!({
         "peer": peer,
@@ -726,6 +733,7 @@ pub fn sync_loop(
     };
     let mut network_category = None;
     let mut maintenance_day = None;
+    let mut streak_error = None;
     loop {
         focus_telemetry::DEVICE_TICK.count(1);
         let day = crate::now_ms() / 86_400_000;
@@ -755,6 +763,24 @@ pub fn sync_loop(
             }
             let _ = app.emit("devices", manager.list());
             let _ = app.emit("wallet-updated", ());
+        }
+        if let Some(server) = host.server() {
+            let result = crate::streak_runtime::tick(&core, &tracker, server, manager);
+            match result {
+                Ok(changed) => {
+                    streak_error = None;
+                    if changed {
+                        let _ = app.emit("wallet-updated", ());
+                    }
+                }
+                Err(error) => {
+                    tracker.disable_coverage();
+                    if streak_error.as_ref() != Some(&error) {
+                        core.log(&format!("streak trial: {error}"));
+                        streak_error = Some(error);
+                    }
+                }
+            }
         }
         thread::sleep(Duration::from_secs(20));
     }

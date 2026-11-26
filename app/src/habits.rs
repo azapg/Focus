@@ -229,6 +229,8 @@ pub struct Ledger {
     pub wallet_start: Option<i32>,
     #[serde(deserialize_with = "wallet::decode_entries", skip_serializing_if = "BTreeMap::is_empty")]
     wallet_entries: BTreeMap<String, WalletEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) streak_journal: Option<crate::streak_journal::Journal>,
 }
 
 #[derive(Serialize)]

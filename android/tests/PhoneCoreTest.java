@@ -21,7 +21,26 @@ public final class PhoneCoreTest {
     }
   }
 
+  private static void testScreenOffCoverage() {
+    UsageTimeline.ScreenOff screen = new UsageTimeline.ScreenOff();
+    java.util.List<String> spans = new java.util.ArrayList<>();
+    java.util.function.BiConsumer<Long, Long> record = (start, end) -> spans.add(start + ":" + end);
+    screen.event(10, 15, record);
+    screen.event(20, 16, record);
+    screen.event(100, 15, record);
+    screen.event(110, 16, record);
+    screen.event(120, 26, record);
+    screen.event(130, 27, record);
+    screen.event(140, 15, record);
+    screen.event(150, 16, record);
+    screen.event(160, 16, record);
+    screen.event(170, 15, record);
+    screen.event(180, 16, record);
+    check(spans.equals(java.util.Arrays.asList("20:100", "160:170")), "only paired screen-off events count");
+  }
+
   public static void main(String[] args) {
+    testScreenOffCoverage();
     pauseBudgetIncludesLiveUse();
     testBrowserUrlParser();
     testClassifierAndHonesty();

@@ -271,6 +271,7 @@ public final class LanController {
       Store.get(context).diagnostic("lan_command_applied");
     } else if (method.equals("POST") && path.equals("/v1/sync")) {
       JSONObject options;
+      boolean reportsStreak = false;
       try {
         JSONObject input = new JSONObject(body);
         options = input.optJSONObject("event_sync");
@@ -278,13 +279,15 @@ public final class LanController {
         JSONObject reciprocal = input.optJSONObject("reciprocal");
         JSONArray relayed = input.optJSONArray("relayed_peers");
         if (peer != null) {
+          reportsStreak = pairedManagersCount() == 1 && Store.get(context)
+              .reportsStreakTo(peer.optString("device_id"));
           DeviceHub.get(context).ingestSyncedPeer(peer, reciprocal, relayed, prefs.getString("id", ""));
         }
       } catch (JSONException e) {
         throw new LanServer.ApiError(400, "Invalid sync payload");
       }
       Store.get(context).diagnostic("lan_peer_synced");
-      String result = snapshot().toString();
+      String result = snapshot(reportsStreak).toString();
       if (options != null) {
         try {
           JSONArray page = FocusEvents.page(context, options.optString("after", ""));
@@ -297,7 +300,7 @@ public final class LanController {
     } else if (!(method.equals("GET") && path.equals("/v1/snapshot"))) {
       throw new LanServer.ApiError(404, "Unsupported device API request");
     }
-    return snapshot().toString();
+    return snapshot(false).toString();
   }
 
   static String appendEvents(String snapshot, JSONArray page) {
@@ -354,7 +357,7 @@ public final class LanController {
 
   String deviceId() { return prefs.getString("id", "phone"); }
 
-  private JSONObject snapshot() throws JSONException {
+  private JSONObject snapshot(boolean reportsStreak) throws JSONException {
     DnsController dns = DnsController.get(context);
     Store store = Store.get(context);
     dns.tick();
@@ -392,6 +395,10 @@ public final class LanController {
             .put("status", dns.status())
             .put("pause_until", deadline == 0 ? 0 : now + Math.max(0, deadline - SystemClock.elapsedRealtime())));
     result.put("apps", new JSONArray());
+    // Legacy pairing grants a manager token without a per-request device ID.
+    // Restrict trial coverage reporting to installations with one approved reader.
+    JSONObject coverage = reportsStreak ? store.streakCoverageSnapshot(now) : null;
+    if (coverage != null) result.put("streak_coverage", coverage);
     return result;
   }
 }

@@ -27,6 +27,8 @@ public final class Store extends SQLiteOpenHelper {
   private String currentBrowserDomain = "";
   public static volatile long heartbeat;
   private volatile long habitObservedFrom;
+  private long streakCoverageStartedAt;
+  private String streakAuthority = "";
 
   public long habitObservedFrom() { return habitObservedFrom; }
 
@@ -36,7 +38,7 @@ public final class Store extends SQLiteOpenHelper {
   }
 
   private Store(Context c) {
-    super(c, "focus_phone.db", null, 3);
+    super(c, "focus_phone.db", null, 4);
     context = c;
     policyPrefs = c.getSharedPreferences("focus_policy", Context.MODE_PRIVATE);
     setWriteAheadLoggingEnabled(true);
@@ -52,12 +54,14 @@ public final class Store extends SQLiteOpenHelper {
     db.execSQL("CREATE TABLE user_rules(match_type TEXT NOT NULL,value TEXT NOT NULL,app TEXT NOT NULL,category TEXT NOT NULL,PRIMARY KEY(match_type,value))");
     db.execSQL("CREATE TABLE diagnostics(at INTEGER NOT NULL,kind TEXT NOT NULL)");
     createPeekHistory(db);
+    createStreakCoverage(db);
   }
 
   @Override
   public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
     if (oldVersion < 2) addPauseFeedbackColumns(db);
     if (oldVersion < 3) createPeekHistory(db);
+    if (oldVersion < 4) createStreakCoverage(db);
   }
 
   @Override
@@ -71,6 +75,120 @@ public final class Store extends SQLiteOpenHelper {
     db.execSQL("ALTER TABLE pauses ADD COLUMN rating INTEGER");
     db.execSQL("ALTER TABLE pauses ADD COLUMN rating_note TEXT");
     db.execSQL("ALTER TABLE pauses ADD COLUMN rated_at INTEGER");
+  }
+
+  private static void createStreakCoverage(SQLiteDatabase db) {
+    db.execSQL("CREATE TABLE streak_coverage(s INTEGER PRIMARY KEY,e INTEGER NOT NULL,CHECK(e>s))");
+    db.execSQL("CREATE INDEX streak_coverage_end ON streak_coverage(e)");
+  }
+
+  synchronized void loadStreakCoverageOptIn() {
+    String authority = StreakAuthority.trialAuthority(context);
+    long previous = policyPrefs.getLong("streak_trial_since", 0);
+    String previousAuthority = policyPrefs.getString("streak_trial_authority", "");
+    long next = authority.isEmpty() ? 0
+        : (authority.equals(previousAuthority) && previous > 0 ? previous : System.currentTimeMillis());
+    if (next != previous || !authority.equals(previousAuthority)) {
+      policyPrefs.edit().putLong("streak_trial_since", next)
+          .putString("streak_trial_authority", authority).apply();
+    }
+    streakAuthority = authority;
+    if (next != streakCoverageStartedAt) {
+      streakCoverageStartedAt = next;
+      clearTimeline();
+    }
+  }
+
+  synchronized String streakAuthority() { return streakAuthority; }
+
+  synchronized boolean reportsStreakTo(String authority) {
+    return !streakAuthority.isEmpty() && streakAuthority.equals(authority);
+  }
+
+  synchronized List<long[]> streakCoverage(long from, long to) {
+    from = Math.max(from, streakCoverageStartedAt);
+    if (streakCoverageStartedAt == 0 || to <= from) return Collections.emptyList();
+    SQLiteDatabase db = getWritableDatabase();
+    backfillScreenOff(db, from, to);
+    List<long[]> result = new ArrayList<>();
+    try (Cursor rows = db.rawQuery(
+        "SELECT s,e FROM streak_coverage WHERE e>? AND s<? ORDER BY s",
+        new String[] {String.valueOf(from), String.valueOf(to)})) {
+      while (rows.moveToNext()) {
+        result.add(new long[] {Math.max(from, rows.getLong(0)), Math.min(to, rows.getLong(1))});
+      }
+    }
+    return result;
+  }
+
+  synchronized JSONObject streakCoverageSnapshot(long now) throws JSONException {
+    if (streakCoverageStartedAt == 0 || !usageAllowed()) return null;
+    long start = now - 3 * 86_400_000L;
+    JSONArray spans = new JSONArray();
+    long left = -1;
+    long right = -1;
+    int maxIntervals = 1024;
+    for (long[] observed : streakCoverage(start, now)) {
+      if (left >= 0 && observed[0] <= right) {
+        right = Math.max(right, observed[1]);
+      } else {
+        if (left >= 0) spans.put(new JSONArray().put(left).put(right));
+        if (spans.length() >= maxIntervals) break;
+        left = observed[0];
+        right = observed[1];
+      }
+    }
+    if (left >= 0 && spans.length() < maxIntervals) {
+      spans.put(new JSONArray().put(left).put(right));
+    }
+    return new JSONObject().put("version", 1).put("intervals", spans);
+  }
+
+  private void backfillScreenOff(SQLiteDatabase db, long from, long to) {
+    if (!usageAllowed()) return;
+    UsageStatsManager usage = context.getSystemService(UsageStatsManager.class);
+    if (usage == null) return;
+    long margin = 36L * 60 * 60 * 1_000;
+    long until = Math.min(System.currentTimeMillis(), to + margin);
+    if (until <= from || until - from > 4 * margin) return;
+    UsageEvents events = usage.queryEvents(Math.max(0, from - margin), until);
+    if (events == null) return;
+    UsageTimeline.ScreenOff screen = new UsageTimeline.ScreenOff();
+    UsageEvents.Event event = new UsageEvents.Event();
+    db.beginTransaction();
+    try {
+      while (events.hasNextEvent()) {
+        events.getNextEvent(event);
+        screen.event(event.getTimeStamp(), event.getEventType(), (off, on) -> {
+          long start = Math.max(off, from);
+          long end = Math.min(on, to);
+          if (end > start) {
+            db.execSQL("INSERT INTO streak_coverage(s,e) VALUES(?,?) "
+                + "ON CONFLICT(s) DO UPDATE SET e=max(e,excluded.e)", new Object[] {start, end});
+          }
+        });
+      }
+      db.setTransactionSuccessful();
+    } finally {
+      db.endTransaction();
+    }
+  }
+
+  private static void recordStreakCoverage(SQLiteDatabase db, long from, long to) {
+    if (to <= from) return;
+    try (Cursor last = db.rawQuery("SELECT s,e FROM streak_coverage ORDER BY s DESC LIMIT 1", null)) {
+      if (last.moveToFirst() && last.getLong(1) == from && to - last.getLong(0) <= 60_000) {
+        ContentValues end = new ContentValues();
+        end.put("e", to);
+        db.update("streak_coverage", end, "s=?", new String[] {String.valueOf(last.getLong(0))});
+        return;
+      }
+    }
+    ContentValues interval = new ContentValues();
+    interval.put("s", from);
+    interval.put("e", to);
+    db.insertWithOnConflict("streak_coverage", null, interval, SQLiteDatabase.CONFLICT_IGNORE);
+    db.delete("streak_coverage", "e<?", new String[] {String.valueOf(to - 90 * 86_400_000L)});
   }
 
   private static void createPeekHistory(SQLiteDatabase db) {
@@ -171,6 +289,7 @@ public final class Store extends SQLiteOpenHelper {
     if (um != null && !um.isUserUnlocked()) {
       foreground = "";
       health("user_locked");
+      if (streakCoverageStartedAt != 0) clearTimeline();
       return;
     }
     long sampledElapsed = SystemClock.elapsedRealtime();
@@ -178,9 +297,14 @@ public final class Store extends SQLiteOpenHelper {
     int boot = boot();
     SQLiteDatabase db = getWritableDatabase();
     UsageTimeline t;
+    boolean continuous = false;
     try (Cursor r = db.rawQuery("SELECT cursor,pkg,cls,domain,interactive,boot FROM tracker WHERE id=1", null)) {
       boolean has = r.moveToFirst();
       if (has && r.getInt(5) == boot && r.getLong(0) <= now && now - r.getLong(0) <= 30_000) {
+        long elapsedGap = sampledElapsed - heartbeat;
+        long wallGap = now - r.getLong(0);
+        continuous = boot >= 0 && heartbeat > 0 && elapsedGap >= 0 && elapsedGap <= 30_000
+            && Math.abs(wallGap - elapsedGap) <= 1_000;
         t = new UsageTimeline(r.getLong(0), r.getInt(4) != 0);
         t.pkg = r.getString(1);
         t.cls = r.getString(2);
@@ -193,6 +317,7 @@ public final class Store extends SQLiteOpenHelper {
     UsageStatsManager usm = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
     UsageEvents events = usm == null ? null : usm.queryEvents(Math.max(0, t.cursor - 60_000), now);
     if (events == null) {
+      if (streakCoverageStartedAt != 0) clearTimeline();
       health("usage_unavailable");
       foreground = "";
       return;
@@ -251,6 +376,9 @@ public final class Store extends SQLiteOpenHelper {
       v.put("interactive", t.interactive ? 1 : 0);
       v.put("boot", boot);
       db.insertWithOnConflict("tracker", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+      if (streakCoverageStartedAt != 0 && continuous) {
+        recordStreakCoverage(db, checkpoint, now);
+      }
       db.delete("spans", "e<?", new String[] {String.valueOf(now - 90 * 86_400_000L)});
       db.setTransactionSuccessful();
     } finally {
