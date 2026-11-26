@@ -1,8 +1,8 @@
 # Clean streak trial
 
-The native trial is off by default. It needs an active wallet and an explicit
-opt-in on the Windows authority and on each enrolled Android phone. Use a
-disposable profile with fictional activity.
+The native trial is off by default. It needs an explicit opt-in on the Windows
+authority and on each enrolled Android phone. Use a disposable profile with
+fictional activity for testing.
 
 - On each Android phone, place a file named `streak-trial` containing the paired Windows laptop ID in Focus's
   private files directory and restart its monitor. Only a phone with one
@@ -12,8 +12,9 @@ disposable profile with fictional activity.
   a desktop-only trial. Enrollment waits for each selected phone to connect
   and report its opt-in.
 - The laptop is the one authority. Enrollment fixes the reporter IDs and
-  the laptop's current calendar timezone. Coverage and streaks start with
-  the next calendar day. If those settings change, finalization stops.
+  the laptop's current calendar timezone. Streak days and a previously dormant
+  wallet start on the next calendar day. The wallet start syncs to paired devices.
+  If the enrollment or timezone changes, finalization stops.
 - Remove the Windows file to stop the trial. Remove the Android marker and
   restart the monitor to stop sending phone coverage.
 
