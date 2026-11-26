@@ -15,7 +15,7 @@ pub const FOCUS_GLANCE_MS: u64 = 45_000;
 pub const FOCUS_AWAY_MS: u64 = 2 * 60_000;
 pub const TRIAL_COINS_PER_MILESTONE: i32 = 5;
 pub const TRIAL_MILESTONE_MS: u64 = 30 * 60_000;
-pub const TRIAL_MAX_MILESTONES: u32 = 4;
+pub const TRIAL_MAX_MILESTONES: u32 = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FocusCategory {
@@ -545,7 +545,7 @@ mod tests {
             day_start_ms: 1_795_564_800_000,
             day_end_ms: 1_795_651_200_000,
             complete: true,
-            union_focus_ms: 135 * MIN, // 4.5 blocks -> capped at 4 milestones = 20 coins
+            union_focus_ms: 375 * MIN, // 12.5 blocks -> capped at 12 milestones = 60 coins
             at_ms: 1_795_651_205_000,
         };
 
@@ -570,39 +570,39 @@ mod tests {
         assert!(award_finalized_day(&mut ledger, &bad_date, &rate).is_err());
         assert_eq!(ledger.balance(), 0);
 
-        // 4. Complete finalized day mints focus:2026-11-25:1..4 atomically (20 coins).
+        // 4. Complete finalized day mints focus:2026-11-25:1..12 atomically (60 coins).
         let awarded = award_finalized_day(&mut ledger, &base_day, &rate).unwrap();
         assert_eq!(awarded.status, AwardStatus::Awarded);
-        assert_eq!(awarded.milestones_awarded, 4);
-        assert_eq!(awarded.coins_awarded, 20);
-        assert_eq!(ledger.balance(), 20);
-        assert_eq!(focus_coins_for_day(&ledger, DAY_2026_11_25), 20);
+        assert_eq!(awarded.milestones_awarded, 12);
+        assert_eq!(awarded.coins_awarded, 60);
+        assert_eq!(ledger.balance(), 60);
+        assert_eq!(focus_coins_for_day(&ledger, DAY_2026_11_25), 60);
 
         let entries = ledger.entries(FOCUS_KIND, DAY_2026_11_25, DAY_2026_11_25);
-        assert_eq!(entries.len(), 4);
-        assert_eq!(entries[0].id, "focus:2026-11-25:1");
-        assert_eq!(entries[3].id, "focus:2026-11-25:4");
+        assert_eq!(entries.len(), 12);
+        assert!(entries.iter().any(|e| e.id == "focus:2026-11-25:1"));
+        assert!(entries.iter().any(|e| e.id == "focus:2026-11-25:12"));
         assert!(entries.iter().all(|e| e.reference == "focus:2026-11-25" && e.amount == 5));
 
         // 5. Retry is idempotent (AlreadyAwarded, 0 new coins).
         let retry = award_finalized_day(&mut ledger, &base_day, &rate).unwrap();
         assert_eq!(retry.status, AwardStatus::AlreadyAwarded);
         assert_eq!(retry.milestones_awarded, 0);
-        assert_eq!(retry.already_present, 4);
-        assert_eq!(ledger.balance(), 20);
+        assert_eq!(retry.already_present, 12);
+        assert_eq!(ledger.balance(), 60);
 
         // 6. Sync merge with another peer awarding the same day does not double-count.
         let mut peer = Ledger::default();
         peer.start_wallet(DAY_2026_11_25 - 1).unwrap();
         award_finalized_day(&mut peer, &base_day, &rate).unwrap();
         ledger.merge(peer);
-        assert_eq!(ledger.balance(), 20);
-        assert_eq!(focus_coins_for_day(&ledger, DAY_2026_11_25), 20);
+        assert_eq!(ledger.balance(), 60);
+        assert_eq!(focus_coins_for_day(&ledger, DAY_2026_11_25), 60);
 
         // 7. Reversing one milestone reduces active focus coins for that day.
         assert!(ledger
-            .reverse("focus:2026-11-25:4", base_day.at_ms + 1_000, DAY_2026_11_25)
+            .reverse("focus:2026-11-25:12", base_day.at_ms + 1_000, DAY_2026_11_25)
             .unwrap());
-        assert_eq!(focus_coins_for_day(&ledger, DAY_2026_11_25), 15);
+        assert_eq!(focus_coins_for_day(&ledger, DAY_2026_11_25), 55);
     }
 }

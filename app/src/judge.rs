@@ -36,6 +36,7 @@ pub struct Request {
 #[serde(rename_all = "snake_case")]
 pub enum Action {
     AllowServices,
+    AllowDomains,
     FullPause,
     Peek,
     CounterOffer,
@@ -46,6 +47,8 @@ pub enum Action {
 pub struct Decision {
     pub action: Action,
     pub services: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub domains: Vec<String>,
     pub minutes: u64,
     pub message: String,
     pub counter_offer: Option<String>,
@@ -249,18 +252,83 @@ pub fn summary_text(text: &str) -> String {
     .into_owned()
 }
 
+pub const ENTERTAINMENT_DOMAINS: &[&str] = &[
+    "x.com",
+    "twitter.com",
+    "twimg.com",
+    "youtube.com",
+    "youtu.be",
+    "googlevideo.com",
+    "ytimg.com",
+    "instagram.com",
+    "cdninstagram.com",
+    "tiktok.com",
+    "reddit.com",
+    "redd.it",
+    "twitch.tv",
+    "facebook.com",
+    "fbcdn.net",
+    "netflix.com",
+    "threads.net",
+    "bsky.app",
+    "primevideo.com",
+    "disneyplus.com",
+    "kick.com",
+    "vimeo.com",
+    "dailymotion.com",
+    "9gag.com",
+    "pinterest.com",
+];
+
+pub fn is_entertainment_domain(host: &str) -> bool {
+    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    ENTERTAINMENT_DOMAINS.iter().any(|blocked| {
+        host == *blocked
+            || host
+                .strip_suffix(blocked)
+                .is_some_and(|prefix| prefix.ends_with('.'))
+    })
+}
+
+/// Extract validated domain names mentioned in the user's request text (links or bare hostnames).
+pub fn named_domains(text: &str) -> Vec<String> {
+    let mut found = BTreeSet::new();
+    for m in LINK.find_iter(text) {
+        let link = m.as_str().trim_end_matches(['.', ',', ')', '!', ';', '?', '"', '\'']);
+        if let Some(host) = link_host(link) {
+            found.insert(host);
+        }
+    }
+    for token in text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-'))) {
+        let host = token.trim_matches('.').to_ascii_lowercase();
+        if valid_domain(&host) {
+            found.insert(host);
+        }
+    }
+    found.into_iter().collect()
+}
+
 pub fn peek_target(text: &str) -> Option<String> {
-    LINK.find_iter(text).find_map(|m| {
+    let mut targets = Vec::new();
+    for m in LINK.find_iter(text) {
         let link = m.as_str().trim_end_matches(['.', ',', ')', '!', ';']);
         let lower = link.to_ascii_lowercase();
         if (lower.starts_with("https://") || lower.starts_with("http://"))
             && link_host(link).is_some()
         {
-            Some(link.to_string())
-        } else {
-            None
+            targets.push(link.to_string());
         }
-    })
+    }
+    // Prefer an explicit social post permalink when multiple links appear (e.g. video CDN + status URL).
+    targets
+        .iter()
+        .find(|link| {
+            let lower = link.to_ascii_lowercase();
+            (lower.contains("x.com/") || lower.contains("twitter.com/")) && lower.contains("/status/")
+                || lower.contains("facebook.com/") && (lower.contains("/posts/") || lower.contains("/permalink") || lower.contains("story_fbid="))
+        })
+        .cloned()
+        .or_else(|| targets.into_iter().next())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -308,11 +376,15 @@ impl AttemptFailure {
 struct Sample {
     action: Action,
     services: Vec<String>,
+    #[serde(default)]
+    domains: Vec<String>,
     minutes: i128,
     message: String,
     #[serde(deserialize_with = "Deserialize::deserialize")]
     counter_offer: Option<String>,
 }
+
+const TASK_SCOPED_MAX_MINUTES: u64 = 10;
 
 impl Sample {
     fn validate(
@@ -320,11 +392,13 @@ impl Sample {
         catalog: &Catalog,
         policy: Policy,
         has_peek_target: bool,
+        allowed_domains: &BTreeSet<String>,
     ) -> Result<Decision, AttemptFailure> {
         use AttemptFailure::*;
         let mut decision = Decision {
             action: self.action,
             services: self.services,
+            domains: self.domains,
             minutes: 0,
             message: self.message,
             counter_offer: self.counter_offer,
@@ -343,29 +417,57 @@ impl Sample {
             if catalog.domains(&decision.services).is_err() {
                 return Err(ServicesUnknown);
             }
+            decision.domains.clear();
+        } else if decision.action == Action::AllowDomains {
+            decision.services.clear();
+            let mut normalized = Vec::new();
+            for raw in decision.domains.drain(..) {
+                let host = raw.trim().trim_end_matches('.').to_ascii_lowercase();
+                let host = host.strip_prefix("*.").unwrap_or(&host).to_owned();
+                if !valid_domain(&host)
+                    || is_entertainment_domain(&host)
+                    || !allowed_domains.contains(&host)
+                {
+                    return Err(ServicesUnknown);
+                }
+                if seen.insert(host.clone()) {
+                    normalized.push(host);
+                }
+            }
+            if normalized.is_empty() {
+                return Err(ServicesEmpty);
+            }
+            if normalized.len() > MAX_SERVICES {
+                return Err(ServicesTooMany);
+            }
+            decision.domains = normalized;
         } else {
             decision.services.clear();
+            decision.domains.clear();
         }
         if decision.action == Action::Peek && !has_peek_target {
             return Err(PeekWithoutTarget);
         }
 
-        if matches!(decision.action, Action::AllowServices | Action::FullPause) {
+        if matches!(
+            decision.action,
+            Action::AllowServices | Action::AllowDomains | Action::FullPause
+        ) {
             if self.minutes <= 0 {
                 return Err(MinutesMismatch);
             }
-            decision.minutes = u64::try_from(self.minutes)
-                .unwrap_or(u64::MAX)
-                .min(policy.cap());
-            if decision.action == Action::FullPause {
-                decision.minutes = decision.minutes.min(MODEL_FULL_PAUSE_MAX_MINUTES);
-            }
+            let cap = match decision.action {
+                Action::AllowServices | Action::AllowDomains => TASK_SCOPED_MAX_MINUTES,
+                Action::FullPause => policy.cap().min(MODEL_FULL_PAUSE_MAX_MINUTES),
+                _ => 0,
+            };
+            decision.minutes = u64::try_from(self.minutes).unwrap_or(u64::MAX).min(cap);
         }
 
         decision.message = decision.message.trim().chars().take(500).collect();
         if decision.message.is_empty() {
             decision.message = match decision.action {
-                Action::AllowServices => "Scoped pause suggested.",
+                Action::AllowServices | Action::AllowDomains => "Scoped access suggested.",
                 Action::FullPause => "Full pause suggested.",
                 Action::Peek => "Peek suggested.",
                 Action::CounterOffer | Action::Deny => "Pause declined.",
@@ -541,14 +643,24 @@ impl Gateway {
         catalog: &Catalog,
         policy: Policy,
         has_peek_target: bool,
+        allowed_domains: &BTreeSet<String>,
         budget: Duration,
         attempts: &mut Vec<Attempt>,
     ) -> Result<Decision, Failure> {
         let mut actions = vec!["allow_services", "full_pause", "counter_offer", "deny"];
+        if !allowed_domains.is_empty() {
+            actions.push("allow_domains");
+        }
         if has_peek_target {
             actions.push("peek");
         }
-        let mut body = json!({
+        let domain_list: Vec<&str> = allowed_domains.iter().map(String::as_str).collect();
+        let domains_schema = if domain_list.is_empty() {
+            json!({ "type": "array", "items": { "type": "string" }, "description": "Always empty." })
+        } else {
+            json!({ "type": "array", "items": { "type": "string", "enum": domain_list }, "description": "One to three verified non-entertainment domains for allow_domains. Empty for other actions." })
+        };
+        let body = json!({
             "model": model,
             "stream": false,
             "messages": [
@@ -565,19 +677,17 @@ impl Gateway {
                         "properties": {
                             "action": { "type": "string", "enum": actions, "description": "The proposed response to the request." },
                             "services": { "type": "array", "items": { "type": "string", "enum": catalog.services() }, "description": "One to three distinct services for allow_services. Empty for other actions." },
-                            "minutes": { "type": "integer", "description": "Positive for allow_services or full_pause. Zero for other actions." },
+                            "domains": domains_schema,
+                            "minutes": { "type": "integer", "description": "Positive for allow_services, allow_domains, or full_pause. Zero for other actions." },
                             "message": { "type": "string", "description": "A short explanation of the proposal." },
                             "counter_offer": { "type": ["string", "null"], "description": "One concrete next step for counter_offer. Null for other actions." }
                         },
-                        "required": ["action", "services", "minutes", "message", "counter_offer"],
+                        "required": ["action", "services", "domains", "minutes", "message", "counter_offer"],
                         "additionalProperties": false
                     }
                 }
             }
         });
-        if matches!(model, DEFAULT_MODEL | LUNA_MODEL) {
-            body["reasoning_effort"] = json!("none");
-        }
         let runtime = RUNTIME.as_ref().map_err(|failure| *failure)?;
         let validate = |bytes: &[u8]| {
             let response: Value =
@@ -599,7 +709,7 @@ impl Gateway {
                 .ok_or(AttemptFailure::NotText)?;
             let decision: Sample =
                 serde_json::from_str(content).map_err(|_| AttemptFailure::Parse)?;
-            decision.validate(catalog, policy, has_peek_target)
+            decision.validate(catalog, policy, has_peek_target, allowed_domains)
         };
         runtime.block_on(self.run(key, &body, budget, attempts, validate))
     }
@@ -806,7 +916,7 @@ mod tests {
     }
 
     fn output(action: &str, services: Value, minutes: Value) -> Value {
-        json!({ "action": action, "services": services, "minutes": minutes, "message": "For your task", "counter_offer": null })
+        json!({ "action": action, "services": services, "domains": [], "minutes": minutes, "message": "For your task", "counter_offer": null })
     }
 
     fn completion(value: &Value) -> Value {
@@ -816,6 +926,17 @@ mod tests {
     fn call(
         replies: Vec<Reply>,
         policy: Policy,
+        timeout: Duration,
+        hedge: Duration,
+        budget: Duration,
+    ) -> (Result<Decision, Failure>, Vec<Attempt>, Duration) {
+        call_with_domains(replies, policy, &BTreeSet::new(), timeout, hedge, budget)
+    }
+
+    fn call_with_domains(
+        replies: Vec<Reply>,
+        policy: Policy,
+        allowed_domains: &BTreeSet<String>,
         timeout: Duration,
         hedge: Duration,
         budget: Duration,
@@ -833,6 +954,7 @@ mod tests {
             &catalog,
             policy,
             false,
+            allowed_domains,
             budget,
             &mut attempts,
         );
@@ -843,7 +965,7 @@ mod tests {
         assert_eq!(request.line, "POST /v1/chat/completions HTTP/1.1");
         assert_eq!(request.body["messages"][0]["content"], PROMPT);
         assert_eq!(request.body["model"], DEFAULT_MODEL);
-        assert_eq!(request.body["reasoning_effort"], "none");
+        assert!(request.body.get("reasoning_effort").is_none());
         assert_eq!(request.body["response_format"]["type"], "json_schema");
         assert!(
             request.body["response_format"]["json_schema"]["schema"]["properties"]["services"]
@@ -878,7 +1000,7 @@ mod tests {
     #[test]
     fn clamps_gateway_decisions_to_device_and_shared_daily_limits() {
         for (action, services, expected) in [
-            ("allow_services", json!(["discord"]), [10, 3, 1]),
+            ("allow_services", json!(["discord"]), [10, 10, 10]),
             ("full_pause", json!([]), [5, 3, 1]),
         ] {
             for (used, expected) in [0, 57, 61].into_iter().zip(expected) {
@@ -894,10 +1016,11 @@ mod tests {
     #[test]
     fn normalization_preserves_or_reduces_access() {
         let catalog = Catalog::parse(include_str!("services.json")).unwrap();
+        let empty = BTreeSet::new();
         let normalize = |value: Value| {
             serde_json::from_str::<Sample>(&value.to_string())
                 .unwrap()
-                .validate(&catalog, policy(0), true)
+                .validate(&catalog, policy(0), true, &empty)
                 .unwrap()
         };
         let mut scoped = output(
@@ -937,12 +1060,49 @@ mod tests {
     }
 
     #[test]
+    fn allow_domains_only_permits_verified_non_entertainment_domains() {
+        let catalog = Catalog::parse(include_str!("services.json")).unwrap();
+        let allowed = BTreeSet::from(["acme-portal.dev".to_owned(), "x.com".to_owned()]);
+        let valid = json!({
+            "action": "allow_domains",
+            "services": [],
+            "domains": ["acme-portal.dev"],
+            "minutes": 10,
+            "message": "Opening acme-portal.dev for 10 min.",
+            "counter_offer": null
+        });
+        let decision = serde_json::from_value::<Sample>(valid)
+            .unwrap()
+            .validate(&catalog, policy(0), false, &allowed)
+            .unwrap();
+        assert_eq!(decision.action, Action::AllowDomains);
+        assert_eq!(decision.domains, ["acme-portal.dev"]);
+        assert_eq!(decision.minutes, 10);
+
+        let entertainment = json!({
+            "action": "allow_domains",
+            "services": [],
+            "domains": ["x.com"],
+            "minutes": 5,
+            "message": "Opening x.com.",
+            "counter_offer": null
+        });
+        assert_eq!(
+            serde_json::from_value::<Sample>(entertainment)
+                .unwrap()
+                .validate(&catalog, policy(0), false, &allowed)
+                .unwrap_err(),
+            AttemptFailure::ServicesUnknown
+        );
+    }
+
+    #[test]
     fn unsafe_or_unusable_replies_fail_closed_with_specific_reasons() {
         use AttemptFailure::*;
         let mut missing = output("deny", json!([]), json!(0));
         missing.as_object_mut().unwrap().remove("counter_offer");
         let mut extra = output("deny", json!([]), json!(0));
-        extra["domains"] = json!(["x.com"]);
+        extra["unexpected_field"] = json!(["x.com"]);
         let mut blank = output("counter_offer", json!([]), json!(0));
         blank["counter_offer"] = json!("  ");
         for (sample, reason) in [

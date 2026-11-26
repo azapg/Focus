@@ -9,7 +9,8 @@ const REVERSAL: &str = "reversal";
 const REVERSE_PREFIX: &str = "reverse:";
 const TIME_PREFIX: &str = "time:";
 const MAX_TIME_OFF: u16 = 60;
-pub const TIME_OFF_PRICE_PER_MINUTE: i32 = 1;
+pub const DEFAULT_FREE_TIME_CAP: u16 = 15;
+pub const TIME_OFF_PRICE_PER_MINUTE: i32 = 3;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WalletEntry {
@@ -193,9 +194,17 @@ impl Ledger {
             .sum()
     }
 
+    pub fn time_off_limit(&self, day: i32) -> u16 {
+        if self.cap.is_none() && self.cap_edits.is_empty() {
+            DEFAULT_FREE_TIME_CAP
+        } else {
+            self.cap_on(day)
+        }
+    }
+
     /// Offline peers can exceed the cap together. Keep every accepted purchase.
     pub fn time_off_limit_remaining(&self, day: i32) -> u16 {
-        (i64::from(self.cap_on(day)) - self.time_off_bought(day)).max(0) as u16
+        (i64::from(self.time_off_limit(day)) - self.time_off_bought(day)).max(0) as u16
     }
 
     pub fn extra_pause_minutes(&self, day: i32) -> i32 {

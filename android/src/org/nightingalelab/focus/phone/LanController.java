@@ -340,6 +340,12 @@ public final class LanController {
         dns.pause(mins * 60_000L, reason, input.optString("after_plan", ""), checkIn);
         break;
       }
+      case "start_free_time": {
+        int mins = input.getInt("minutes");
+        if (mins < 1 || mins > 30) throw new IllegalArgumentException("Invalid free time duration");
+        dns.startFreeTime(mins, input.optString("request_id", ""));
+        break;
+      }
       case "dns_resume":
         if (!dns.enabled()) throw new IllegalStateException("Connect a NextDNS profile first");
         dns.resume();

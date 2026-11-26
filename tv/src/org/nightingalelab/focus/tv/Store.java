@@ -442,21 +442,42 @@ public final class Store extends SQLiteOpenHelper {
         new String[] {"" + now, "" + from})) {
       while (r.moveToNext()) {
         String pkg = r.getString(0);
-        pauses.put(new JSONObject().put("package", pkg).put("kind", DnsController.KEY.equals(pkg) ? "dns" : "app")
+        String reason = r.getString(3);
+        boolean freeTime = reason != null && reason.startsWith("Store free time");
+        String kind = freeTime ? "free_time" : (DnsController.KEY.equals(pkg) ? "dns" : "app");
+        pauses.put(new JSONObject().put("package", pkg).put("kind", kind)
+            .put("free_time", freeTime)
             .put("t", r.getLong(1)).put("end", r.isNull(4) ? now : r.getLong(4))
             .put("minutes", Math.round((r.getLong(2) - r.getLong(1)) / 60000.0))
-            .put("reason", r.getString(3)).put("check_in", r.getString(6))
+            .put("reason", reason).put("check_in", r.getString(6))
             .put("end_kind", r.isNull(5) ? JSONObject.NULL : r.getString(5)));
       }
     }
     return root.put("spans", spans).put("pauses", pauses);
   }
 
+  public synchronized boolean hasAnyRules() {
+    try (Cursor r = getReadableDatabase().rawQuery("SELECT COUNT(*) FROM rules WHERE blocked=1 OR limit_ms>0 OR scheduled=1", null)) {
+      return r.moveToFirst() && r.getInt(0) > 0;
+    }
+  }
+
+  public synchronized void ensureDefaultYouTubeBlock() {
+    if (hasAnyRules()) return;
+    for (String yt : new String[] {"com.google.android.youtube.tv", "com.google.android.youtube.tvmusic"}) {
+      if (AppCatalog.allowed(context, yt)) {
+        Rules rule = rule(yt);
+        rule.blocked = true;
+        saveRule(yt, rule);
+      }
+    }
+  }
+
   public synchronized JSONObject exportHistory() throws JSONException {
     JSONObject root = new JSONObject();
     root.put("version", 1);
     root.put("device", "tv");
-    root.put("scope", "household");
+    root.put("scope", "personal");
     root.put("exportedAt", System.currentTimeMillis());
     JSONArray spans = new JSONArray();
     try (Cursor r = getReadableDatabase().rawQuery("SELECT s,e,pkg FROM spans ORDER BY s", null)) {

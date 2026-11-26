@@ -401,17 +401,17 @@ fn wallet_cutover_uses_qualified_habits_and_undo_can_create_debt() {
     relayed.merge(wallet.clone());
     assert_eq!(relayed.balance(), 15);
     assert_eq!(
-        relayed.buy_time_off("first", 15, at, day),
+        relayed.buy_time_off("first", 5, at, day),
         Ok(super::Purchase::Bought)
     );
     assert_eq!(
-        relayed.buy_time_off_for_day("first", 15, at, day + 1, Some(day)),
+        relayed.buy_time_off_for_day("first", 5, at, day + 1, Some(day)),
         Ok(super::Purchase::AlreadyBought)
     );
     assert!(relayed
         .buy_time_off_for_day("second", 1, at, day + 1, Some(day))
         .is_err());
-    assert_eq!(relayed.extra_pause_minutes(day), 15);
+    assert_eq!(relayed.extra_pause_minutes(day), 5);
     assert_eq!(relayed.extra_pause_minutes(day + 1), 0);
 
     let mut undo = event("undo", "walk", day, day);
@@ -425,9 +425,9 @@ fn wallet_cutover_uses_qualified_habits_and_undo_can_create_debt() {
     assert_eq!(relayed.balance(), -15);
     assert_eq!(
         relayed.buy_time_off("second", 5, at, day),
-        Ok(super::Purchase::NotEnough { missing: 20 })
+        Ok(super::Purchase::NotEnough { missing: 30 })
     );
-    assert_eq!(relayed.time_off_bought(day), 15);
+    assert_eq!(relayed.time_off_bought(day), 5);
 }
 
 #[test]
@@ -446,10 +446,10 @@ fn wallet_merge_keeps_offline_purchases_and_converges_with_reversals() {
         Ok(false)
     );
     let mut laptop = phone.clone();
-    assert_eq!(phone.buy_time_off("phone", 30, at, day), Ok(Bought));
-    assert_eq!(laptop.buy_time_off("laptop", 30, at, day), Ok(Bought));
+    assert_eq!(phone.buy_time_off("phone", 10, at, day), Ok(Bought));
+    assert_eq!(laptop.buy_time_off("laptop", 10, at, day), Ok(Bought));
     assert_eq!(
-        laptop.buy_time_off("over-cap", 20, at, day),
+        laptop.buy_time_off("over-cap", 10, at, day),
         Ok(LimitReached)
     );
 
@@ -458,11 +458,11 @@ fn wallet_merge_keeps_offline_purchases_and_converges_with_reversals() {
     laptop.merge(original_phone);
     assert_eq!(phone, laptop);
     assert_eq!(phone.balance(), -20);
-    assert_eq!(phone.time_off_bought(day), 60);
+    assert_eq!(phone.time_off_bought(day), 20);
     assert_eq!(phone.buy_time_off("next", 1, at, day), Ok(LimitReached));
     assert_eq!(
         phone.buy_time_off("next", 1, at, day + 1),
-        Ok(NotEnough { missing: 21 })
+        Ok(NotEnough { missing: 23 })
     );
 
     phone.earn("fund", "future_kind", 200, "", at, day).unwrap();

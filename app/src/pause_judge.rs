@@ -564,6 +564,17 @@ fn judge_using_gateway<'a>(
     let saved = lock_before(&core.saved, deadline)?.clone();
     let recent = Recent::read(core, &saved, devices);
 
+    let (today_day, today_minute) = focus_dns::habits::local_clock(recent.now);
+    let (habits_due, wallet_balance_coins) = {
+        let ledger = core.habits.read();
+        let due = ledger
+            .status(today_day, today_minute)
+            .into_iter()
+            .filter(|row| row.due)
+            .count();
+        (due, ledger.balance())
+    };
+
     let config = Settings::load(&core.dir);
     let model = config
         .as_ref()
@@ -576,6 +587,57 @@ fn judge_using_gateway<'a>(
         let key = settings.gateway_key()?;
         cause = "gateway_invalid_reply";
         let catalog = Catalog::load(&core.dir).map_err(|_| Failure::Configuration)?;
+
+        // Check NextDNS recent block logs when the user names an ordinary non-catalog domain
+        // (such as a newly registered work site on a call), so Ask can verify and scope only that domain.
+        let named: Vec<String> = judge::named_domains(&request.text)
+            .into_iter()
+            .filter(|host| {
+                !judge::is_entertainment_domain(host) && catalog.matching_services(host).is_empty()
+            })
+            .collect();
+        let mut allowed_domains = std::collections::BTreeSet::new();
+        let mut dns_check = None;
+        if !named.is_empty() {
+            let blocks = if !core.dry {
+                core.dns_profile()
+                    .and_then(|profile| settings.nextdns_key().ok().map(|k| (profile, k)))
+                    .and_then(|(profile, k)| NextDns::new(profile, k).ok())
+                    .and_then(|api| api.observed(core.event_log(), Some(&trace)).recent_blocks(15).ok())
+            } else {
+                None
+            };
+            let mut checks = Vec::new();
+            for host in &named {
+                let matched = blocks.as_ref().and_then(|list| {
+                    list.iter().find(|entry| {
+                        entry.domain == *host
+                            || entry.domain.ends_with(&format!(".{host}"))
+                            || host.ends_with(&format!(".{}", entry.domain))
+                    })
+                });
+                let is_threat = matched.is_some_and(|m| m.is_security_threat);
+                if !is_threat {
+                    allowed_domains.insert(host.clone());
+                }
+                checks.push(json!({
+                    "domain": host,
+                    "blocked_recently": matched.is_some(),
+                    "reasons": matched.map_or_else(Vec::new, |m| m.reasons.clone()),
+                    "is_security_threat": is_threat,
+                    "is_entertainment": false,
+                }));
+            }
+            if !checks.is_empty() {
+                dns_check = Some(json!(checks));
+            }
+        }
+
+        let meta = judge_context::ContextMeta {
+            habits_due,
+            wallet_balance_coins,
+            dns_check,
+        };
         let context = judge_context::build(
             &request,
             recent.now,
@@ -585,6 +647,7 @@ fn judge_using_gateway<'a>(
             tracker,
             &catalog,
             peek_target.is_some(),
+            &meta,
         );
         let decision = gateway()?.decide(
             &key,
@@ -593,13 +656,18 @@ fn judge_using_gateway<'a>(
             &catalog,
             recent.policy,
             peek_target.is_some(),
+            &allowed_domains,
             deadline.saturating_duration_since(Instant::now())
                 .saturating_sub(judge::decision_commit_margin()),
             &mut attempts,
         )?;
-        let domains = catalog
-            .domains(&decision.services)
-            .map_err(|_| Failure::Invalid)?;
+        let domains = match decision.action {
+            Action::AllowServices => catalog
+                .domains(&decision.services)
+                .map_err(|_| Failure::Invalid)?,
+            Action::AllowDomains => decision.domains.clone(),
+            _ => Vec::new(),
+        };
         Ok((decision, domains))
     })();
     let (decision, approved_domains, failure) = match result {
@@ -657,7 +725,7 @@ fn judge_using_gateway<'a>(
     let mut fields = fields;
     fields["scope_available"] = json!(scope_available);
     let missing_scope = !scope_available
-        && decision.as_ref().is_some_and(|d| d.action == Action::AllowServices);
+        && decision.as_ref().is_some_and(|d| matches!(d.action, Action::AllowServices | Action::AllowDomains));
     let duration = focus_devices::events::elapsed(elapsed);
     let history_core = Arc::clone(core);
     let _ = std::thread::Builder::new()
@@ -698,8 +766,11 @@ pub fn begin_hold(
     let policy = recent.policy;
     let mut tickets = core.judge_tickets.0.lock().unwrap();
     let ticket = ticket(&mut tickets, id)?;
-    if !ticket.can_hold(override_full) {
-        return Err("Select the full pause override before holding".into());
+    if override_full {
+        return Err("Ask overrides are disabled. Use Emergency Shield in Settings if needed.".into());
+    }
+    if !ticket.can_hold(false) {
+        return Err("Hold is only required for a full pause".into());
     }
     let friction = ticket.friction(policy);
     ticket.check_wait(friction, recent.restored_ago)?;
@@ -810,7 +881,10 @@ pub(crate) fn apply_with_trace(
         trace = ticket.trace.clone();
         cause = "laptop_rejected";
         let model_action = ticket.decision.as_ref().map(|d| d.action);
-        let action = if ticket.manual(input.override_full) {
+        if input.override_full {
+            return Err("Ask overrides are disabled. Use Emergency Shield in Settings if needed.".into());
+        }
+        let action = if ticket.fallback() {
             Action::FullPause
         } else {
             model_action.unwrap()
@@ -824,7 +898,7 @@ pub(crate) fn apply_with_trace(
                 cause = "dns_apply_failed";
                 ticket.hold = None;
                 let extra = json!({
-                    "decision_id": input.id, "overridden": input.override_full, "fallback": ticket.fallback(),
+                    "decision_id": input.id, "overridden": false, "fallback": ticket.fallback(),
                     "origin": trace.fields()["origin"],
                     "after_plan": input.after_plan.as_deref().map(str::trim),
                 });
@@ -841,7 +915,7 @@ pub(crate) fn apply_with_trace(
             }
             Action::AllowServices => {
                 let decision = ticket.decision.as_ref().unwrap();
-                applied_minutes = decision.minutes.min(policy.cap());
+                applied_minutes = decision.minutes.min(10);
                 services = decision.services.as_slice();
                 let domains = Catalog::load(&core.dir)?.domains(services)?;
                 if domains != ticket.approved_domains {
@@ -856,6 +930,30 @@ pub(crate) fn apply_with_trace(
                     &ticket.request,
                     &input.id,
                     services,
+                    &trace,
+                    &mut cause,
+                )?;
+                Applied::AllowServices {
+                    scoped_until: until,
+                }
+            }
+            Action::AllowDomains => {
+                let decision = ticket.decision.as_ref().unwrap();
+                applied_minutes = decision.minutes.min(10);
+                let domains = ticket.approved_domains.clone();
+                if domains.is_empty() || domains.iter().any(|d| judge::is_entertainment_domain(d)) {
+                    return Err("Only verified non-entertainment domains can be opened".into());
+                }
+                cause = "dns_apply_failed";
+                let labels: Vec<String> = domains.clone();
+                let until = start_scope(
+                    core,
+                    &mut saved,
+                    domains,
+                    applied_minutes,
+                    &ticket.request,
+                    &input.id,
+                    &labels,
                     &trace,
                     &mut cause,
                 )?;
@@ -942,6 +1040,28 @@ fn persist_lease(core: &Core, saved: &mut Saved, value: Option<Lease>) -> Result
         ..saved.clone()
     };
     commit_state(core, saved, new)
+}
+
+pub(crate) fn load_nextdns_api(core: &Core, trace: Option<&PauseTrace>) -> Result<NextDns, String> {
+    let settings = Settings::load(&core.dir)?;
+    let key = settings.nextdns_key()?;
+    let profile = core.require_dns_profile()?;
+    Ok(NextDns::new(profile, key)?.observed(core.event_log(), trace))
+}
+
+pub(crate) fn start_emergency_domain_scope(
+    core: &Core,
+    saved: &mut Saved,
+    domain: String,
+    minutes: u64,
+    reason: String,
+) -> Result<u64, String> {
+    let id = random_id()?;
+    let trace = PauseTrace::new(false, None);
+    let mut cause = "dns_apply_failed";
+    let request = Request { text: reason, check_in: None };
+    let labels = vec![domain.clone()];
+    start_scope(core, saved, vec![domain], minutes, &request, &id, &labels, &trace, &mut cause)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1338,7 +1458,7 @@ mod tests {
         let settings = Settings { gateway_dpapi: Some(key), ..Settings::default() };
         write_json(&core.dir.join(SETTINGS), &settings).unwrap();
         let sample = json!({
-            "action": "allow_services", "services": ["x"], "minutes": 3,
+            "action": "allow_services", "services": ["x"], "domains": [], "minutes": 3,
             "message": "Check the post.", "counter_offer": null,
         });
         let completion = |sample: &Value| json!({
@@ -1515,22 +1635,26 @@ mod tests {
     }
 
     #[test]
-    fn denying_still_allows_an_explicit_held_override() {
+    fn ask_overrides_are_rejected_on_hold_and_apply() {
+        let fixture = crate::dns_tests::Fixture::new(|_| Ok(String::new()));
+        let core = &fixture.core;
+        let devices = Devices(Err("test".into()));
         let decision = Decision {
             action: Action::Deny,
             services: vec![],
+            domains: vec![],
             minutes: 0,
             message: "Try the next step".into(),
             counter_offer: None,
         };
-        let mut ticket = ticket_with(Some(decision), 2500);
+        let ticket = ticket_with(Some(decision), 2500);
         assert!(!ticket.can_hold(false));
-        assert!(ticket.can_hold(true));
-        ticket.hold = Some(Hold {
-            id: "override".into(),
-            started: Instant::now() - Duration::from_millis(2200),
-            override_full: true,
-        });
+        core.judge_tickets
+            .0
+            .lock()
+            .unwrap()
+            .insert("ticket".into(), ticket);
+        assert!(begin_hold(core, &devices, "ticket", true).is_err());
         let input = ApplyInput {
             id: "ticket".into(),
             override_full: true,
@@ -1538,15 +1662,7 @@ mod tests {
             hold_id: Some("override".into()),
             after_plan: None,
         };
-        assert_eq!(
-            ticket
-                .full_pause(&input, policy(0, 0), Duration::MAX)
-                .unwrap(),
-            10
-        );
-        assert!(ticket
-            .full_pause(&input, policy(4, 0), Duration::MAX)
-            .is_err());
+        assert!(apply(core, &devices, input).is_err());
     }
 
     #[test]

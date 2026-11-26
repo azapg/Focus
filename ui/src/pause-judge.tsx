@@ -13,9 +13,10 @@ type Settings = {
 type Decision = {
   id: string;
   decision: null | {
-    action: "allow_services" | "full_pause" | "peek" | "counter_offer" | "deny";
+    action: "allow_services" | "allow_domains" | "full_pause" | "peek" | "counter_offer" | "deny";
     minutes: number;
     services: string[];
+    domains?: string[];
     message: string;
     counter_offer: string | null;
   };
@@ -142,8 +143,6 @@ export function PauseJudgeSettings({ invoke }: { invoke: Invoke }) {
 export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: () => void }) {
   const [request, setRequest] = useState("");
   const [result, setResult] = useState<Decision | null>(null);
-  const [overriding, setOverriding] = useState(false);
-  const [duration, setDuration] = useState(1);
   const [plan, setPlan] = useState("");
   const [waitUntil, setWaitUntil] = useState(0);
   const [clock, setClock] = useState(0);
@@ -190,7 +189,6 @@ export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: 
     setBusy(true);
     setMessage("");
     setResult(null);
-    setOverriding(false);
     setPlan("");
     try {
       // The native worker validates the permalink. A refusal stays local.
@@ -219,7 +217,6 @@ export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: 
       const now = performance.now();
       setClock(now);
       setWaitUntil(now + decision.friction.wait_ms);
-      setDuration(!decision.decision ? 1 : decision.manual_choices.includes(5) ? 5 : 1);
       setResult(decision);
       requestAnimationFrame(() => (decision.decision ? start : field).current?.focus());
     } catch (error) {
@@ -237,12 +234,22 @@ export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: 
       const applied = await invoke("apply_decision", {
         input: {
           id: result.id,
-          override_full: overriding && Boolean(result.decision),
-          manual_minutes: manual ? duration : null,
+          override_full: false,
+          manual_minutes: null,
           after_plan: plan || null,
           hold_id: confirmation?.hold_id,
         },
       });
+      if (applied.action === "peek" && applied.url) {
+        const reply: PeekReply = await invoke("peek_link", { url: applied.url });
+        if (reply.snapshot) {
+          setRequest("");
+          setPost(reply.snapshot);
+        } else {
+          setMessage(peekErrors[reply.refusal ?? ""] ?? "Snapshot unavailable.");
+        }
+        return;
+      }
       if (applied.action === "allow_services" || applied.action === "full_pause") dismiss();
     } catch (error) {
       setMessage(String(error));
@@ -260,7 +267,7 @@ export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: 
     try {
       const confirmation: Hold = await invoke("begin_pause_hold", {
         id: result.id,
-        overrideFull: overriding && Boolean(result.decision),
+        overrideFull: false,
       });
       if (activeHold.current !== pending) {
         await invoke("cancel_pause_hold", { id: pending.id, holdId: confirmation.hold_id });
@@ -287,9 +294,8 @@ export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: 
   }
 
   const decision = result?.decision;
-  const retry = Boolean(result && !decision && !overriding);
-  const manual = Boolean(result && overriding);
-  const needsHold = manual || decision?.action === "full_pause";
+  const retry = Boolean(result && !decision);
+  const needsHold = decision?.action === "full_pause";
   const remaining = Math.max(0, Math.ceil((waitUntil - clock) / 1000));
   const fallbackMessages = {
     configuration: "Check your Gateway settings.",
@@ -298,12 +304,12 @@ export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: 
     invalid: "No usable reply. Try again.",
   };
 
-  const scoped = decision?.action === "allow_services" && result?.scope_available && !overriding;
+  const scoped = (decision?.action === "allow_services" || decision?.action === "allow_domains") && result?.scope_available;
+  const scopedDomains = decision?.domains ?? [];
 
   function edit() {
     setMessage("");
     setResult(null);
-    setOverriding(false);
     requestAnimationFrame(() => field.current?.focus());
   }
 
@@ -341,10 +347,10 @@ export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: 
           <button type="submit" className="btn primary" disabled={busy || request.trim().length < 3}>{busy ? "Checking…" : "Ask"}</button>
         </form>}
         {scoped && <div className="judge-review" aria-live="polite">
-          <ServiceIcons services={decision.services} />
-          <span className="judge-time">{decision.minutes} min</span>
+          {decision.action === "allow_domains"
+            ? <span className="judge-time">{scopedDomains.join(", ")} · {decision.minutes} min</span>
+            : <><ServiceIcons services={decision.services} /><span className="judge-time">{decision.minutes} min</span></>}
           <button type="button" className="btn judge-edit" onClick={edit} disabled={busy}>Edit</button>
-          <button type="button" className="btn icon" aria-label="Full pause override" title="Full pause override" onClick={() => setOverriding(true)} disabled={busy}>⋯</button>
           <button type="button" ref={start} className="btn primary" onClick={() => void apply()} disabled={busy}>{busy ? "Opening…" : "Start"}</button>
         </div>}
         {result && !scoped && !retry && <div className="judge-review">
@@ -359,20 +365,17 @@ export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: 
             {retry && result.failure && <p className={`judge-attention${result.refused ? " bad" : ""}`}>{result.refused
               ? "Assistant declined this request." : fallbackMessages[result.failure]}</p>}
             {decision?.action === "deny" && <p className="judge-attention bad">{decision.message}</p>}
-            {decision?.action === "allow_services" && !result.scope_available && <p>Add the NextDNS key in Settings to open these services.</p>}
+            {(decision?.action === "allow_services" || decision?.action === "allow_domains") && !result.scope_available && <p>Add the NextDNS key in Settings to open this site.</p>}
             {decision?.action === "full_pause" && <p>Full pause · {decision.minutes} min</p>}
             {decision?.counter_offer && <p>{decision.counter_offer}</p>}
-            {decision?.action === "peek" && <p>Peek is unavailable in this build.</p>}
-            {(retry || decision && decision.action !== "full_pause") && !overriding && !scoped && (
-              <button type="button" className="t3-btn judge-override" disabled={busy} onClick={() => setOverriding(true)}>{retry ? "Full pause" : "I still need a full pause"}</button>
-            )}
+            {decision?.action === "peek" && <button type="button" className="t3-btn primary" disabled={busy} onClick={() => void apply()}>Open Peek</button>}
 
             {needsHold && result.friction.requires_plan && <label className="block">What will you do after the pause?
               <Input value={plan} maxLength={300} disabled={busy || holding} onChange={(e) => setPlan(e.target.value)} />
             </label>}
             {needsHold && <button
               type="button"
-              className={`t3-btn primary judge-hold${overriding ? " override" : ""}${holding ? " holding" : ""}`}
+              className={`t3-btn primary judge-hold${holding ? " holding" : ""}`}
               style={{ "--hold-ms": `${result.friction.hold_ms}ms` } as React.CSSProperties}
               disabled={busy || remaining > 0 || (result.friction.requires_plan && plan.trim().length < 3)}
               onPointerDown={(e) => {
@@ -389,7 +392,7 @@ export function PauseJudgeSheet({ invoke, dismiss }: { invoke: Invoke; dismiss: 
               }}
               onKeyUp={(e) => { if (e.key === " " || e.key === "Enter") release(); }}
               onBlur={release}
-            ><span>{remaining > 0 ? `Wait ${remaining}s` : holding ? "Keep holding…" : `Hold ${result.friction.hold_ms / 1000}s for ${manual ? duration : decision?.minutes} min`}</span></button>}
+            ><span>{remaining > 0 ? `Wait ${remaining}s` : holding ? "Keep holding…" : `Hold ${result.friction.hold_ms / 1000}s for ${decision?.minutes} min`}</span></button>}
           </>
         )}
         {message && <p role="status">{message}</p>}

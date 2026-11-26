@@ -147,8 +147,20 @@ public final class PausePolicy {
 
   private static final java.util.regex.Pattern BARE_LINK = java.util.regex.Pattern.compile(
       "(?i)^[\\s\\p{Z}\\uFEFF]*(https?://[^\\s\\p{Z}\\uFEFF]+)[\\s\\p{Z}\\uFEFF]*$");
+  private static final java.util.regex.Pattern EMBEDDED_POST_LINK = java.util.regex.Pattern.compile(
+      "(?i)(https?://(?:(?:www\\.|mobile\\.|m\\.)?(?:x\\.com|twitter\\.com)/[^\\s\\p{Z}\\uFEFF<>\"`]+/status/\\d+[^\\s\\p{Z}\\uFEFF<>\"`]*|(?:www\\.|m\\.)?facebook\\.com/[^\\s\\p{Z}\\uFEFF<>\"`]*(?:/posts/|/permalink/|story_fbid=)[^\\s\\p{Z}\\uFEFF<>\"`]*))");
 
   public static String peekLink(String text) {
+    if (text == null) return null;
+    java.util.regex.Matcher post = EMBEDDED_POST_LINK.matcher(text);
+    if (post.find()) {
+      String first = post.group(1);
+      if (post.find()) return null; // Multiple post links stay in Ask.
+      while (!first.isEmpty() && ".,;:!?)".indexOf(first.charAt(first.length() - 1)) >= 0) {
+        first = first.substring(0, first.length() - 1);
+      }
+      return first;
+    }
     java.util.regex.Matcher match = BARE_LINK.matcher(text);
     return match.matches() ? match.group(1) : null;
   }

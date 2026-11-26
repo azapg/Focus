@@ -7,6 +7,7 @@
 //! Everything that happens is written to %LOCALAPPDATA%\FocusDNS\focusdns.log.
 
 mod device_commands;
+mod emergency_shield;
 mod habit_commands;
 mod streak_runtime;
 mod focus_state_runtime;
@@ -86,6 +87,10 @@ struct Saved {
     pending_grants: std::collections::BTreeMap<String, nextdns::PendingGrant>,
     #[serde(default)]
     rating_prompt: Option<RatingPrompt>,
+    #[serde(default)]
+    free_time: bool,
+    #[serde(default)]
+    emergency_shield: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -107,6 +112,8 @@ struct View {
     scoped_until: Option<u64>,
     scoped_services: Vec<String>,
     rating_prompt: Option<RatingPrompt>,
+    free_time: bool,
+    emergency_shield: bool,
 }
 
 struct LaptopPauseSnapshot {
@@ -227,6 +234,8 @@ impl Core {
             dns_configured: self.dry || self.dns_profile().is_some(),
             scoped_services: s.scoped_pause.as_ref().map(|lease| lease.services.clone()).unwrap_or_default(),
             rating_prompt: s.rating_prompt.as_ref().filter(|p| now < p.expires_at).cloned(),
+            free_time: s.free_time && s.paused_until > now,
+            emergency_shield: s.emergency_shield && s.paused_until > now,
         }
     }
 
@@ -355,9 +364,13 @@ impl Core {
                 "pause_id": s.pause_id,
                 "requested_at": requested_at,
             }));
-            next.rating_prompt = recorded.ok().map(|_| RatingPrompt {
-                paused_at: s.paused_at, pause_id: s.pause_id, ended_at, expires_at: ended_at + RATING_WINDOW_MS,
-            });
+            next.rating_prompt = if s.free_time {
+                None
+            } else {
+                recorded.ok().map(|_| RatingPrompt {
+                    paused_at: s.paused_at, pause_id: s.pause_id, ended_at, expires_at: ended_at + RATING_WINDOW_MS,
+                })
+            };
         }
         next.scoped_pause = s.scoped_pause.take();
         next.pending_grants = std::mem::take(&mut s.pending_grants);
@@ -379,6 +392,26 @@ impl Core {
             pause_judge::sweep_scope(self, &mut saved, true)?;
         }
         self.publish(app);
+        Ok(())
+    }
+
+    fn start_free_time(&self, minutes: u64, request_id: &str) -> Result<(), String> {
+        let mut s = self.saved.lock().unwrap();
+        let extra = serde_json::json!({
+            "free_time": true,
+            "kind": "free_time",
+            "request_id": request_id,
+        });
+        self.start_pause_locked(
+            &mut s,
+            minutes,
+            format!("Store free time ({minutes}m)"),
+            None,
+            Some(extra),
+        )?;
+        s.free_time = true;
+        s.emergency_shield = false;
+        self.save(&s);
         Ok(())
     }
 
@@ -939,7 +972,9 @@ fn main() {
         .manage(StartupPanel(open_panel))
         .invoke_handler(tauri::generate_handler![focus_state_runtime::habits_feed_lock, streak_runtime::streak_view, streak_runtime::streak_buy_freeze, habit_commands::wallet_view, habit_commands::wallet_buy_time, habit_commands::habits_view, habit_commands::habits_change, habit_commands::habits_pause_limit, get_state, pause, resume, rate_pause, set_hit, grab_focus, history, lock, ui_log, return_focus, startup_panel, peek_panel::peek_link, activity_rules_load, activity_rules_save, activity_uncategorized_save, activity_categories_load, activity_icons_load, device_commands::device_nearby, device_commands::device_request_approval, device_commands::device_approval_status, device_commands::device_cancel_approval, device_commands::device_list, device_commands::device_probe, device_commands::device_pair, device_commands::device_refresh, device_commands::device_command, device_commands::device_forget, device_commands::laptop_incoming_approval, device_commands::laptop_approve_pairing, device_commands::laptop_decline_pairing, updater::updater_status, updater::updater_check, updater::updater_install, updater::updater_dismiss, updater::updater_set_token, updater::updater_set_enabled,
             pause_judge::pause_judge_settings, pause_judge::pause_judge_settings_save, pause_judge::pause_judge_limits_sync,
-            pause_judge::judge_pause, pause_judge::begin_pause_hold, pause_judge::cancel_pause_hold, pause_judge::apply_decision])
+            pause_judge::judge_pause, pause_judge::begin_pause_hold, pause_judge::cancel_pause_hold, pause_judge::apply_decision,
+            emergency_shield::emergency_status, emergency_shield::emergency_recent_blocks,
+            emergency_shield::emergency_activate])
         .setup(move |app| {
             setup_core.log("setup: entered");
             let mut initial_state = setup_core.read_state_for_startup()?;

@@ -23,16 +23,16 @@ public final class WalletCoreTest {
     check(ledger.wallet.extraPauseMinutes(DAY - 1) == 15 && ledger.wallet.extraPauseMinutes(DAY) == 0,
         "Legacy allowance survives the setup day");
     check(ledger.wallet.balance() == 15, "Only one wallet-qualified completion earns coins");
-    check(ledger.wallet.buyTimeOff("request", 15, AT, DAY).status == BOUGHT, "Purchase accepted");
-    check(ledger.wallet.buyTimeOff("request", 15, AT, DAY + 1).status == ALREADY_BOUGHT, "Retry across midnight");
-    check(ledger.wallet.extraPauseMinutes(DAY) == 15 && ledger.wallet.extraPauseMinutes(DAY + 1) == 0, "Local-day entitlement expires");
+    check(ledger.wallet.buyTimeOff("request", 5, AT, DAY).status == BOUGHT, "Purchase accepted");
+    check(ledger.wallet.buyTimeOff("request", 5, AT, DAY + 1).status == ALREADY_BOUGHT, "Retry across midnight");
+    check(ledger.wallet.extraPauseMinutes(DAY) == 5 && ledger.wallet.extraPauseMinutes(DAY + 1) == 0, "Local-day entitlement expires");
     ledger.put(event("undo", "walk", DAY, false, "new"));
     check(ledger.wallet.balance() == 0, "Deduplicated check-off remains after undo");
     ledger.put(event("undo-duplicate", "walk", DAY, false, "new-duplicate"));
     check(ledger.wallet.balance() == -15, "Undo can create debt");
     Wallet.Purchase blocked = ledger.wallet.buyTimeOff("more", 5, AT, DAY);
-    check(blocked.status == NOT_ENOUGH && blocked.missing == 20, "Debt blocks further purchases");
-    check(ledger.wallet.timeOffBought(DAY) == 15, "Undo retains purchases");
+    check(blocked.status == NOT_ENOUGH && blocked.missing == 30, "Debt blocks further purchases");
+    check(ledger.wallet.timeOffBought(DAY) == 5, "Undo retains purchases");
   }
 
   private static void offlinePurchases() {
@@ -42,13 +42,13 @@ public final class WalletCoreTest {
     check(!phone.wallet.earn("credit", "future_kind", 40, "", AT, DAY), "Earning retries once");
     Habits laptop = new Habits();
     laptop.merge(phone);
-    check(phone.wallet.buyTimeOff("phone", 30, AT, DAY).status == BOUGHT, "Phone buys time offline");
-    check(laptop.wallet.buyTimeOff("laptop", 30, AT, DAY).status == BOUGHT, "Laptop buys time offline");
-    check(laptop.wallet.buyTimeOff("over-cap", 20, AT, DAY).status == LIMIT_REACHED, "Cap enforced locally");
+    check(phone.wallet.buyTimeOff("phone", 10, AT, DAY).status == BOUGHT, "Phone buys time offline");
+    check(laptop.wallet.buyTimeOff("laptop", 10, AT, DAY).status == BOUGHT, "Laptop buys time offline");
+    check(laptop.wallet.buyTimeOff("over-cap", 10, AT, DAY).status == LIMIT_REACHED, "Cap enforced locally");
     phone.merge(laptop);
     laptop.merge(phone);
     check(phone.wallet.balance() == -20 && laptop.wallet.balance() == -20, "Offline overspend converges");
-    check(phone.wallet.timeOffBought(DAY) == 60, "Offline purchases survive cap overage");
+    check(phone.wallet.timeOffBought(DAY) == 20, "Offline purchases survive cap overage");
 
     phone.wallet.earn("fund", "future_kind", 200, "", AT, DAY);
     laptop.wallet.earn("fund", "future_kind", 200, "", AT, DAY);

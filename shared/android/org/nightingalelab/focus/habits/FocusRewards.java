@@ -14,7 +14,7 @@ public final class FocusRewards {
   public static final long FOCUS_AWAY_MS = 2L * 60_000L;
   public static final int TRIAL_COINS_PER_MILESTONE = 5;
   public static final long TRIAL_MILESTONE_MS = 30L * 60_000L;
-  public static final int TRIAL_MAX_MILESTONES = 4;
+  public static final int TRIAL_MAX_MILESTONES = 12;
 
   public enum Category {
     CODING(25L * 60_000L, false),

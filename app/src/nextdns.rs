@@ -101,8 +101,17 @@ pub struct GrantError {
     pub rejected: bool,
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct BlockedQuery {
+    pub domain: String,
+    pub reasons: Vec<String>,
+    pub timestamp_ms: u64,
+    pub is_security_threat: bool,
+}
+
 pub struct NextDns {
     client: Client,
+    base: String,
     endpoint: String,
     profile: String,
     key: String,
@@ -126,7 +135,8 @@ impl NextDns {
             .map_err(|_| "Could not start NextDNS client")?;
         Ok(Self {
             client,
-            endpoint: format!("{base}/profiles/{profile}/allowlist"),
+            base: base.trim_end_matches('/').to_owned(),
+            endpoint: format!("{}/profiles/{profile}/allowlist", base.trim_end_matches('/')),
             profile,
             key,
             events: None,
@@ -235,6 +245,92 @@ impl NextDns {
 
     pub fn verify_key(&self) -> Result<(), String> {
         self.current().map(|_| ())
+    }
+
+    /// Inspect recent blocked queries in the NextDNS profile log so Ask and Emergency Shield
+    /// can confirm false positives (like Newly Registered Domains) without turning DNS off.
+    pub fn recent_blocks(&self, within_minutes: u64) -> Result<Vec<BlockedQuery>, String> {
+        let mut url = reqwest::Url::parse(&format!("{}/profiles/{}/logs", self.base, self.profile))
+            .map_err(|_| "Invalid NextDNS logs endpoint")?;
+        url.query_pairs_mut()
+            .append_pair("status", "blocked")
+            .append_pair("limit", "50")
+            .append_pair("from", &format!("-{}m", within_minutes.clamp(1, 60)));
+        let started = Instant::now();
+        let response = self.request(self.client.get(url), "check", started)?;
+        let status = response.status();
+        if !status.is_success() {
+            self.event("check", started, Some(status), rejection(status));
+            return Err(format!("NextDNS logs lookup failed ({status})"));
+        }
+        let body: Value = response.json().map_err(|_| {
+            self.event("check", started, Some(status), "nextdns_rejected");
+            "Invalid NextDNS logs response"
+        })?;
+        self.event("check", started, Some(status), "ok");
+        let mut by_domain: BTreeMap<String, BlockedQuery> = BTreeMap::new();
+        for item in body["data"].as_array().into_iter().flatten() {
+            let raw_domain = item["domain"]
+                .as_str()
+                .unwrap_or_default()
+                .trim()
+                .trim_end_matches('.')
+                .to_ascii_lowercase();
+            if !crate::judge::valid_domain(&raw_domain) {
+                continue;
+            }
+            let timestamp_ms = item["timestamp"]
+                .as_str()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map_or(0, |dt| dt.timestamp_millis().max(0) as u64);
+            let mut reasons = Vec::new();
+            let mut threat = false;
+            for reason in item["reasons"].as_array().into_iter().flatten() {
+                let id = reason["id"].as_str().unwrap_or_default().to_ascii_lowercase();
+                let name = reason["name"]
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or(id.as_str())
+                    .trim()
+                    .to_owned();
+                if id.contains("malware")
+                    || id.contains("phishing")
+                    || id.contains("cryptojacking")
+                    || id.contains("threat")
+                    || id.contains("csam")
+                    || id.contains("homograph")
+                    || id.contains("typosquatting")
+                    || id.contains("dga")
+                {
+                    threat = true;
+                }
+                if !name.is_empty() && !reasons.contains(&name) {
+                    reasons.push(name);
+                }
+            }
+            by_domain
+                .entry(raw_domain.clone())
+                .and_modify(|existing| {
+                    if timestamp_ms > existing.timestamp_ms {
+                        existing.timestamp_ms = timestamp_ms;
+                    }
+                    existing.is_security_threat |= threat;
+                    for r in &reasons {
+                        if !existing.reasons.contains(r) {
+                            existing.reasons.push(r.clone());
+                        }
+                    }
+                })
+                .or_insert(BlockedQuery {
+                    domain: raw_domain,
+                    reasons,
+                    timestamp_ms,
+                    is_security_threat: threat,
+                });
+        }
+        let mut result: Vec<_> = by_domain.into_values().collect();
+        result.sort_by_key(|q| std::cmp::Reverse(q.timestamp_ms));
+        Ok(result)
     }
 
     pub fn plan(&self, domains: &[String], until: u64) -> Result<Lease, String> {

@@ -270,6 +270,11 @@ public final class LanController {
         dns.pause(duration(input), reason(input),
             input.isNull("check_in") ? null : Rules.CheckIn.parse(input.getString("check_in")));
         break;
+      case "start_free_time": {
+        int mins = (int) integer(input, "minutes", 1, 30);
+        dns.startFreeTime(mins, input.optString("request_id", ""), input.optString("package", ""));
+        break;
+      }
       case "dns_resume":
         if (!dns.enabled()) throw new IllegalStateException("Connect a NextDNS profile first");
         dns.resume(); break;
@@ -352,7 +357,7 @@ public final class LanController {
     }
     result.put("habits_sync", 1).put("wallet_sync", Wallet.SYNC_VERSION)
         .put("pause_allowance_generation", HabitStore.get(context).allowanceGeneration())
-        .put("activity_observed_from", store.habitObservedFrom()).put("scope", "household").put("now", now).put("range_from", start.getTimeInMillis())
+        .put("activity_observed_from", store.habitObservedFrom()).put("scope", "personal").put("now", now).put("range_from", start.getTimeInMillis())
         .put("time_zone", TimeZone.getDefault().getID())
         .put("permissions", new JSONObject().put("usage", store.usageAllowed()).put("restrictions", RestrictionService.connected).put("dns", dns.permitted()))
         .put("tracking_age_ms", Store.heartbeat == 0 ? -1 : SystemClock.elapsedRealtime() - Store.heartbeat);

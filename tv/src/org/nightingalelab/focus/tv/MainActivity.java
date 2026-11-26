@@ -345,8 +345,8 @@ public final class MainActivity extends Activity {
     body.addView(
         Ui.button(
             this,
-            "Allow temporarily",
-            () -> PauseForm.show(this, pkg, () -> PauseForm.openApp(this, pkg))));
+            "Free time (Store)",
+            () -> PauseForm.showFreeTimeStore(this, pkg, () -> PauseForm.openApp(this, pkg))));
     Ui.gap(body, 7);
     body.addView(Ui.button(this, "Open app", () -> PauseForm.openApp(this, pkg)));
     Dialog dialog = Ui.dialog(this, label, body);
@@ -568,7 +568,7 @@ public final class MainActivity extends Activity {
         body.addView(
             Ui.button(
                 this,
-                dns.deadline() > 0 ? "Resume filtering" : "Pause filtering",
+                dns.deadline() > 0 ? "Resume filtering" : "Free time (Store)",
                 () -> {
                   dialog.dismiss();
                   if (dns.deadline() > 0) {
@@ -579,7 +579,7 @@ public final class MainActivity extends Activity {
                     }
                     dns();
                   } else
-                    PauseForm.show(
+                    PauseForm.showFreeTimeStore(
                         this,
                         DnsController.KEY,
                         () -> {

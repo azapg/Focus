@@ -574,6 +574,111 @@ public final class SettingsDialogs {
     dlg[0] = sheetDialog(a, "NextDNS profile", body);
   }
 
+  public static void showEmergencyShieldSheet(Activity a, Runnable onChanged) {
+    EmergencyShieldStore store = new EmergencyShieldStore(a);
+    DnsController dns = DnsController.get(a);
+    LinearLayout body = Theme.column(a);
+    LinearLayout.LayoutParams full = new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+
+    body.addView(Theme.text(a,
+        "10 min offline bypass with social and video apps blocked locally. 1 per 24h.",
+        12, Theme.MUTED, false));
+    Theme.gap(body, 12);
+
+    TextView msg = Theme.text(a, "", 12, Theme.ATTN, false);
+    msg.setVisibility(View.GONE);
+
+    long cooldownMs = store.offlineCooldownLeftMs(System.currentTimeMillis());
+    if (cooldownMs > 0) {
+      long hours = Math.max(1, (cooldownMs + 3_599_999L) / 3_600_000L);
+      body.addView(Theme.text(a, "Offline shield available again in " + hours + "h.", 12, Theme.MUTED, false));
+      Theme.gap(body, 10);
+    }
+
+    String phrase = store.rotatePhrase();
+    TextView phraseCard = Theme.text(a, phrase, 14, Theme.FG, true);
+    phraseCard.setTextIsSelectable(false);
+    phraseCard.setPadding(Theme.dp(a, 12), Theme.dp(a, 10), Theme.dp(a, 12), Theme.dp(a, 10));
+    phraseCard.setBackground(Theme.roundRect(a, Theme.CARD, Theme.LINE, 12));
+    body.addView(phraseCard, full);
+    Theme.gap(body, 8);
+
+    EditText phraseField = noPasteTextField(a, "Type the phrase above");
+    body.addView(phraseField, full);
+    Theme.gap(body, 8);
+
+    EditText reasonField = new EditText(a);
+    reasonField.setHint("What is broken?");
+    reasonField.setHintTextColor(Theme.DIM);
+    reasonField.setTextColor(Theme.FG);
+    reasonField.setTextSize(14);
+    reasonField.setSingleLine(true);
+    reasonField.setPadding(Theme.dp(a, 12), Theme.dp(a, 10), Theme.dp(a, 12), Theme.dp(a, 10));
+    reasonField.setBackground(Theme.roundRect(a, Theme.BG, Theme.LINE, 12));
+    body.addView(reasonField, full);
+    Theme.gap(body, 12);
+
+    final Dialog[] dlg = new Dialog[1];
+    TextView activate = Theme.primaryPillButton(a, "10 min offline shield", () -> {
+      long now = System.currentTimeMillis();
+      if (store.offlineCooldownLeftMs(now) > 0) {
+        msg.setText("Offline shield cooldown active (1 per 24h).");
+        msg.setVisibility(View.VISIBLE);
+        return;
+      }
+      if (!store.verifyPhrase(phraseField.getText().toString())) {
+        msg.setText("Type the accountability phrase as shown.");
+        msg.setVisibility(View.VISIBLE);
+        return;
+      }
+      String reason = reasonField.getText().toString().trim();
+      if (reason.length() < 3) {
+        msg.setText("Add a short reason.");
+        msg.setVisibility(View.VISIBLE);
+        return;
+      }
+      try {
+        dns.startEmergencyShield(EmergencyShieldStore.SHIELD_MINUTES, reason);
+        store.recordOfflineUse(now);
+        if (dlg[0] != null) dlg[0].dismiss();
+        onChanged.run();
+      } catch (RuntimeException e) {
+        msg.setText(e.getMessage() == null ? "Could not start shield." : e.getMessage());
+        msg.setVisibility(View.VISIBLE);
+      }
+    });
+    if (cooldownMs > 0 || !dns.canPause()) {
+      activate.setEnabled(false);
+      activate.setAlpha(0.45f);
+    }
+    body.addView(activate, full);
+
+    Theme.gap(body, 8);
+    body.addView(msg, full);
+    dlg[0] = sheetDialog(a, "Emergency shield", body);
+  }
+
+  private static EditText noPasteTextField(Activity a, String hint) {
+    EditText field = new EditText(a);
+    field.setHint(hint);
+    field.setHintTextColor(Theme.DIM);
+    field.setTextColor(Theme.FG);
+    field.setTextSize(14);
+    field.setSingleLine(true);
+    field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+    field.setLongClickable(false);
+    field.setCustomSelectionActionModeCallback(new ActionMode.Callback() {
+      public boolean onCreateActionMode(ActionMode m, Menu menu) { return false; }
+      public boolean onPrepareActionMode(ActionMode m, Menu menu) { return false; }
+      public boolean onActionItemClicked(ActionMode m, MenuItem item) { return false; }
+      public void onDestroyActionMode(ActionMode m) {}
+    });
+    field.setPadding(Theme.dp(a, 12), Theme.dp(a, 10), Theme.dp(a, 12), Theme.dp(a, 10));
+    field.setBackground(Theme.roundRect(a, Theme.BG, Theme.LINE, 12));
+    return field;
+  }
+
   /**
    * "Update ready" sheet opened from the update icon in the header: what's new in the build
    * (bold title + one sentence, up to 3 items, plus "Plus N more fixes.") and one button.

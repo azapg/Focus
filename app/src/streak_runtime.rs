@@ -198,6 +198,23 @@ pub fn tick(
             }
         }
     }
+    let mut tv_drift = false;
+    for peer in &peers {
+        if peer.kind == "tv" {
+            if let Some(snapshot) = peer.snapshot.as_ref() {
+                if let Ok(true) =
+                    streak_journal::paired_tv_drift(snapshot, &mut extractor, start_ms, end_ms)
+                {
+                    tv_drift = true;
+                }
+            }
+        }
+    }
+    if tv_drift {
+        if let Some(desktop) = reports.first_mut() {
+            desktop.confirmed_drift = true;
+        }
+    }
     let outcome = streak_journal::finalize_with_focus_rewards(
         &core.habits,
         &authority,

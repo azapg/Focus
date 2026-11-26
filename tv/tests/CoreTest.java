@@ -145,6 +145,9 @@ public final class CoreTest {
     afterBoot.event(1_950_000, 2, "youtube", "main", true, history);
     ok(missed.stream().mapToLong(span -> span.b - span.a).sum() == 1_940_000,
         "A resume cannot override explicit screen off");
+    ok(TvPauseJudge.isBareBypass("full pause. 5m"), "TV judge rejects bare bypass");
+    ok(!TvPauseJudge.evaluate("watch youtube for a bit", 30).allowed, "TV judge denies recreational ask");
+    ok(!TvPauseJudge.evaluate("full pause 5m", 0).allowed, "TV judge denies bare pause");
     System.out.println("PASS " + count + " policy and timeline assertions");
   }
 }
