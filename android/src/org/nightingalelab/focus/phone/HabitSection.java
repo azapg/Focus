@@ -31,6 +31,7 @@ final class HabitSection {
     long now = System.currentTimeMillis();
     Habits ledger = store.read();
     List<Habits.Status> statuses = ledger.status(now);
+    boolean coins = ledger.wallet.active(Habits.day(now));
     LinearLayout box = card(activity);
     LinearLayout head = row(activity);
     long done = statuses.stream().filter(s -> s.completion != null).count();
@@ -45,7 +46,7 @@ final class HabitSection {
     box.addView(head);
     for (Habits.Status status : statuses) {
       if (!status.due) continue;
-      Hold hold = new Hold(activity, status, 14, () -> complete(status, overlay, false, rerender), () -> toggle(status));
+      Hold hold = new Hold(activity, status, 14, coins, () -> complete(status, overlay, false, rerender), () -> toggle(status));
       addSpaced(box, hold);
       if (status.habit.id.equals(expanded)) addSpaced(box, week(status, now));
     }
@@ -59,8 +60,9 @@ final class HabitSection {
         line.addView(text(activity, status.habit.name, 13, GREY), new LinearLayout.LayoutParams(0, -2, 1));
         Habits.Event event = status.completion;
         String away = event.away < 0 ? "" : "Away " + event.away + "m    ";
-        TextView detail = text(activity, away + "+" + event.reward + "m", 12, MUTED);
-        if (event.away >= 0) detail.setContentDescription("Away from all screens " + event.away + " min, plus " + event.reward + " minutes");
+        String reward = !coins || event.walletReward ? rewardLabel(event.reward, coins) : "";
+        TextView detail = text(activity, (away + reward).trim(), 12, MUTED);
+        if (event.away >= 0) detail.setContentDescription(("Away from all screens " + event.away + " min " + reward).trim());
         line.addView(detail);
         line.setOnClickListener(v -> toggle(status));
         box.addView(line);
@@ -98,6 +100,8 @@ final class HabitSection {
   View settings() {
     long now = System.currentTimeMillis();
     Habits ledger = store.read();
+    int today = Habits.day(now);
+    boolean coins = ledger.wallet.active(today);
     LinearLayout box = card(activity);
     LinearLayout head = row(activity);
     head.addView(text(activity, "Habits", 14, WHITE), new LinearLayout.LayoutParams(0, -2, 1));
@@ -105,13 +109,12 @@ final class HabitSection {
     box.addView(head);
     for (Habits.Status status : ledger.status(now)) {
       Habits.Habit habit = status.habit;
-      box.addView(action(activity, habit.name + " · " + habit.cadence() + " · +" + habit.reward + "m", () -> editor(habit)));
+      box.addView(action(activity, habit.name + " · " + habit.cadence() + " · " + rewardLabel(habit.reward, coins), () -> editor(habit)));
     }
-    int today = Habits.day(now);
     int current = ledger.capOn(today);
     int pending = ledger.capOn(today + 1);
     LinearLayout cap = row(activity);
-    String label = "Daily credit cap";
+    String label = coins ? "Daily time-off purchase cap" : "Daily credit cap";
     if (pending != current) label += "\n+" + pending + "m tomorrow";
     cap.addView(text(activity, label, 12, GREY), new LinearLayout.LayoutParams(0, -2, 1));
     for (int value : new int[] {30, 45, 60}) {
@@ -186,9 +189,10 @@ final class HabitSection {
       clock.setText(timeLabel(time[0]));
     }));
     rowField(box, "Time", timeControls);
-    Spinner rewards = choices("+5m", "+10m", "+15m");
+    boolean coins = store.read().wallet.active(Habits.day(System.currentTimeMillis()));
+    Spinner rewards = choices(rewardLabel(5, coins), rewardLabel(10, coins), rewardLabel(15, coins));
     rewards.setSelection(habit == null ? 1 : Math.max(0, Math.min(2, habit.reward / 5 - 1)));
-    rowField(box, "Credit", rewards);
+    rowField(box, coins ? "Reward" : "Credit", rewards);
     LinearLayout footer = row(activity);
     footer.setGravity(Gravity.END);
     if (habit != null) footer.addView(action(activity, "Remove", () -> {
@@ -267,10 +271,10 @@ final class HabitSection {
     int day = Habits.day(now);
     int prior = store.read().credit(day);
     Habits.Event completion = store.complete(status.habit.id, now, HabitScreen.away(activity, now));
-    int earned = store.read().credit(day) - prior;
     refresh.run();
     if (completion != null) {
-      undo(host, status.habit.name, Math.max(0, earned), mini ? 16 : 78, () -> {
+      int earned = completion.walletReward ? completion.reward : Math.max(0, store.read().credit(day) - prior);
+      undo(host, status.habit.name, rewardLabel(earned, completion.walletReward), mini ? 16 : 78, () -> {
         store.undo(completion.id);
         refresh.run();
         sync();

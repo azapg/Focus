@@ -17,7 +17,7 @@ python -m playwright install chromium
 python scripts/screenshot.py desktop --out build/screenshots-desktop
 ```
 
-Choose `activity`, `devices`, or `updates` to capture one flow. Desktop runs
+Choose `activity`, `devices`, `updates`, or `store` to capture one flow. Desktop runs
 the same frontend bundle that Focus embeds on Windows. Each flow gets a fresh
 headless browser context, a fixed UTC clock and in-memory Tauri responses. The
 browser uses a temporary configuration and blocks external requests, WebSockets
@@ -31,6 +31,7 @@ fixtures. Browser notifications are disabled.
   pairing code. The fixture simulates approval, cancellation and offline errors.
 - **Updates** captures protection settings and the update card and settings using
   invented build metadata.
+- **Store** captures a 15-minute time-off purchase with a fictional balance.
 
 The regenerated device previews are [stats and settings](previews/implemented-devices.html)
 and [nearby pairing](previews/nearby-pairing.html).
@@ -58,6 +59,8 @@ grant Private DNS, accessibility or notification permissions. The phone
 screenshot build omits the Peek renderer and does not produce a release manifest.
 The phone flow shows Today, Week and the update sheet. The TV flow shows Today
 and Week, selected through the production remote-control navigation.
+Use `phone-store` with the same SDK and image arguments to capture a time-off
+purchase in the native Store with a fictional balance.
 
 Choose a new output directory for each run. Successful runs publish a directory
 of PNGs. The built APKs, emulator data and profiles are discarded. Fonts,

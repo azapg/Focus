@@ -80,11 +80,7 @@ public final class HabitViews {
 
     public static boolean active() { return activeHolds > 0; }
 
-    public Hold(Context context, Habits.Status status, float size, Runnable completed) {
-      this(context, status, size, completed, null);
-    }
-
-    public Hold(Context context, Habits.Status status, float size, Runnable completed, Runnable showStreak) {
+    public Hold(Context context, Habits.Status status, float size, boolean coins, Runnable completed, Runnable showStreak) {
       super(context);
       this.completed = completed;
       setBackground(shape(context, CARD, BORDER, 11));
@@ -111,7 +107,7 @@ public final class HabitViews {
           : action(context, streakLabel, showStreak);
       if (showStreak != null) streak.setContentDescription("Streak for " + status.habit.name + " " + status.streak);
       row.addView(streak);
-      TextView credit = text(context, "+" + status.habit.reward + "m", size - 1, GREY);
+      TextView credit = text(context, rewardLabel(status.habit.reward, coins), size - 1, GREY);
       credit.setPadding(dp(context, 9), 0, 0, 0);
       row.addView(credit);
       addView(row, new LayoutParams(-1, -2));
@@ -249,7 +245,11 @@ public final class HabitViews {
 
   private static final int UNDO_ACTION_ID = View.generateViewId();
 
-  public static void undo(FrameLayout host, String title, int credit, int margin, Runnable undo) {
+  public static String rewardLabel(int amount, boolean coins) {
+    return "+" + amount + (coins ? " coins" : "m");
+  }
+
+  public static void undo(FrameLayout host, String title, String reward, int margin, Runnable undo) {
     Context context = host.getContext();
     View previous = host.findViewWithTag("habitUndo");
     if (previous != null) host.removeView(previous);
@@ -259,7 +259,7 @@ public final class HabitViews {
     toast.setClipToOutline(true);
     LinearLayout content = row(context);
     content.setPadding(dp(context, 12), 0, dp(context, 6), 0);
-    content.addView(text(context, title + "  +" + credit + "m", 13, GREY), new LinearLayout.LayoutParams(0, -2, 1));
+    content.addView(text(context, title + "  " + reward, 13, GREY), new LinearLayout.LayoutParams(0, -2, 1));
     TextView undoAction = action(context, "Undo", () -> { host.removeView(toast); undo.run(); });
     undoAction.setId(UNDO_ACTION_ID);
     content.addView(undoAction);

@@ -41,10 +41,11 @@ public final class HabitWidgets {
       }
       if (row.completion != null) done++;
     }
-    int credit = habits.credit(Habits.day(now));
+    int day = Habits.day(now);
+    boolean coins = habits.wallet.active(day);
     if (list.length > 0) {
       RemoteViews views = base(context, R.layout.widget_habits, "Habits");
-      String earned = " · +" + credit + "m";
+      String earned = coins ? " · " + habits.wallet.balance() + " coins" : " · +" + habits.credit(day) + "m";
       if (due.isEmpty()) label(views, R.id.hab_widget_meta, done + "/" + rows.size() + earned, GREY);
       else attention(views, R.id.hab_widget_meta, overdue > 0 ? overdue + " overdue" : due.size() + " due", earned, overdue > 0 ? RED : ORANGE);
       views.removeAllViews(R.id.hab_widget_rows);
@@ -53,7 +54,7 @@ public final class HabitWidgets {
         RemoteViews item = new RemoteViews(context.getPackageName(), R.layout.widget_habit_row);
         label(item, R.id.hab_widget_name, row.habit.name, WHITE);
         attention(item, R.id.hab_widget_caption, row.dueLabel(),
-            " · " + row.habit.streakLabel(row.streak) + " · +" + row.habit.reward + "m",
+            " · " + row.habit.streakLabel(row.streak) + " · " + HabitViews.rewardLabel(row.habit.reward, coins),
             row.overdue || row.grace ? RED : ORANGE);
         item.setOnClickPendingIntent(R.id.hab_widget_row, intent(context, row.habit.id));
         views.addView(R.id.hab_widget_rows, item);
@@ -68,14 +69,13 @@ public final class HabitWidgets {
       label(views, R.id.hab_widget_meta, row == null ? "Done" : row.habit.streakLabel(row.streak), GREY);
       label(views, R.id.hab_widget_name, row == null ? (rows.isEmpty() ? "No habits" : "All done today") : row.habit.name, WHITE);
       if (row == null) label(views, R.id.hab_widget_caption, "", GREY);
-      else attention(views, R.id.hab_widget_caption, row.dueLabel(), " · +" + row.habit.reward + "m", row.overdue || row.grace ? RED : ORANGE);
+      else attention(views, R.id.hab_widget_caption, row.dueLabel(), " · " + HabitViews.rewardLabel(row.habit.reward, coins), row.overdue || row.grace ? RED : ORANGE);
       views.setOnClickPendingIntent(R.id.hab_widget_root, intent(context, row == null ? null : row.habit.id));
       manager.updateAppWidget(next, views);
     }
     if (allowance.length > 0) {
       RemoteViews views = base(context, R.layout.widget_habit_compact, "Allowance");
       int base = Store.get(context).policyConfig().dailyLimitMinutes;
-      int day = Habits.day(now);
       int extra = habits.wallet.extraPauseMinutes(day);
       long limitMs = (base + (long) extra) * 60_000L;
       long offMs = HabitScreen.offToday(context, now);
@@ -86,7 +86,7 @@ public final class HabitWidgets {
       label(views, R.id.hab_widget_meta, "Today", GREY);
       label(views, R.id.hab_widget_name, headline, valueColor);
       views.setTextViewTextSize(R.id.hab_widget_name, android.util.TypedValue.COMPLEX_UNIT_SP, 23);
-      label(views, R.id.hab_widget_caption, base + "m + " + extra + (habits.wallet.active(day) ? "m bought" : "m earned"), GREY);
+      label(views, R.id.hab_widget_caption, base + "m + " + extra + (coins ? "m bought" : "m earned"), GREY);
       manager.updateAppWidget(allowance, views);
     }
   }

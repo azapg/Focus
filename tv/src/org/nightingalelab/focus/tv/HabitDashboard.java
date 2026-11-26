@@ -25,13 +25,16 @@ final class HabitDashboard {
   View view(FrameLayout host, Runnable refresh) {
     Habits ledger = habits.read();
     List<Habits.Status> rows = ledger.status(now);
+    int day = Habits.day(now);
+    boolean coins = ledger.wallet.active(day);
     LinearLayout screen = column(activity);
     LinearLayout summary = row(activity);
     long due = rows.stream().filter(s -> s.due).count();
     long overdue = rows.stream().filter(s -> s.due && (s.overdue || s.grace)).count();
     long done = rows.stream().filter(s -> s.completion != null).count();
     summary.addView(text(activity, "Habits", 16, WHITE), new LinearLayout.LayoutParams(0, -2, 1));
-    summary.addView(text(activity, allowance() + " left · +" + ledger.credit(Habits.day(now)) + "m earned", 15, GREY));
+    String reward = coins ? ledger.wallet.balance() + " coins" : "+" + ledger.credit(day) + "m earned";
+    summary.addView(text(activity, allowance() + " left · " + reward, 15, GREY));
     screen.addView(summary);
     Ui.gap(screen, 10);
     LinearLayout columns = row(activity);
@@ -43,7 +46,7 @@ final class HabitDashboard {
     for (Habits.Status row : rows) {
       if (!row.due) continue;
       Ui.gap(list, 6);
-      Hold hold = new Hold(activity, row, 17, () -> complete(row, host, refresh));
+      Hold hold = new Hold(activity, row, 17, coins, () -> complete(row, host, refresh), null);
       hold.setId(MainActivity.controlId("habit_" + row.habit.id));
       list.addView(hold);
     }
@@ -100,8 +103,8 @@ final class HabitDashboard {
     Habits.Event completed = habits.complete(row.habit.id, checkedAt, Habits.away(checkedAt, local, new ArrayList<>(habits.screens().values())));
     refresh.run();
     if (completed != null) {
-      int credit = Math.max(0, habits.read().credit(day) - prior);
-      undo(host, row.habit.name, credit, 18, () -> { habits.undo(completed.id); refresh.run(); });
+      int earned = completed.walletReward ? completed.reward : Math.max(0, habits.read().credit(day) - prior);
+      undo(host, row.habit.name, rewardLabel(earned, completed.walletReward), 18, () -> { habits.undo(completed.id); refresh.run(); });
     }
   }
 

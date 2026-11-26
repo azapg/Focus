@@ -573,7 +573,7 @@ const Panel = (() => {
       ? `<div class="pz-sum"><b>${peekCount} ${peekCount === 1 ? 'peek' : 'peeks'}</b> · ${dnsPauseCount} DNS ${dnsPauseCount === 1 ? 'pause' : 'pauses'}</div>`
       : '';
     const chart = dnsLimitChart(offAllMs, limitMs, days, scoped)
-      + (credit ? `<div class="habit-credit">${limitMin()}m base + ${credit}m earned</div>` : '')
+      + (credit ? `<div class="habit-credit">${limitMin()}m base + ${credit}m ${window.focusWalletActive ? 'bought' : 'earned'}</div>` : '')
       + peeks;
 
     if (!pauses.length) {

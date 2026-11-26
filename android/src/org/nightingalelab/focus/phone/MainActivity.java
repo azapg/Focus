@@ -239,7 +239,9 @@ public final class MainActivity extends Activity {
 
   private void openHabitCard(String id) {
     HabitStore store = HabitStore.get(this);
-    Habits.Status status = store.read().status(System.currentTimeMillis()).stream()
+    long now = System.currentTimeMillis();
+    Habits ledger = store.read();
+    Habits.Status status = ledger.status(now).stream()
         .filter(row -> row.due && row.habit.id.equals(id)).findFirst().orElse(null);
     if (status == null) return;
     android.app.Dialog dialog = new android.app.Dialog(this);
@@ -247,11 +249,11 @@ public final class MainActivity extends Activity {
     host.setLayoutParams(new ViewGroup.LayoutParams(-1, HabitViews.dp(this, 138)));
     LinearLayout card = HabitSection.card(this);
     card.addView(HabitViews.text(this, "Habits", 13, HabitViews.GREY));
-    card.addView(new HabitViews.Hold(this, status, 14, () -> habits.complete(status, host, true, () -> {
+    card.addView(new HabitViews.Hold(this, status, 14, ledger.wallet.active(Habits.day(now)), () -> habits.complete(status, host, true, () -> {
       card.setVisibility(View.INVISIBLE);
       host.postDelayed(dialog::dismiss, 5100);
       render();
-    })));
+    }), null));
     host.addView(card, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
     HabitViews.dismissOnSwipe(card, dialog::dismiss);
     dialog.setContentView(host);
@@ -608,6 +610,8 @@ public final class MainActivity extends Activity {
     top.addView(deviceFilterPill());
     View spacer = new View(this);
     top.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
+
+    if (!isWeek) StoreSheet.addHeader(this, top, this::render, this::openPauseSheet);
 
     PhoneUpdater.Snapshot upd = PhoneUpdater.get(this).snapshot();
     if (upd.available != null) {

@@ -405,9 +405,12 @@ fn wallet_cutover_uses_qualified_habits_and_undo_can_create_debt() {
         Ok(super::Purchase::Bought)
     );
     assert_eq!(
-        relayed.buy_time_off("first", 15, at, day + 1),
+        relayed.buy_time_off_for_day("first", 15, at, day + 1, Some(day)),
         Ok(super::Purchase::AlreadyBought)
     );
+    assert!(relayed
+        .buy_time_off_for_day("second", 1, at, day + 1, Some(day))
+        .is_err());
     assert_eq!(relayed.extra_pause_minutes(day), 15);
     assert_eq!(relayed.extra_pause_minutes(day + 1), 0);
 

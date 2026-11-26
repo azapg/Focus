@@ -20,6 +20,7 @@
 }
 .habit-action:hover, .habit-action[aria-pressed=true], .habit-settings-row:hover, .habit-done-row:hover { background: #222225; }
 .habit-hold {
+  display: flex; align-items: center;
   position: relative; overflow: hidden; border-radius: 11px; background: #0a0a0c;
   border: 1px solid #252528; margin: 6px 0; transition: transform 160ms, opacity 230ms;
 }
@@ -32,7 +33,7 @@
 .habit-hold.leaving { opacity: 0; transform: translateX(18px) scale(.97); pointer-events: none; }
 .habit-hold.leaving::before { transform: scaleX(1); background: #fafafa38; }
 .habit-hold-target {
-  position: relative; display: flex; align-items: center; gap: 8px; justify-content: space-between; width: 100%;
+  position: relative; display: flex; align-items: center; gap: 8px; justify-content: space-between; flex: 1; min-width: 0;
   border: 0; background: transparent; color: #fafafa; text-align: left; font: inherit;
   padding: 9px 11px; cursor: pointer; touch-action: none;
 }
@@ -41,8 +42,8 @@
 .habit-hold strong { display: block; font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .habit-section small, .habit-hold small, .habit-toast small, .habit-reward { color: #8a8a90; font-size: 11.5px; }
 .habit-hold b { font-weight: 400; }
-.habit-hold:has(.habit-streak) .habit-reward { padding-left: 48px; }
-.habit-streak { position: absolute; right: 49px; top: 50%; transform: translateY(-50%); }
+.habit-reward { white-space: nowrap; }
+.habit-streak { position: relative; flex: none; margin-right: 4px; }
 .habit-quiet { padding: 8px 2px; color: #a1a1aa; }
 .habit-done, .habit-cap { border-top: 1px solid #19191c; margin-top: 8px; padding-top: 5px; }
 .habit-done-row, .habit-settings-row { width: 100%; text-align: left; padding: 8px 4px; }

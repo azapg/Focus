@@ -1,12 +1,14 @@
 # Wallet integration
 
-The wallet is a backend feature. The store UI can read `wallet_view` and call
-`wallet_buy_time` on desktop. The phone and TV use `HabitStore.read()` and
-`HabitStore.buyTimeOff`. The desktop purchase response is
+The desktop Store reads `wallet_view` and calls `wallet_buy_time`. The phone
+Store reads and updates the same ledger through `HabitStore`. The TV applies
+synced purchases. The desktop purchase response is
 `{status: "bought" | "already_bought" | "limit_reached"}` or
 `{status: "not_enough", missing: number}`. Generate a fresh request ID for
-each confirmation and reuse it for retries, even after midnight. Use the latest
-view after `wallet-updated`. Native callers use the existing habit-store listener.
+each confirmation and reuse it for retries, even after midnight. Pass the
+quoted `expectedDay` so a new purchase cannot go through after its day ends.
+Use the latest view after `wallet-updated`. Native callers use the existing
+habit-store listener.
 
 ## Backend callers
 
@@ -20,12 +22,11 @@ fail together if the caller propagates a validation error. Keep `earn`, `spend`,
 - `balance` returns signed coins. `entries(kind, fromDay, toDay)` uses inclusive
   epoch days and excludes reversed entries. Habit rewards come from the active
   check-offs in the habit ledger.
-- Repair eligibility and pricing belong to the streak backend. Within the
-  transaction, use `spend("streak:clean:YYYY-MM-DD", "streak_repair", price,
-  "clean:YYYY-MM-DD", now, purchaseDay)`. A retry uses the same key. To recover
-  repaired dates, query purchases of kind `streak_repair` and read their
-  references. The entry day is the **purchase** day. The reference is the
-  repaired day. Repair preserves the previous streak count.
+- The streak backend owns purchase eligibility, price and consumption for a
+  prepaid Streak Freeze. The Store needs an authoritative read and purchase
+  interface before it can offer freezes. A purchase and its inventory change
+  belong in the same transaction. A freeze preserves the previous streak count
+  on a qualifying future day.
 - Only a finalized focus aggregator should call `earn` with kind `focus`.
   Use stable milestone keys shared by all devices, such as
   `focus:YYYY-MM-DD:1`, without device IDs. The aggregator owns the rate, daily
