@@ -16,7 +16,9 @@ function timeInput(time) {
   return time == null ? '' : [Math.floor(time / 60), time % 60].map((n) => String(n).padStart(2, '0')).join(':');
 }
 
-function checkoff({ habit, overdue, grace, streak }, compact) {
+const rewardLabel = (amount, coins) => coins ? `+${amount} coins` : `+${amount}m`;
+
+function checkoff({ habit, overdue, grace, streak }, compact, coins) {
   const status = overdue ? 'Overdue' : grace ? 'Missed last time' : 'Due';
   const tone = overdue || grace ? 'habit-breach' : 'habit-attention';
   const state = overdue ? 'overdue' : grace ? 'missed' : 'due';
@@ -24,7 +26,7 @@ function checkoff({ habit, overdue, grace, streak }, compact) {
   return `<div class="habit-hold" data-habit-row data-habit-state="${state}">
     <button type="button" class="habit-hold-target" data-habit-hold="${escapeHtml(habit.id)}" aria-label="Hold to complete ${escapeHtml(habit.name)}">
       <span><strong>${escapeHtml(habit.name)}</strong><small><b class="${tone}">${status}</b>${compact ? '' : ` · ${escapeHtml(cadence(habit))}`}</small></span>
-      <span class="habit-reward">+${habit.reward}m</span>
+      <span class="habit-reward">${rewardLabel(habit.reward, coins)}</span>
     </button>
     ${compact ? '' : `<button type="button" class="habit-action habit-streak" aria-label="Streak for ${escapeHtml(habit.name)} ${streak}" data-habit-detail="${escapeHtml(habit.id)}">${streak}${unit}</button>`}
   </div>`;
@@ -38,7 +40,7 @@ function detail(row) {
   }).join('')}</div>`;
 }
 
-function editor(habit) {
+function editor(habit, coins) {
   const h = habit ?? { name: '', interval: 1, weekdays: 0, time: null, reward: 10 };
   const mode = h.weekdays ? 'weekly' : h.interval > 1 ? 'interval' : 'daily';
   return `<form class="habit-editor" data-habit-editor aria-label="Habit editor">
@@ -50,7 +52,7 @@ function editor(habit) {
     <fieldset data-habit-days ${mode === 'weekly' ? '' : 'hidden'}><legend>Days</legend>${weekdays.map((day, index) =>
       `<label><input type="checkbox" name="weekday" value="${1 << index}" ${h.weekdays & (1 << index) ? 'checked' : ''} title="${day}">${day}</label>`).join('')}</fieldset>
     <label>Time <input type="time" name="time" value="${timeInput(h.time)}"></label>
-    <label>Credit <select name="reward">${[5, 10, 15].map((n) => `<option value="${n}" ${n === h.reward ? 'selected' : ''}>+${n}m</option>`).join('')}</select></label>
+    <label>${coins ? 'Reward' : 'Credit'} <select name="reward">${[5, 10, 15].map((n) => `<option value="${n}" ${n === h.reward ? 'selected' : ''}>${rewardLabel(n, coins)}</option>`).join('')}</select></label>
     ${habit ? '<button type="button" class="habit-action" data-habit-remove>Remove</button>' : ''}
     <div class="habit-error" role="status" hidden></div>
   </form>`;
@@ -101,6 +103,7 @@ export function mountHabits(invoke, onChange) {
       state = next;
     }
     const rows = state.rows;
+    const coins = Boolean(state.wallet_active);
     const due = rows.filter((r) => r.due);
     const overdue = due.filter((r) => r.overdue || r.grace);
     const done = rows.filter((r) => r.completion);
@@ -110,26 +113,26 @@ export function mountHabits(invoke, onChange) {
     trigger.classList.toggle('habit-attention', Boolean(due.length && !overdue.length));
     trigger.classList.toggle('habit-breach', Boolean(overdue.length));
     quick.innerHTML = `<div class="habit-heading"><span>Habits</span><b class="${headTone}">${due.length ? dueLabel : 'Done'}</b></div>
-      ${due.length ? due.map((row) => checkoff(row, true)).join('') : `<div class="habit-quiet">${rows.length ? 'All habits done today.' : 'No habits'}</div>`}`;
+      ${due.length ? due.map((row) => checkoff(row, true, coins)).join('') : `<div class="habit-quiet">${rows.length ? 'All habits done today.' : 'No habits'}</div>`}`;
     if (sectionSlot) sectionSlot.innerHTML = `<section class="habit-section">
       <div class="habit-heading"><span>Habits <b class="${headTone}">${due.length ? dueLabel : `${done.length}/${rows.length}`}</b></span>
       <button class="habit-action" data-habit-new>New</button></div>
-      ${due.length ? due.map((row) => checkoff(row, false) + (row.habit.id === expanded ? detail(row) : '')).join('') : rows.length ? '<div class="habit-quiet">All habits done today.</div>' : ''}
+      ${due.length ? due.map((row) => checkoff(row, false, coins) + (row.habit.id === expanded ? detail(row) : '')).join('') : rows.length ? '<div class="habit-quiet">All habits done today.</div>' : ''}
       ${done.length ? `<div class="habit-done"><button class="habit-action" type="button" data-habit-done aria-expanded="${showDone}">Done · ${done.length}</button>
         ${showDone ? done.map((row) => `<button class="habit-done-row" type="button" data-habit-detail="${escapeHtml(row.habit.id)}">
           <span>${escapeHtml(row.habit.name)}</span><small>${row.completion.away == null ? '' : `<span aria-label="Away from all screens ${row.completion.away} min">Away ${row.completion.away}m</span>`}
-          <span>+${row.completion.reward}m</span></small></button>${row.habit.id === expanded ? detail(row) : ''}`).join('') : ''}</div>` : ''}
+          ${!coins || row.completion.wallet_reward ? `<span>${rewardLabel(row.completion.reward, coins)}</span>` : ''}</small></button>${row.habit.id === expanded ? detail(row) : ''}`).join('') : ''}</div>` : ''}
     </section>`;
     if (settingsSlot) settingsSlot.innerHTML = `<section class="habit-section">
       <div class="habit-heading"><b>Habits</b><button class="habit-action" data-habit-new>New habit</button></div>
       ${rows.map(({ habit }) => `<button class="habit-settings-row" data-habit-edit="${escapeHtml(habit.id)}"><span>${escapeHtml(habit.name)}
-        <small>${escapeHtml(cadence(habit))}</small></span><small>+${habit.reward}m</small></button>`).join('')}
-      <div class="habit-cap"><span>Daily credit cap${state.pending_cap ? `<small>+${state.pending_cap}m tomorrow</small>` : ''}</span>
+        <small>${escapeHtml(cadence(habit))}</small></span><small>${rewardLabel(habit.reward, coins)}</small></button>`).join('')}
+      <div class="habit-cap"><span>${coins ? 'Daily time-off purchase cap' : 'Daily credit cap'}${state.pending_cap != null ? `<small>+${state.pending_cap}m tomorrow</small>` : ''}</span>
         ${[30, 45, 60].map((n) => `<button type="button" class="habit-action" data-habit-cap="${n}" aria-pressed="${n === state.cap}">+${n}m</button>`).join('')}</div>
       <div class="habit-cap"><span>Lock feeds after a nudge${lockSetup ? `<small>${lockSetup}</small>` : ''}</span>
         <button type="button" class="habit-action" data-habit-feed-lock aria-pressed="${lockFeeds}">${lockFeeds ? 'On' : 'Off'}</button></div>
     </section>`;
-    onChange(state.credit, due.length, overdue.length);
+    onChange(state.credit, due.length, overdue.length, coins);
   }
 
   function setQuick(open) {
@@ -140,7 +143,7 @@ export function mountHabits(invoke, onChange) {
   function setEditor(id) {
     editId = id;
     const host = document.getElementById('habitEditor');
-    host.innerHTML = id === undefined ? '' : editor(state.rows.find((r) => r.habit.id === id)?.habit);
+    host.innerHTML = id === undefined ? '' : editor(state.rows.find((r) => r.habit.id === id)?.habit, state.wallet_active);
     host.hidden = id === undefined;
     if (!host.hidden) {
       const form = host.querySelector('form');
@@ -155,10 +158,10 @@ export function mountHabits(invoke, onChange) {
     float.hidden = true;
     onChange(state.credit);
   }
-  function showToast(name, credit, id) {
+  function showToast(name, reward, id) {
     clearTimeout(toastTimer);
     toast = id;
-    float.innerHTML = `<div class="habit-toast"><span>${escapeHtml(name)} <small>+${credit}m</small></span>
+    float.innerHTML = `<div class="habit-toast"><span>${escapeHtml(name)} <small>${reward}</small></span>
       <button type="button" class="habit-action" data-habit-undo>Undo</button><i></i></div>`;
     float.hidden = false;
     swipe(float.firstElementChild, clearToast, 'button');
@@ -207,7 +210,11 @@ export function mountHabits(invoke, onChange) {
         const [result] = await Promise.all([change({ action: 'complete', id }), new Promise((resolve) => setTimeout(resolve, 280))]);
         settling = false;
         settle();
-        if (result.event) showToast(name, Math.max(0, state.credit - prior), result.event.id);
+        if (result.event) {
+          const coins = result.event.wallet_reward === true;
+          const amount = coins ? result.event.reward : Math.max(0, state.credit - prior);
+          showToast(name, rewardLabel(amount, coins), result.event.id);
+        }
         else row.classList.remove('leaving');
       } catch (error) {
         settling = false;

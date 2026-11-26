@@ -536,15 +536,16 @@ const overlayObserver = new ResizeObserver(reportHit);
 let portalFrame;
 new MutationObserver(() => { cancelAnimationFrame(portalFrame); portalFrame = requestAnimationFrame(reportHit); }).observe(document.body, { childList: true, subtree: true });
 DevicePanel.init(invoke, (nextRange) => { if (nextRange) setRange(nextRange); if (panelOpen) refreshPanel(); }, reportHit);
-const habits = mountHabits(invoke, (credit, due, overdue) => {
+const habits = mountHabits(invoke, (credit, due, overdue, walletActive) => {
   if (due !== undefined) {
     habitDue = due;
     habitOverdue = overdue || 0;
   }
   if (due === 0) nudgeText = null;
-  const changed = credit !== earnedCredit;
+  const changed = credit !== earnedCredit || (walletActive !== undefined && window.focusWalletActive !== walletActive);
   earnedCredit = credit;
   window.focusHabitCredit = credit;
+  if (walletActive !== undefined) window.focusWalletActive = walletActive;
   updateAllowance();
   reportHit();
   if (panelOpen && changed) refreshPanel();
@@ -556,6 +557,7 @@ document.getElementById('habitTrigger').addEventListener('click', () => {
   if (!habitOverlays[0].hidden) invoke('grab_focus');
 });
 T.event.listen('habits', e => habits.refresh(e.payload));
+T.event.listen('wallet-updated', () => window.dispatchEvent(new Event('focus-wallet-updated')));
 T.event.listen('habits-updated', () => habits.load());
 T.event.listen('focus-state-transition', e => {
   liveFocusState = e.payload?.to ?? null;

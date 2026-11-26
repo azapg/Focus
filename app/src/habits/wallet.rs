@@ -263,6 +263,24 @@ impl Ledger {
         self.purchase(entry, Some(minutes))
     }
 
+    pub fn buy_time_off_for_day(
+        &mut self,
+        request_id: &str,
+        minutes: u16,
+        at: u64,
+        day: i32,
+        expected_day: Option<i32>,
+    ) -> Result<Purchase, String> {
+        if expected_day.is_some_and(|expected| expected != day)
+            && !self
+                .wallet_entries
+                .contains_key(&format!("{TIME_PREFIX}{request_id}"))
+        {
+            return Err("A new day started. Open Store to see today's allowance.".into());
+        }
+        self.buy_time_off(request_id, minutes, at, day)
+    }
+
     fn purchase(&mut self, entry: WalletEntry, minutes: Option<u16>) -> Result<Purchase, String> {
         if self.wallet_entries.contains_key(&entry.id) {
             return Ok(Purchase::AlreadyBought);
