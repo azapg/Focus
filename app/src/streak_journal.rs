@@ -326,8 +326,8 @@ pub struct StreakView {
     pub unavailable_reason: Option<&'static str>,
 }
 
-/// Bootstrap once, on the designated device. A native setup flow must supply
-/// this configuration and verified collector enrollment.
+/// Bootstrap once, on the designated device, after verified collector enrollment.
+/// A dormant wallet begins on the first day covered by the journal.
 pub fn configure(
     store: &Store,
     local_device: &str,
@@ -348,12 +348,32 @@ pub fn configure(
         if ledger.streak_journal.is_some() {
             return Err("Streak authority is already configured".into());
         }
+        let setup_day = first_day.checked_sub(1).ok_or("Invalid streak start day")?;
+        schedule_wallet(ledger, setup_day)?;
         ledger.streak_journal = Some(Journal {
             profile,
             streak: Streak::new(first_day, first_start_ms),
             days: BTreeMap::new(),
         });
         Ok(())
+    })
+}
+
+fn schedule_wallet(ledger: &mut Ledger, today: i32) -> Result<bool, String> {
+    if ledger.wallet_start.is_some() {
+        return Ok(false);
+    }
+    ledger.start_wallet(today)?;
+    Ok(true)
+}
+
+/// Schedule the cutover for profiles enrolled before wallet setup was wired in.
+pub fn schedule_enrolled_wallet(store: &Store, today: i32) -> Result<bool, String> {
+    store.update(|ledger| {
+        if ledger.streak_journal.is_none() {
+            return Ok(false);
+        }
+        schedule_wallet(ledger, today)
     })
 }
 
@@ -724,13 +744,7 @@ mod tests {
             std::env::temp_dir().join(format!("focus-streak-journal-{}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         let store = Store::new(&path);
-        store
-            .update(|ledger| {
-                ledger.start_wallet(DAY - 1)?;
-                ledger.earn("trial-grant", "test", 100, "", START, DAY)?;
-                Ok(())
-            })
-            .unwrap();
+        assert!(!schedule_enrolled_wallet(&store, DAY - 1).unwrap());
         configure(
             &store,
             "desk",
@@ -745,6 +759,25 @@ mod tests {
             START,
         )
         .unwrap();
+        let ledger = Store::new(&path).read();
+        assert!(!ledger.wallet_active(DAY - 1));
+        assert!(ledger.wallet_active(DAY));
+        // An enrolled profile from an earlier build has no wallet schedule.
+        store
+            .update(|ledger| {
+                ledger.wallet_start = None;
+                Ok(())
+            })
+            .unwrap();
+        assert!(schedule_enrolled_wallet(&store, DAY - 1).unwrap());
+        assert!(!schedule_enrolled_wallet(&store, DAY).unwrap());
+        assert_eq!(store.read().wallet_start, Some(DAY));
+        store
+            .update(|ledger| {
+                ledger.earn("trial-grant", "test", 100, "", START, DAY)?;
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(
             streak_buy_freeze(&store, "phone", "test", DAY, START).unwrap(),
             FreezePurchase::Unavailable

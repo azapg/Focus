@@ -159,11 +159,12 @@ pub fn tick(
     }
 
     tracker.enable_coverage();
+    let wallet_scheduled = streak_journal::schedule_enrolled_wallet(&core.habits, today_day)?;
     let Some((_, day, start_ms)) = streak_journal::authority_cursor(&core.habits) else {
         return Ok(false);
     };
     if day >= today_day {
-        return Ok(false);
+        return Ok(wallet_scheduled);
     }
     let end_ms = streak_journal::local_day_start(&Local, date(day + 1)?)?;
     let snapshot = core.laptop_pause_snapshot()?;
@@ -212,7 +213,7 @@ pub fn tick(
     )?;
     match outcome {
         Ok(_) => Ok(true),
-        Err(FinalizeError::Pending | FinalizeError::OutOfOrder) => Ok(false),
+        Err(FinalizeError::Pending | FinalizeError::OutOfOrder) => Ok(wallet_scheduled),
         Err(FinalizeError::InvalidEvidence) => Err("Invalid streak day evidence".into()),
     }
 }
