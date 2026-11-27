@@ -12,10 +12,11 @@ public final class FocusEventCodes {
   public static final String EVENT_LAN = "lan";
   public static final String EVENT_NEXTDNS = "nextdns";
   public static final String EVENT_DNS = "dns";
+  public static final String EVENT_INTENTION = "intention";
 
   static final Set<String> EVENTS = Set.of(
       EVENT_ASK, EVENT_PAUSE, EVENT_UPDATE, EVENT_LAN,
-      EVENT_NEXTDNS, EVENT_DNS);
+      EVENT_NEXTDNS, EVENT_DNS, EVENT_INTENTION);
 
   public static final String STAGE_START = "start";
   public static final String STAGE_LAPTOP = "laptop";
@@ -41,6 +42,13 @@ public final class FocusEventCodes {
   public static final String STAGE_ADDRESS = "address";
   public static final String STAGE_PAUSE = "pause";
   public static final String STAGE_RESUME = "resume";
+  public static final String STAGE_SET = "set";
+  public static final String STAGE_EXTEND = "extend";
+  public static final String STAGE_END = "end";
+  public static final String STAGE_PARSE_FALLBACK = "parse_fallback";
+  public static final String STAGE_SYNC = "sync";
+  public static final String STAGE_NUDGE = "nudge";
+  public static final String STAGE_TIME_UP = "time_up";
 
   static final Set<String> STAGES = Set.of(
       STAGE_START, STAGE_LAPTOP, STAGE_LAPTOP_ABANDONED, STAGE_GATEWAY, STAGE_ELIGIBILITY,
@@ -48,7 +56,8 @@ public final class FocusEventCodes {
       STAGE_CHECK, STAGE_DOWNLOAD, STAGE_VERIFY, STAGE_INSTALL,
       STAGE_BIND, STAGE_FIREWALL, STAGE_NETWORK, STAGE_CONNECT, STAGE_TLS,
       STAGE_AUTH, STAGE_REQUEST, STAGE_REACHABILITY, STAGE_ADDRESS,
-      STAGE_PAUSE, STAGE_RESUME);
+      STAGE_PAUSE, STAGE_RESUME, STAGE_SET, STAGE_EXTEND, STAGE_END, STAGE_PARSE_FALLBACK,
+      STAGE_SYNC, STAGE_NUDGE, STAGE_TIME_UP);
 
   public static final String OUTCOME_STARTED = "started";
   public static final String OUTCOME_OK = "ok";
@@ -111,6 +120,7 @@ public final class FocusEventCodes {
   public static final String FIREWALL_FAILED = "firewall_failed";
   public static final String DNS_APPLY_FAILED = "dns_apply_failed";
   public static final String NO_LAPTOP_ANSWER = "no_laptop_answer";
+  public static final String STALE = "stale";
 
   static final Set<String> CAUSES = Set.of(
       LAPTOP_UNREACHABLE, LAPTOP_TIMEOUT, LAPTOP_TLS_MISMATCH, LAPTOP_UNAUTHORIZED,
@@ -125,5 +135,5 @@ public final class FocusEventCodes {
       UPDATE_DOWNLOAD, UPDATE_VERIFY, UPDATE_NO_SPACE, UPDATE_INSTALL, UPDATE_CANCELLED,
       LAN_UNREACHABLE, LAN_TIMEOUT, LAN_TLS_MISMATCH, LAN_UNAUTHORIZED,
       LAN_REJECTED, LAN_INVALID_REPLY, LAN_BIND_FAILED, FIREWALL_FAILED,
-      DNS_APPLY_FAILED, NO_LAPTOP_ANSWER);
+      DNS_APPLY_FAILED, NO_LAPTOP_ANSWER, STALE);
 }
