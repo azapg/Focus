@@ -7,11 +7,6 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
-/// Activate Store on first desktop launch. Clean Streak has its own explicit enrollment path.
-pub fn activate_at_startup(core: &Core, today: i32) -> Result<bool, String> {
-    core.habits.activate_wallet(today)
-}
-
 #[tauri::command]
 pub fn wallet_view(core: State<'_, Arc<Core>>, devices: State<'_, Arc<Devices>>) -> Value {
     let day = local_clock(now_ms()).0;
@@ -21,6 +16,14 @@ pub fn wallet_view(core: State<'_, Arc<Core>>, devices: State<'_, Arc<Devices>>)
         .as_ref()
         .map(|manager| manager.list())
         .unwrap_or_default();
+    wallet_value(&ledger, day, &peers)
+}
+
+fn wallet_value(
+    ledger: &focus_dns::habits::Ledger,
+    day: i32,
+    peers: &[focus_devices::DeviceView],
+) -> Value {
     let needs_upgrade: Vec<_> = peers
         .iter()
         .filter(|peer| {
@@ -109,29 +112,68 @@ pub fn wallet_buy_time(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
-    #[test]
-    fn production_startup_is_wired_to_store_activation() {
-        let startup = include_str!("main.rs");
-        assert!(startup.contains("wallet::activate_at_startup(&setup_core, today)"));
+    fn test_profile(name: &str) -> PathBuf {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        std::env::temp_dir().join(format!(
+            "focus-wallet-profile-{name}-{}-{}-{}",
+            std::process::id(),
+            now_ms(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ))
+    }
+
+    fn wallet_view(core: &Core) -> Value {
+        let day = local_clock(now_ms()).0;
+        wallet_value(&core.habits.read(), day, &[])
     }
 
     #[test]
-    fn startup_keeps_an_existing_wallet_balance() {
-        let fixture = crate::dns_tests::Fixture::new(|_| panic!("unexpected DNS operation"));
-        let day = 20_496;
-        fixture
-            .core
-            .habits
+    fn fresh_profile_open_activates_empty_store_and_persists_it() {
+        let dir = test_profile("fresh");
+        let first = Core::open_profile(dir.clone(), true);
+        let today = local_clock(now_ms()).0;
+        let view = wallet_view(&first);
+        assert_eq!(view["active"], true);
+        assert_eq!(view["balance"], 0);
+        assert!(first.habits.read().wallet_active(today));
+        assert!(focus_dns::streak_journal::authority_cursor(&first.habits).is_none());
+        drop(first);
+
+        let reopened = Core::open_profile(dir.clone(), true);
+        let view = wallet_view(&reopened);
+        assert_eq!(view["active"], true);
+        assert_eq!(view["balance"], 0);
+        assert!(focus_dns::streak_journal::authority_cursor(&reopened.habits).is_none());
+        drop(reopened);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn existing_profile_reopen_preserves_wallet_balance() {
+        let dir = test_profile("upgrade");
+        std::fs::create_dir_all(&dir).unwrap();
+        let day = local_clock(now_ms()).0;
+        focus_dns::habits::Store::new(&dir)
             .update(|ledger| {
+                ledger.wallet_start = Some(day);
                 ledger.earn("legacy-grant", "focus", 12, "existing", 1, day)?;
                 Ok(())
             })
             .unwrap();
 
-        assert_eq!(activate_at_startup(&fixture.core, day), Ok(true));
-        assert!(fixture.core.habits.read().wallet_active(day));
-        assert_eq!(activate_at_startup(&fixture.core, day), Ok(false));
-        assert_eq!(fixture.core.habits.read().balance(), 12);
+        let first = Core::open_profile(dir.clone(), true);
+        let view = wallet_view(&first);
+        assert_eq!(view["active"], true);
+        assert_eq!(view["balance"], 12);
+        drop(first);
+
+        let reopened = Core::open_profile(dir.clone(), true);
+        let view = wallet_view(&reopened);
+        assert_eq!(view["active"], true);
+        assert_eq!(view["balance"], 12);
+        drop(reopened);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

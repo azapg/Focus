@@ -154,6 +154,27 @@ struct Core {
 }
 
 impl Core {
+    /// Open a Focus profile exactly as desktop startup does, including Store activation.
+    pub(crate) fn open_profile(dir: PathBuf, dry: bool) -> Self {
+        let _ = fs::create_dir_all(&dir);
+        let core = Self {
+            dir: dir.clone(), dns_config: OnceLock::new(), habits: focus_dns::habits::Store::new(&dir), intentions: focus_dns::intentions::Store::open(&dir), dry, saved: Mutex::new(Saved::default()), state_write_pending: AtomicBool::new(false), hit: Mutex::new([0.0; 4]),
+            judge_tickets: pause_judge::Tickets::default(),
+            history_write: Mutex::new(()),
+            event_sequence: Mutex::new(None),
+            dns_lock: Mutex::new(()), dns_sequence: AtomicU64::new(1), prev_fg: Mutex::new(0),
+            #[cfg(test)]
+            dns_override: Box::new(|_| panic!("tests must supply a DNS fake")),
+        };
+        let today = focus_dns::habits::local_clock(now_ms()).0;
+        match core.habits.activate_wallet(today) {
+            Ok(true) => core.log("Store wallet activated"),
+            Ok(false) => {}
+            Err(error) => core.log(&format!("Could not activate Store wallet: {error}")),
+        }
+        core
+    }
+
     fn event_log(&self) -> focus_devices::events::EventLog {
         focus_devices::events::EventLog::new(&self.dir, env!("FOCUS_BUILD_ID"))
     }
@@ -924,35 +945,29 @@ fn main() {
     let dir = PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into()))
         .join(if dry { "FocusDNS-dry" } else { "FocusDNS" });
     let _ = fs::create_dir_all(&dir);
-    let core = Arc::new(Core {
-        dir: dir.clone(), dns_config: OnceLock::new(), habits: focus_dns::habits::Store::new(&dir), intentions: focus_dns::intentions::Store::open(&dir), dry, saved: Mutex::new(Saved::default()), state_write_pending: AtomicBool::new(false), hit: Mutex::new([0.0; 4]),
-        judge_tickets: pause_judge::Tickets::default(),
-        history_write: Mutex::new(()),
-        event_sequence: Mutex::new(None),
-        dns_lock: Mutex::new(()), dns_sequence: AtomicU64::new(1), prev_fg: Mutex::new(0),
-        #[cfg(test)]
-        dns_override: Box::new(|_| panic!("tests must supply a DNS fake")),
-    });
     overlay::install_panic_hook(dir.clone());
-    core.log(&format!(
+    let elevated = is_elevated();
+    overlay::append_log(&dir, &format!(
         "start v{} build={} pid={} dry_run={dry} elevated={} from_task={from_task}",
         env!("CARGO_PKG_VERSION"),
         env!("FOCUS_BUILD_ID"),
         std::process::id(),
-        is_elevated()
+        elevated
     ));
 
-    if !dry && !is_elevated() {
+    if !dry && !elevated {
         if from_task {
-            core.log("started by the FocusDNS task but without admin rights; reinstall with scripts/install.ps1");
+            overlay::append_log(&dir, "started by the FocusDNS task but without admin rights; reinstall with scripts/install.ps1");
         } else {
             // Double-clicked: let the scheduled task (which has admin rights) start the real one.
-            core.log("not admin, asking the FocusDNS task to start the app instead");
+            overlay::append_log(&dir, "not admin, asking the FocusDNS task to start the app instead");
             use std::os::windows::process::CommandExt;
             let _ = Command::new("schtasks").args(["/run", "/tn", "FocusDNS"]).creation_flags(NO_WINDOW).status();
         }
         return;
     }
+
+    let core = Arc::new(Core::open_profile(dir.clone(), dry));
 
     let already_running = !dry && overlay::is_single_instance_mutex_held(APP_IDENTIFIER);
     if already_running {
@@ -1001,12 +1016,6 @@ fn main() {
             intention_commands::intention_end])
         .setup(move |app| {
             setup_core.log("setup: entered");
-            let today = focus_dns::habits::local_clock(now_ms()).0;
-            match wallet::activate_at_startup(&setup_core, today) {
-                Ok(true) => setup_core.log("Store wallet activated"),
-                Ok(false) => {}
-                Err(error) => setup_core.log(&format!("Could not activate Store wallet: {error}")),
-            }
             let mut initial_state = setup_core.read_state_for_startup()?;
             if !setup_core.dry {
                 if let Err(error) = setup_core.dns("recover") {
