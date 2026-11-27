@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import ActivityClassifier from '../ui/activity-classifier.js';
 
 const MIN = 60_000;
+const focusEligibilityFixtures = JSON.parse(fs.readFileSync(new URL('../shared/focus-eligibility-fixtures.json', import.meta.url)));
 
 test('normalizes app.notion.com into Notion and deduplicates pages by page ID', () => {
   const spans = [
@@ -392,4 +394,75 @@ test('detectFocusSessions rewards unbroken single-app runs (25m build/write, 15m
   assert.equal(byApp['Readest'].focusMs, 0);
   assert.equal(byApp['Duolingo'].focusMs, 16 * m);
   assert.equal(byApp['NotebookLM'].focusMs, 18 * m);
+});
+
+test('observed video/feed eligibility stays separate from Learning display labels on desktop and phone', () => {
+  const { durationMs, youtubeWatch, youtubeOtherPage, learningControls, readingControl } = focusEligibilityFixtures;
+  const desktopRule = { rules: [{ match: 'host', value: 'youtube.com', ...youtubeWatch.displayRule }] };
+  const phoneRule = { rules: [{ match: 'package', value: youtubeWatch.phonePackage, ...youtubeWatch.displayRule }] };
+  const desktopWatch = {
+    s: 0, e: durationMs, app: 'Chrome', label: 'youtube.com', source: 'chromium_extension',
+    browser: { url: youtubeWatch.desktopUrl, title: 'Fictional lesson - YouTube', audible: true },
+  };
+  const phoneWatch = { s: 0, e: durationMs, app: youtubeWatch.phonePackage, label: 'YouTube' };
+  const sources = [
+    { id: 'laptop', name: 'Laptop', kind: 'windows', history: { now: durationMs, spans: [desktopWatch], pauses: [] } },
+    { id: 'phone', name: 'Phone', kind: 'phone', history: { now: durationMs, spans: [phoneWatch], pauses: [] } },
+  ];
+
+  const fine = ActivityClassifier.summarizeFine(sources, 0, durationMs, { userRules: desktopRule });
+  assert.equal(fine.apps.find((a) => a.app === 'Lessons')?.category, 'learning', 'the visible category remains Learning');
+  assert.equal(fine.apps.find((a) => a.app === 'Lessons')?.ms, durationMs);
+  assert.equal(fine.focus.totalMs, 0, 'the desktop video stays ineligible when a host rule displays Learning');
+  assert.equal(ActivityClassifier.detectFocusSessions(sources, 0, durationMs, {
+    userRules: desktopRule,
+  }).totalMs, 0, 'a host rule that displays Learning cannot grant focus eligibility');
+  assert.equal(ActivityClassifier.detectFocusSessions([sources[0]], 0, durationMs, {
+    cache: { items: { 'app:YouTube': 'learning' } },
+  }).totalMs, 0, 'a legacy per-app Learning category cannot grant focus eligibility');
+  assert.equal(ActivityClassifier.detectFocusSessions([sources[1]], 0, durationMs, { userRules: phoneRule }).totalMs, 0,
+    'the phone YouTube package stays ineligible when a package rule displays Learning');
+  const homeFeed = { ...desktopWatch, browser: { ...desktopWatch.browser, url: 'https://www.youtube.com/' } };
+  assert.equal(ActivityClassifier.detectFocusSessions([{
+    id: 'laptop', name: 'Laptop', kind: 'windows', history: { now: durationMs, spans: [homeFeed], pauses: [] },
+  }], 0, durationMs, { userRules: desktopRule }).totalMs, 0, 'the YouTube home feed remains excluded when displayed as Learning');
+
+  const otherPage = {
+    ...desktopWatch,
+    browser: { ...desktopWatch.browser, url: youtubeOtherPage.desktopUrl },
+  };
+  const observedPage = ActivityClassifier.classifySpan(otherPage, 'windows');
+  assert.equal(observedPage.itemKind, 'page');
+  assert.equal(ActivityClassifier.classifySpan(homeFeed, 'windows').itemKind, 'feed');
+  assert.equal(ActivityClassifier.classifySpan({ ...homeFeed, browser: { ...homeFeed.browser, url: 'https://www.youtube.com/shorts' } }, 'windows').itemKind, 'feed');
+  assert.equal(ActivityClassifier.classifySpan(desktopWatch, 'windows').itemKind, 'video');
+  assert.equal(ActivityClassifier.focusEligibility(otherPage, 'windows').isWaste, false,
+    'a non-video YouTube URL is not blanket-classified as a video or feed');
+  assert.equal(ActivityClassifier.focusEligibility(otherPage, 'windows').minMs, 0,
+    'an unknown page also cannot become eligible from its display label');
+
+  const controlSources = [
+    { id: 'phone', name: 'Phone', kind: 'phone', history: { now: learningControls.durationMs, spans: [
+      { s: 0, e: learningControls.durationMs, app: learningControls.phonePackage, label: 'Duolingo' },
+    ], pauses: [] } },
+    { id: 'laptop', name: 'Laptop', kind: 'windows', history: { now: readingControl.durationMs, spans: [
+      { s: 0, e: readingControl.durationMs, app: 'Chrome', label: 'read.amazon.com', source: 'chromium_extension',
+        browser: { url: readingControl.desktopUrl, title: 'Fictional book', audible: false } },
+    ], pauses: [] } },
+  ];
+  assert.equal(ActivityClassifier.detectFocusSessions([controlSources[0]], 0, learningControls.durationMs).totalMs, learningControls.durationMs,
+    'known phone Learning remains eligible at the 15m boundary');
+  assert.equal(ActivityClassifier.detectFocusSessions([controlSources[1]], 0, readingControl.durationMs).totalMs, readingControl.durationMs,
+    'known desktop Reading remains eligible at the 15m boundary');
+
+  const sharedDisplayName = { rules: [
+    { match: 'app', value: 'T3 Code', app: 'Shared work label', category: 'writing' },
+    { match: 'app', value: 'VS Code', app: 'Shared work label', category: 'writing' },
+  ] };
+  const renamedApps = [{ id: 'laptop', name: 'Laptop', kind: 'windows', history: { now: 30 * MIN, spans: [
+    { s: 0, e: 15 * MIN, app: 'T3 Code', label: 'T3 Code' },
+    { s: 15 * MIN, e: 30 * MIN, app: 'VS Code', label: 'VS Code' },
+  ], pauses: [] } }];
+  assert.equal(ActivityClassifier.detectFocusSessions(renamedApps, 0, 30 * MIN, { userRules: sharedDisplayName }).totalMs, 0,
+    'display aliases cannot join separate observed apps into one qualifying run');
 });

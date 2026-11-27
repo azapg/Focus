@@ -461,7 +461,17 @@ const ActivityClassifier = (() => {
     if (base === 'youtube.com' || base === 'm.youtube.com' || base === 'youtu.be') {
       const vid = urlObj.searchParams.get('v') || (base === 'youtu.be' ? path.slice(1) : '');
       const videoTitle = stripSuffix(title, [' - YouTube', ' · YouTube']);
-      return { app: 'YouTube', category: 'watching', itemKey: vid ? `yt:${vid}` : `yt:${path}`, itemTitle: videoTitle || 'YouTube', itemKind: vid ? 'video' : 'feed', matchType: 'host', matchValue: base };
+      const videoRoute = base === 'youtu.be' || path === '/watch' || Boolean(vid) || /^\/(?:shorts|live|embed)\/[^/]+/.test(path);
+      const feedRoute = path === '/' || /^\/(?:feed|results|playlist|channel|c|user|@|shorts|live)(?:\/|$)/.test(path);
+      return {
+        app: 'YouTube',
+        category: videoRoute ? 'watching' : feedRoute ? 'browsing' : 'unknown',
+        itemKey: vid ? `yt:${vid}` : `yt:${path}`,
+        itemTitle: videoTitle || 'YouTube',
+        itemKind: videoRoute ? 'video' : feedRoute ? 'feed' : 'page',
+        matchType: 'host',
+        matchValue: base,
+      };
     }
 
     if (base === 'twitch.tv') {
@@ -1033,6 +1043,23 @@ const ActivityClassifier = (() => {
   const FOCUS_GLANCE_MS = 45e3;
   const FOCUS_AWAY_MS = 2 * MIN;
 
+  /**
+   * Reward eligibility from the underlying observed activity. User rules and the
+   * category cache are display choices; they cannot turn a video/feed into focus
+   * or make an unknown app eligible. Known reading and learning apps remain eligible.
+   */
+  function focusEligibility(span, deviceKind = 'windows') {
+    const observed = classifySpan(span, deviceKind, null);
+    const fine = fineCategory(span, observed, deviceKind, null);
+    const minMs = FOCUS_THRESHOLDS[fine.id] || 0;
+    return {
+      appKey: observed.app,
+      category: fine.id,
+      minMs,
+      isWaste: FOCUS_WASTE_CATS.has(fine.id) || observed.itemKind === 'video' || observed.itemKind === 'feed',
+    };
+  }
+
   function subtractIntervals(a, b, cuts) {
     if (b <= a) return [];
     if (!cuts.length) return [[a, b]];
@@ -1079,12 +1106,13 @@ const ActivityClassifier = (() => {
         if (b <= a) continue;
         const c = classifySpan(s, src.kind, userRules);
         const f = fineCategory(s, c, src.kind, cache);
+        const eligibility = focusEligibility(s, src.kind);
         const explicit = cache?.items?.[`app:${c.app}`];
         if (c.noise && !explicit) continue;
-        const minMs = FOCUS_THRESHOLDS[f.id] || 0;
-        const isWaste = FOCUS_WASTE_CATS.has(f.id);
+        const minMs = eligibility.minMs;
+        const isWaste = eligibility.isWaste;
         for (const [pa, pb] of subtractIntervals(a, b, offs)) {
-          events.push({ s: pa, e: pb, app: f.app, category: f.id, minMs, isWaste, isBreak: false });
+          events.push({ s: pa, e: pb, app: f.app, appKey: eligibility.appKey, category: f.id, minMs, isWaste, isBreak: false });
         }
       }
       events.sort((x, y) => x.s - y.s || (x.isBreak ? -1 : y.isBreak ? 1 : 0));
@@ -1113,6 +1141,7 @@ const ActivityClassifier = (() => {
 
       const startFrom = (ev) => (ev.minMs ? {
         app: ev.app,
+        appKey: ev.appKey,
         category: ev.category,
         minMs: ev.minMs,
         start: ev.s,
@@ -1134,7 +1163,7 @@ const ActivityClassifier = (() => {
           return;
         }
         const gapFromCur = ev.s - cur.end;
-        if (ev.app === cur.app && ev.minMs) {
+        if (ev.appKey === cur.appKey && ev.minMs) {
           const ok = pending.length === 0
             ? gapFromCur <= FOCUS_AWAY_MS
             : gapFromCur <= FOCUS_GLANCE_MS;
@@ -1293,6 +1322,7 @@ const ActivityClassifier = (() => {
     FINE,
     FOCUS_THRESHOLDS,
     fineCategory,
+    focusEligibility,
     detectFocusSessions,
     summarizeFine,
   };

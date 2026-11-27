@@ -1,0 +1,19 @@
+{
+  "durationMs": 1800000,
+  "youtubeWatch": {
+    "desktopUrl": "https://www.youtube.com/watch?v=fictional-lesson",
+    "phonePackage": "com.google.android.youtube",
+    "displayRule": { "category": "learning", "app": "Lessons" }
+  },
+  "youtubeOtherPage": {
+    "desktopUrl": "https://www.youtube.com/policies/fictional-guide"
+  },
+  "learningControls": {
+    "phonePackage": "com.duolingo",
+    "durationMs": 900000
+  },
+  "readingControl": {
+    "desktopUrl": "https://read.amazon.com/kindle/fictional-book",
+    "durationMs": 900000
+  }
+}
