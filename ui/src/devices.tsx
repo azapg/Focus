@@ -373,6 +373,7 @@ const Statistics = memo(() => (
         <div className="legend" id="pLegend" hidden />
       </div>
       <div id="habitSection" />
+      <div id="pIntentionsSec" className="p-sec-intentions" hidden />
       <div className="bento-grid">
         <div className="bento-card" id="pAppsCard">
           <div className="bento-head" id="pAppsLbl">

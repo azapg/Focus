@@ -110,7 +110,7 @@ const Panel = (() => {
     return `<span class="app-ico letter" aria-hidden="true">${esc(letter)}</span>`;
   }
 
-  function renderHero(fine, range, selectedDay, { days = 1, overLimit = false } = {}) {
+  function renderHero(fine, range, selectedDay, { days = 1, overLimit = false, intentions = null } = {}) {
     const statsEl = $('pStats');
     statsEl.classList.add('ratio-mode');
     const total = fine.total;
@@ -171,10 +171,22 @@ const Panel = (() => {
           ${extraRuns ? `<span class="focus-log-more">+${extraRuns} more</span>` : ''}
         </div>`
       : '';
+    let intentSummaryHtml = '';
+    let intentUnclearHtml = '';
+    if (range === 'today' && intentions && (intentions.totalIntentions > 0 || intentions.unclearMs >= Stats.MIN)) {
+      const counts = [];
+      if (intentions.doneCount > 0) counts.push(`${intentions.doneCount} done`);
+      if (intentions.partlyCount > 0) counts.push(`${intentions.partlyCount} partly`);
+      if (intentions.runningCount > 0) counts.push(`${intentions.runningCount} running`);
+      if (counts.length) intentSummaryHtml = `, <b data-intent-summary>${counts.join(', ')}</b>`;
+      if (intentions.unclearMs >= Stats.MIN) {
+        intentUnclearHtml = `<span class="hero-unclear" data-intent-unclear>, ${Stats.fmt(intentions.unclearMs)} unclear</span>`;
+      }
+    }
     statsEl.innerHTML = `
       <div class="hero-line">
         <span class="hero-total v" data-total>${Stats.fmt(total)}</span>
-        <span class="hero-sent">on screens, <b data-build-pct>${Stats.fmt(building)} building</b>${focusMs >= 60e3 ? `, <span class="hero-focus" data-deep-focus>${Stats.fmt(focusMs)} deep focus</span>${focusCoinsText ? ` <span class="hero-focus-coins" data-focus-coins>· ${esc(focusCoinsText)}</span>` : ''}` : ''}${drift >= 60e3 ? `, <span class="hero-drift${heavyDrift ? ' bad' : ''}">${Stats.fmt(drift)} drifting</span>` : ''}.</span>
+        <span class="hero-sent">on screens, <b data-build-pct>${Stats.fmt(building)} building</b>${focusMs >= 60e3 ? `, <span class="hero-focus" data-deep-focus>${Stats.fmt(focusMs)} deep focus</span>${focusCoinsText ? ` <span class="hero-focus-coins" data-focus-coins>· ${esc(focusCoinsText)}</span>` : ''}` : ''}${drift >= 60e3 ? `, <span class="hero-drift${heavyDrift ? ' bad' : ''}">${Stats.fmt(drift)} drifting</span>` : ''}${intentSummaryHtml}${intentUnclearHtml}.</span>
       </div>
       <div class="thin-bar">
         ${major.map((c) => {
@@ -409,6 +421,8 @@ const Panel = (() => {
         const k = e.target.closest('[data-pz]').dataset.pz;
         openPause = openPause === k ? null : k;
         if (lastRenderArgs) renderFromSnapshot(lastRenderArgs);
+      } else if (e.target.closest('[data-intent-new]')) {
+        window.dispatchEvent(new Event('focus-open-intention'));
       }
     });
     document.addEventListener('keydown', (e) => {
@@ -634,6 +648,73 @@ const Panel = (() => {
     return { count: pauses.length, overLimit, days };
   }
 
+  function renderIntentions(sources, fine, range, from, to) {
+    const sec = $('pIntentionsSec');
+    if (!sec) return null;
+    if (range !== 'today') {
+      sec.hidden = true;
+      sec.innerHTML = '';
+      return null;
+    }
+    const laptop = sources.find((s) => s.id === 'laptop') || sources[0];
+    if (!laptop || !Array.isArray(laptop.history?.intentions)) {
+      sec.hidden = true;
+      sec.innerHTML = '';
+      return null;
+    }
+    const sum = Stats.summarizeIntentions(laptop.history, from, to, {
+      classifier: ActivityClassifier,
+      userRules: rulesDoc,
+      cache: fineCache,
+      focusRuns: fine?.focus?.runs,
+    });
+    const segClass = (kind) => ({ ice: ' class="ice"', muted: ' class="g"', drift: ' class="o"', away: ' class="h"' }[kind] || '');
+    const renderDetail = (d) => {
+      if (d.kind === 'focus') return `<span class="ice">${esc(d.text)}</span>`;
+      if (d.kind === 'drift') return `<span class="o">${esc(d.text)}</span>`;
+      return esc(d.text);
+    };
+    const rowsHtml = sum.rows.map((r) => {
+      if (r.kind === 'none') {
+        const bars = r.segments.map((seg) => `<i class="o" style="flex:${seg.ms}"></i>`).join('');
+        const det = r.details.length ? `<div class="det"><span class="o">${r.details.map((d) => esc(d.text)).join(' · ')}</span></div>` : '';
+        return `<div class="irow" data-intent-row="none">
+          <span class="tm">${time(r.start)}</span>
+          <div>
+            <div class="what o">No intention</div>
+            <div class="mini">${bars}</div>
+            ${det}
+          </div>
+          <div class="num o">${Stats.fmt(r.actualMs)}</div>
+        </div>`;
+      }
+      const bars = r.segments.map((seg) => `<i${segClass(seg.kind)} style="flex:${seg.ms}"></i>`).join('');
+      const detHtml = r.details.map(renderDetail).join(' · ');
+      const ext = r.extensions ? ` (+${r.extensions * 10}m)` : '';
+      const sub = `planned ${Stats.fmt(r.plannedMs)}${ext} · ${r.statusLabel}`;
+      return `<div class="irow" data-intent-row="${esc(r.outcome || (r.running ? 'running' : 'done'))}">
+        <span class="tm">${time(r.start)}</span>
+        <div>
+          <div class="what">${esc(r.label)}</div>
+          ${r.doneWhen ? `<div class="det">Done when: ${esc(r.doneWhen)}</div>` : ''}
+          <div class="mini">${bars}</div>
+          ${detHtml ? `<div class="det">${detHtml}</div>` : ''}
+        </div>
+        <div class="num">${Stats.fmt(r.actualMs)}<small>${esc(sub)}</small></div>
+      </div>`;
+    }).join('');
+
+    sec.hidden = false;
+    sec.innerHTML = `<div class="bento-card">
+      <div class="bento-head">
+        <span class="bento-title">Intentions</span>
+        <button type="button" class="bento-action" data-intent-new>New</button>
+      </div>
+      ${sum.rows.length ? `<div class="intent-list">${rowsHtml}</div>` : '<div class="bento-empty">No intention set today.</div>'}
+    </div>`;
+    return sum;
+  }
+
   function renderFromSnapshot({ invoke, range, sources, allSources, scoped, from, to, today, days, now }) {
     bindDelegatedEvents();
     if (range !== lastRange) {
@@ -652,6 +733,8 @@ const Panel = (() => {
       const sec = $('pTimelineSec') || $('pChart')?.parentElement;
       if (sec) sec.hidden = true;
       $('pChart').innerHTML = '';
+      const isec = $('pIntentionsSec');
+      if (isec) { isec.hidden = true; isec.innerHTML = ''; }
       $('pAppsLbl').innerHTML = '<span class="bento-title">Screen time</span>';
       $('pApps').innerHTML = '<div class="bento-empty">No device data selected.</div>';
       const af = $('pAppsFoot'); if (af) { af.hidden = true; af.innerHTML = ''; }
@@ -671,7 +754,8 @@ const Panel = (() => {
     const fine = ActivityClassifier.summarizeFine(sources, viewFrom, viewTo, { userRules: rulesDoc, cache: fineCache });
 
     const limitCtx = renderPausesColumn(sources, allSources, viewFrom, viewTo, isMultiDay, multi, scoped);
-    renderHero(fine, range, activeDay, limitCtx);
+    const intentSum = renderIntentions(sources, fine, range, viewFrom, viewTo);
+    renderHero(fine, range, activeDay, { ...limitCtx, intentions: intentSum });
     renderTimeline(sources, range, today, days);
     renderScreenTime(fine, multi, limitCtx);
     renderExplorer(fine, multi, range, days, activeDay, limitCtx);
