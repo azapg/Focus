@@ -278,7 +278,8 @@ public final class LanController {
       case "dns_resume":
         if (!dns.enabled()) throw new IllegalStateException("Connect a NextDNS profile first");
         dns.resume(); break;
-      case "dns_disconnect": dns.disconnect(); break;
+      case "dns_disconnect":
+        throw new IllegalStateException("Disconnecting NextDNS is disabled on TV");
       case "dns_verify": dns.checkAsync(null); break;
       case "set_rule": {
         if (!RestrictionService.connected || !store.usageAllowed())

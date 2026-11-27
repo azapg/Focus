@@ -88,6 +88,12 @@ final class HabitDashboard {
   }
 
   private void complete(Habits.Status row, FrameLayout host, Runnable refresh) {
+    completeHabit(activity, row, host, refresh);
+  }
+
+  static void completeHabit(Activity activity, Habits.Status row, FrameLayout host, Runnable refresh) {
+    Store activityStore = Store.get(activity);
+    HabitStore habits = HabitStore.get(activity);
     activityStore.collect();
     long checkedAt = System.currentTimeMillis();
     long from = Math.max(checkedAt - 32 * 60_000L, activityStore.habitObservedFrom());
@@ -102,7 +108,7 @@ final class HabitDashboard {
     int prior = habits.read().credit(day);
     Habits.Event completed = habits.complete(row.habit.id, checkedAt, Habits.away(checkedAt, local, new ArrayList<>(habits.screens().values())));
     refresh.run();
-    if (completed != null) {
+    if (completed != null && host != null) {
       int earned = completed.walletReward ? completed.reward : Math.max(0, habits.read().credit(day) - prior);
       undo(host, row.habit.name, rewardLabel(earned, completed.walletReward), 18, () -> { habits.undo(completed.id); refresh.run(); });
     }

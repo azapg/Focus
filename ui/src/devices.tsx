@@ -973,7 +973,6 @@ function RemoteDeviceTab({ device }: { device: Device }) {
   const [profile, setProfile] = useState(dns?.profile || "");
   const [dirty, setDirty] = useState(false);
   const [pause, setPause] = useState<number | null>(null);
-  const [restore, setRestore] = useState(false);
   useEffect(() => {
     if (!dirty) setProfile(dns?.profile || "");
   }, [dns?.profile, dirty]);
@@ -1125,43 +1124,7 @@ function RemoteDeviceTab({ device }: { device: Device }) {
                     >
                       Verify connection
                     </button>
-                    <button
-                      type="button"
-                      className="t3-btn"
-                      disabled={disabled || !dns?.enabled}
-                      onClick={() => setRestore(true)}
-                    >
-                      Restore previous DNS
-                    </button>
                   </div>
-                  {restore && (
-                    <div className="focus-control-row mt-3">
-                      <span>Restore the {noun}’s previous DNS settings?</span>
-                      <button
-                        type="button"
-                        className="t3-btn primary"
-                        onClick={async () => {
-                          if (
-                            await command(
-                              { action: "dns_disconnect" },
-                              false,
-                              device.id,
-                            )
-                          )
-                            setRestore(false);
-                        }}
-                      >
-                        Restore
-                      </button>
-                      <button
-                        type="button"
-                        className="t3-btn"
-                        onClick={() => setRestore(false)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  )}
                   <p className="mt-3">
                     Cached content and existing streams may continue after filtering
                     resumes.

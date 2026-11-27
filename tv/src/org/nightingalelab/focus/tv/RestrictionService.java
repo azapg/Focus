@@ -152,15 +152,32 @@ public final class RestrictionService extends AccessibilityService {
         };
     root.setOrientation(LinearLayout.VERTICAL);
     root.setGravity(Gravity.CENTER);
-    root.setBackgroundColor(Ui.BG);
-    TextView title = Ui.text(this, AppCatalog.label(this, pkg), 34, Ui.FG);
+    root.setBackground(Ui.tvBackground());
+    TextView title = Ui.text(this, AppCatalog.label(this, pkg) + " is blocked", 34, Ui.FG);
     title.setGravity(Gravity.CENTER);
     root.addView(title);
-    Ui.gap(root, 20);
-    Button allow =
-        Ui.button(
+    Ui.gap(root, 8);
+    TextView hint = Ui.text(this, "Go read, finish a habit, or focus on something.", 16, Ui.MUTED);
+    hint.setGravity(Gravity.CENTER);
+    root.addView(hint);
+    Ui.gap(root, 22);
+    Button done =
+        Ui.glassButton(
             this,
-            "Free time & options",
+            "Done with TV",
+            () -> {
+              performGlobalAction(GLOBAL_ACTION_HOME);
+              front = "";
+              remove();
+            });
+    Ui.add(root, done, 260, 48);
+    Ui.gap(root, 10);
+    Ui.add(
+        root,
+        Ui.dockTab(
+            this,
+            "Options",
+            false,
             () -> {
               try {
                 startActivity(
@@ -170,21 +187,9 @@ public final class RestrictionService extends AccessibilityService {
               } catch (RuntimeException e) {
                 Store.get(this).diagnostic("block_open_failed");
               }
-            });
-    Ui.add(root, allow, 250, 48);
-    Ui.gap(root, 10);
-    Ui.add(
-        root,
-        Ui.button(
-            this,
-            "Home",
-            () -> {
-              performGlobalAction(GLOBAL_ACTION_HOME);
-              front = "";
-              remove();
             }),
-        250,
-        48);
+        200,
+        40);
     WindowManager.LayoutParams p =
         new WindowManager.LayoutParams(
             -1,
@@ -193,7 +198,7 @@ public final class RestrictionService extends AccessibilityService {
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.OPAQUE);
     add(root, p, pkg, true);
-    allow.requestFocus();
+    done.requestFocus();
   }
 
   private void add(View v, WindowManager.LayoutParams p, String pkg, boolean block) {

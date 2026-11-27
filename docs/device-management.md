@@ -24,7 +24,7 @@ in the TV's **Settings → Connected devices**. Guest Wi-Fi or router isolation 
 prevent devices from finding each other. Sleeping TVs may be unreachable.
 
 Select the TV on the settings page to change its NextDNS profile, pause or resume
-filtering, verify the resolver, or restore its previous DNS. Expand an app to block
+filtering, or verify the resolver. Expand an app to block
 it, set a daily limit or overnight schedule, or grant/end a reason-required timed
 exception. Rules and timers run on the TV even when the laptop disconnects.
 The existing one-time TV settings grant is still required for DNS controls;
@@ -116,8 +116,8 @@ does not keep a sleeping TV awake. Wake/standby reachability depends on the TV.
 | `GET /v1/snapshot` | Pinned TLS + credential | Recent spans/pauses, app rules, DNS and permission state |
 | `POST /v1/command` | Pinned TLS + credential | Apply one control and return a confirmed snapshot |
 
-Commands are `dns_connect`, `dns_pause`, `dns_resume`, `dns_disconnect`,
-`dns_verify`, `set_rule`, `app_pause` and `app_resume`. Pauses require 1, 5, 10 or 30
+Commands are `dns_connect`, `dns_pause`, `dns_resume`, `dns_verify`,
+`set_rule`, `app_pause` and `app_resume`. Pauses require 1, 5, 10 or 30
 minutes and a 3–200-character reason. Partial rule updates preserve other fields.
 The server rejects protected packages, nonintegral/out-of-range values and missing
 permissions. The versioned snapshot is validated before replacing the desktop cache.

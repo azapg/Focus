@@ -69,6 +69,7 @@ async def main(output=None):
   assert not await page.locator('#statsPage').is_visible()
   await page.locator('[data-stab="device:tv-one"]').click()
   assert await page.locator('#dnsProfile').input_value()=='f0c057'
+  assert await page.get_by_role('button',name='Restore previous DNS').count()==0
   youtube=page.locator('[data-package="tv.youtube"]')
   await youtube.locator('[data-slot=collapsible-trigger]').first.click()
   await youtube.get_by_role('checkbox',name='Block app',exact=True).check()

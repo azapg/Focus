@@ -3,17 +3,22 @@ package org.nightingalelab.focus.tv;
 import android.app.*;
 import android.content.*;
 import android.os.*;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
 import android.view.*;
 import android.widget.*;
-import java.util.UUID;
+import java.util.List;
 import org.nightingalelab.focus.habits.HabitStore;
+import org.nightingalelab.focus.habits.HabitViews;
 import org.nightingalelab.focus.habits.Habits;
-import org.nightingalelab.focus.habits.Wallet;
 
+/** Option A quiet redirect: calm monochrome block screen that leads with a habit or focus nudge. */
 public final class BlockActivity extends Activity {
   public static volatile boolean visible;
   public static volatile String presentedPackage = "";
   private String pkg;
+  private FrameLayout host;
 
   @Override
   public void onCreate(Bundle b) {
@@ -36,73 +41,100 @@ public final class BlockActivity extends Activity {
       return;
     }
     presentedPackage = pkg;
-    Wallet wallet = HabitStore.get(this).read().wallet;
-    int day = Habits.day(System.currentTimeMillis());
-    long balance = wallet.balance();
-    int remaining = wallet.timeOffLimitRemaining(day);
-    int packMinutes = (remaining >= 10 && balance >= 10 * Wallet.TIME_OFF_PRICE_PER_MINUTE) ? 10 : 5;
-    int packCoins = packMinutes * Wallet.TIME_OFF_PRICE_PER_MINUTE;
-    boolean canBuy = wallet.active(day) && remaining >= packMinutes && balance >= packCoins;
+    render();
+    Store.get(this).diagnostic("blocked_app_presented");
+  }
 
-    LinearLayout root = Ui.screen(this);
+  private void render() {
+    if (pkg == null || !AppCatalog.allowed(this, pkg) || Store.get(this).restricted(pkg) == null) {
+      finish();
+      return;
+    }
+    long now = System.currentTimeMillis();
+    int day = Habits.day(now);
+    Habits ledger = HabitStore.get(this).read();
+    List<Habits.Status> statuses = ledger.status(now);
+    Habits.Status nextDue = null;
+    for (Habits.Status s : statuses) {
+      if (s.due) {
+        nextDue = s;
+        break;
+      }
+    }
+    boolean coins = ledger.wallet.active(day);
+
+    if (host == null) {
+      host = new FrameLayout(this);
+      setContentView(host);
+    } else if (host.getChildCount() > 0) {
+      host.removeViewAt(0);
+    }
+
+    LinearLayout root = Ui.column(this);
+    root.setBackground(Ui.tvBackground());
+    root.setPadding(Ui.dp(this, 48), Ui.dp(this, 28), Ui.dp(this, 48), Ui.dp(this, 28));
     root.setGravity(Gravity.CENTER);
-    TextView title = Ui.text(this, AppCatalog.label(this, pkg), 38, Ui.FG);
+
+    LinearLayout badge = Ui.row(this);
+    badge.setGravity(Gravity.CENTER);
+    ImageView mark = new ImageView(this);
+    mark.setImageResource(R.drawable.focus_ring);
+    mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+    badge.addView(mark, new LinearLayout.LayoutParams(Ui.dp(this, 20), Ui.dp(this, 20)));
+    Ui.gap(badge, 8);
+    badge.addView(Ui.text(this, "Focus  ·  NextDNS " + DnsController.get(this).status(), 14, Ui.MUTED));
+    root.addView(badge);
+    Ui.gap(root, 14);
+
+    TextView title = Ui.text(this, AppCatalog.label(this, pkg) + " is blocked", 38, Ui.FG);
     title.setGravity(Gravity.CENTER);
     root.addView(title);
-    Ui.gap(root, 10);
-    TextView status = Ui.text(this,
-        Store.get(this).restricted(pkg) + "  ·  " + balance + (balance == 1 ? " coin" : " coins"),
-        18, Ui.MUTED);
-    status.setGravity(Gravity.CENTER);
-    root.addView(status);
-    Ui.gap(root, 26);
+    Ui.gap(root, 8);
 
-    String buyLabel = canBuy
-        ? packMinutes + " min free · " + packCoins + " coins"
-        : "Store free time (" + balance + " coins)";
-    Button freeTime = Ui.button(this, buyLabel, () -> {
-      if (canBuy) {
-        PauseForm.confirmFreeTime(this, pkg, packMinutes, packCoins, () -> {
-          PauseForm.openApp(this, pkg);
-          finish();
-        });
-      } else {
-        PauseForm.showFreeTimeStore(this, pkg, () -> {
-          PauseForm.openApp(this, pkg);
-          finish();
-        });
+    String habitName = nextDue == null ? "" : nextDue.habit.name;
+    String subText = TvRedirect.blockSubhead(habitName, !statuses.isEmpty());
+    TextView sub = Ui.text(this, subText, 17, Ui.MUTED);
+    sub.setGravity(Gravity.CENTER);
+    if (nextDue != null) {
+      int start = subText.indexOf(habitName);
+      if (start >= 0) {
+        SpannableString styled = new SpannableString(subText);
+        int accent = (nextDue.overdue || nextDue.grace) ? Ui.RED : Ui.ORANGE;
+        styled.setSpan(new ForegroundColorSpan(accent), start, start + habitName.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sub.setText(styled);
       }
-    });
-    Ui.add(root, freeTime, 310, 50);
+    }
+    root.addView(sub);
+    Ui.gap(root, 20);
+
+    if (nextDue != null) {
+      Habits.Status target = nextDue;
+      HabitViews.Hold hold = new HabitViews.Hold(
+          this, target, 17, coins, () -> HabitDashboard.completeHabit(this, target, host, this::render), null);
+      Ui.applyFocusLift(hold, 1.02f);
+      Ui.add(root, hold, 430, -2);
+      Ui.gap(root, 18);
+    }
+
+    Button doneWithTv = Ui.glassButton(this, "Done with TV", this::home);
+    Ui.add(root, doneWithTv, 300, 50);
     Ui.gap(root, 10);
 
-    Button phoneAsk = Ui.button(this, "Ask on phone", this::showPhoneHint);
-    Ui.add(root, phoneAsk, 310, 48);
-    Ui.gap(root, 10);
+    Button phoneOnly = Ui.dockTab(this, "Need a break? Use Focus on phone", false, this::showPhoneHint);
+    Ui.add(root, phoneOnly, 330, 42);
 
-    Ui.add(root, Ui.button(this, "Home", this::home), 310, 48);
-    Ui.gap(root, 18);
-
-    // Tiny ghost button below in case the phone isn't nearby.
-    Button tvAsk = Ui.button(this, "Ask on TV", () -> PauseForm.showTvAsk(this, pkg, () -> {
-      PauseForm.openApp(this, pkg);
-      finish();
-    }));
-    tvAsk.setTextSize(13);
-    tvAsk.setAlpha(0.55f);
-    Ui.add(root, tvAsk, 180, 38);
-
-    setContentView(root);
-    freeTime.requestFocus();
-    Store.get(this).diagnostic("blocked_app_presented");
+    host.addView(root, 0, new FrameLayout.LayoutParams(-1, -1));
+    doneWithTv.requestFocus();
   }
 
   private void showPhoneHint() {
     LinearLayout body = Ui.column(this);
-    body.addView(Ui.text(this, "Open Focus on your phone to buy Free Time for this TV or ask for a task exception.", 16, Ui.MUTED));
-    Dialog d = Ui.dialog(this, "Ask on phone", body);
-    Ui.gap(body, 14);
-    body.addView(Ui.button(this, "OK", d::dismiss));
+    body.addView(Ui.text(
+        this,
+        "Free Time and task exceptions live in Focus on your phone. Open Focus there if you really need a break.",
+        16,
+        Ui.MUTED));
+    Dialog d = Ui.dialog(this, "Use Focus on phone", body);
     d.show();
   }
 
