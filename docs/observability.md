@@ -43,6 +43,7 @@ Phone events and synced Windows copies survive app restarts. A dropped connectio
 | `lan` | `bind`, `firewall`, `network`, `address`, `connect`, `tls`, `auth`, `request`, `reachability` |
 | `dns` | `pause`, `resume`, `verify` |
 | `nextdns` | `check`, `apply`, `cleanup`, `reconcile` |
+| `intention` | `set`, `edit`, `extend`, `end`, `outcome`, `nag_shown`, `parse_fallback` |
 
 The phone generates one ID for each Ask and carries it into Apply. Events store it as `correlation_id` with `origin=phone` and the route used. Laptop commands send it as an optional top-level field beside `action`. The `ask/eligibility` step captures `scope_available`, `dns_enabled`, `dns_paused`, `vpn_default`, `strict_mode` and `private_dns_active` when observed. The `lan/reachability` step records `direction=phone_to_laptop` or `direction=laptop_to_phone`.
 

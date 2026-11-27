@@ -1285,6 +1285,8 @@ const ActivityClassifier = (() => {
     classifySpan,
     summarizeClassified,
     classifyPause,
+    reasonMentions,
+    reasonMentionsCategory,
     dayStripClassified,
     upsertUserRule,
     buildUncategorizedInbox,

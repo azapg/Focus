@@ -9,3 +9,4 @@ pub mod pause_history;
 
 pub mod habits;
 pub mod habit_nudge;
+pub mod intentions;

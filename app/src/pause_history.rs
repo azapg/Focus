@@ -35,6 +35,40 @@ pub struct PauseRec {
     pub active: bool,
 }
 
+/// A service window that Ask approved while DNS stayed on.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct ScopedGrant {
+    pub t: u64,
+    pub end: u64,
+    pub services: Vec<String>,
+}
+
+/// Ask-approved service windows, ended early by a matching `scoped_resume`.
+pub fn scoped_grants(text: &str, now: u64) -> Vec<ScopedGrant> {
+    let mut grants: Vec<ScopedGrant> = Vec::new();
+    for v in text.lines().filter_map(|raw| serde_json::from_str::<serde_json::Value>(raw).ok()) {
+        let Some(t) = v["t"].as_u64() else { continue };
+        match v["type"].as_str() {
+            Some("scoped_pause") => {
+                let services: Vec<String> = v["services"].as_array().into_iter().flatten()
+                    .filter_map(|s| s.as_str().map(str::to_owned)).collect();
+                let Some(end) = v["until"].as_u64()
+                    .or_else(|| t.checked_add(v["minutes"].as_u64()?.checked_mul(60_000)?))
+                else { continue };
+                if services.is_empty() || end < t { continue }
+                grants.push(ScopedGrant { t, end: end.min(now.max(t)), services });
+            }
+            Some("scoped_resume") => {
+                if let Some(g) = grants.iter_mut().rev().find(|g| Some(g.t) == v["paused_at"].as_u64()) {
+                    g.end = g.end.min(t.max(g.t));
+                }
+            }
+            _ => {}
+        }
+    }
+    grants
+}
+
 /// New resumes identify their pause. Old resumes are matched only until the next
 /// pause, so an incomplete historical entry cannot steal a later pause's end.
 pub fn read_pauses(text: &str, active_pause: Option<(u64, Option<u64>)>, now: u64) -> Vec<PauseRec> {
@@ -181,6 +215,21 @@ mod tests {
         assert_eq!(access[0].rating, Some(4));
         assert_eq!(access[1].end, 4000);
         assert_eq!(access[1].rating, None);
+    }
+
+    #[test]
+    fn scoped_grants_keep_services_and_early_ends() {
+        let journal = concat!(
+            "{\"type\":\"scoped_pause\",\"t\":1000,\"until\":181000,\"minutes\":3,\"services\":[\"youtube\"]}\n",
+            "{\"type\":\"scoped_resume\",\"t\":61000,\"paused_at\":1000}\n",
+            "{\"type\":\"scoped_pause\",\"t\":200000,\"until\":320000,\"minutes\":2,\"services\":[\"discord\",\"slack\"]}\n",
+            "{\"type\":\"scoped_pause\",\"t\":400000,\"until\":460000,\"minutes\":1}\n",
+        );
+        let grants = scoped_grants(journal, 300000);
+        assert_eq!(grants, vec![
+            ScopedGrant { t: 1000, end: 61000, services: vec!["youtube".into()] },
+            ScopedGrant { t: 200000, end: 300000, services: vec!["discord".into(), "slack".into()] },
+        ]);
     }
 
     #[test]

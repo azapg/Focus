@@ -14,9 +14,10 @@ REACHABILITY_WINDOW_MS = 300_000
 INBOUND_BLOCKED = "inbound blocked, outbound fine (Public network; LAN rule allows Domain and Private)"
 ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 BUILD = re.compile(r"[0-9a-f]{7,40}|dev|local|unknown")
-EVENTS = set("ask pause update lan dns nextdns".split())
+EVENTS = set("ask pause update lan dns nextdns intention".split())
 STAGES = set(("start laptop laptop_abandoned gateway eligibility decision apply reconcile cleanup check download "
-              "verify install bind firewall network connect tls auth request reachability address pause resume").split())
+              "verify install bind firewall network connect tls auth request reachability address pause resume "
+              "set edit extend end outcome nag_shown parse_fallback").split())
 OUTCOMES = {"started", "ok", "failed", "skipped", "blocked"}
 CAUSES = {
     "ok": "Completed successfully",
@@ -81,7 +82,7 @@ CAUSE_PRECEDENCE = {
                      "private_dns_inactive", "cap_exceeded", "decision_expired", "nextdns_auth",
                      "nextdns_rejected", "nextdns_unreachable", "apk_too_large"), 2),
 }
-NUMBER_FIELDS = set("expected_bytes actual_bytes limit_bytes http_status status_class attempt port service_count".split())
+NUMBER_FIELDS = set("expected_bytes actual_bytes limit_bytes http_status status_class attempt port service_count planned_minutes active_minutes extensions".split())
 FLAGS = set(("vpn_default strict_mode private_dns_active scope_available dns_enabled dns_paused "
              "authenticated manual_override").split())
 ENUMS = {
@@ -93,6 +94,8 @@ ENUMS = {
                            "minutes_mismatch counter_offer_mismatch cancelled").split()),
     "network_category": {"public", "private", "domain", "mixed", "unknown"},
     "firewall_profiles": {"domain_private"},
+    "intention_outcome": {"done", "partly", "no", "cleared", "replaced"},
+    "parse_source": {"gateway", "local"},
 }
 KEYS = set("v at_ms event_id build_id device correlation_id event stage outcome cause duration_ms fields".split())
 

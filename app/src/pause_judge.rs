@@ -178,6 +178,17 @@ pub fn uses_judge(core: &Core) -> Result<bool, String> {
     Ok(Settings::load(&core.dir)?.enabled())
 }
 
+pub(crate) fn gateway_credentials(dir: &Path) -> Result<(String, String), (&'static str, Failure)> {
+    let settings = Settings::load(dir).map_err(|_| ("gateway_no_key", Failure::Configuration))?;
+    let cause = if settings.gateway_dpapi.is_some() {
+        "gateway_keystore"
+    } else {
+        "gateway_no_key"
+    };
+    let key = settings.gateway_key().map_err(|failure| (cause, failure))?;
+    Ok((settings.model, key))
+}
+
 fn protect_key(key: &str) -> Result<Option<String>, String> {
     let key = key.trim();
     if key.is_empty() {
@@ -633,10 +644,19 @@ fn judge_using_gateway<'a>(
             }
         }
 
+        let active_intention = core.intentions.active().map(|intent| {
+            judge_context::ActiveIntentionContext {
+                label: intent.label,
+                done_when: intent.done_when,
+                elapsed_minutes: recent.now.saturating_sub(intent.start) / MINUTE_MS,
+                remaining_minutes: intent.planned_until.saturating_sub(recent.now) / MINUTE_MS,
+            }
+        });
         let meta = judge_context::ContextMeta {
             habits_due,
             wallet_balance_coins,
             dns_check,
+            active_intention,
         };
         let context = judge_context::build(
             &request,

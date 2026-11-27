@@ -17,7 +17,7 @@ python -m playwright install chromium
 python scripts/screenshot.py desktop --out build/screenshots-desktop
 ```
 
-Choose `activity`, `devices`, `updates`, or `store` to capture one flow. Desktop runs
+Choose `activity`, `devices`, `updates`, `store`, or `intentions` to capture one flow. Desktop runs
 the same frontend bundle that Focus embeds on Windows. Each flow gets a fresh
 headless browser context, a fixed UTC clock and in-memory Tauri responses. The
 browser uses a temporary configuration and blocks external requests, WebSockets
@@ -32,6 +32,7 @@ fixtures. Browser notifications are disabled.
 - **Updates** captures protection settings and the update card and settings using
   invented build metadata.
 - **Store** captures a 5-minute Free Time purchase with a fictional balance.
+- **Intentions** captures the dock bar with no intention, the read-back card, an active intention pill, off-plan warning, the 18-minute orange nag, the time-up check-in card, and the Today stats Intentions section.
 
 The regenerated device previews are [stats and settings](previews/implemented-devices.html)
 and [nearby pairing](previews/nearby-pairing.html).
