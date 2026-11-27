@@ -17,7 +17,7 @@ impl Fixture {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let recorded = calls.clone();
         let core = Arc::new(Core {
-            habits: focus_dns::habits::Store::new(&dir), dir, dry: true, dns_config: OnceLock::new(), saved: Mutex::new(Saved::default()), state_write_pending: AtomicBool::new(false),
+            habits: focus_dns::habits::Store::new(&dir), intentions: focus_dns::intentions::Store::open(&dir), dir, dry: true, dns_config: OnceLock::new(), saved: Mutex::new(Saved::default()), state_write_pending: AtomicBool::new(false),
             judge_tickets: pause_judge::Tickets::default(),
             history_write: Mutex::new(()),
             event_sequence: Mutex::new(None),

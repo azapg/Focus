@@ -9,6 +9,7 @@
 mod device_commands;
 mod emergency_shield;
 mod habit_commands;
+mod intention_commands;
 mod streak_runtime;
 mod focus_state_runtime;
 mod judge;
@@ -132,6 +133,7 @@ struct LaptopPauseSnapshot {
 struct Core {
     dir: PathBuf,
     habits: focus_dns::habits::Store,
+    intentions: focus_dns::intentions::Store,
     dry: bool,
     dns_config: OnceLock<focus_browser_host::NextDnsConfig>,
     // Hold this lock from the pause decision through DNS changes and persistence.
@@ -666,6 +668,7 @@ struct History {
     spans: Vec<Span>,
     pauses: Vec<PauseRec>,
     peeks: Vec<u64>,
+    intentions: Vec<focus_dns::intentions::IntentionRec>,
 }
 
 /// Raw screen time + pauses between two times (ms). The UI does the math.
@@ -680,7 +683,8 @@ fn history(from: u64, to: u64, core: State<Arc<Core>>, tracker: State<Arc<Tracke
     pauses.retain(|p| p.end > from && p.t < to);
     let mut peeks = focus_browser_host::peek_history::timestamps(&core.dir, from, to);
     peeks.extend(peek_panel::timestamps(&core.dir, from, to));
-    History { now, spans: tracker.spans(from, to), pauses, peeks }
+    let intentions = core.intentions.history(from, to, now);
+    History { now, spans: tracker.spans(from, to), pauses, peeks, intentions }
 }
 
 /// Same as Win+L: agents keep running, screen time stops counting until you unlock.
@@ -832,12 +836,22 @@ fn hover_loop(win: WebviewWindow, core: Arc<Core>) {
     }
 }
 
-fn watchdog_loop(app: AppHandle, core: Arc<Core>) {
+fn watchdog_loop(app: AppHandle, core: Arc<Core>, tracker: Arc<Tracker>) {
     let mut last_scope_failure = None::<Instant>;
     let (mut last_try, mut last_check) = (0u64, now_ms());
+    let mut prev_time_up = None::<String>;
+    let (mut last_nag_check, mut last_nag_emit) = (0u64, 0u64);
     loop {
         thread::sleep(Duration::from_secs(1));
         telemetry::DNS_TICK.count(1);
+        intention_commands::tick(
+            &app,
+            &core,
+            &tracker,
+            &mut prev_time_up,
+            &mut last_nag_check,
+            &mut last_nag_emit,
+        );
         let n = now_ms();
         if n.saturating_sub(last_try) >= 15_000 {
             let check_dns = n.saturating_sub(last_check) >= 60_000;
@@ -906,7 +920,7 @@ fn main() {
         .join(if dry { "FocusDNS-dry" } else { "FocusDNS" });
     let _ = fs::create_dir_all(&dir);
     let core = Arc::new(Core {
-        dir: dir.clone(), dns_config: OnceLock::new(), habits: focus_dns::habits::Store::new(&dir), dry, saved: Mutex::new(Saved::default()), state_write_pending: AtomicBool::new(false), hit: Mutex::new([0.0; 4]),
+        dir: dir.clone(), dns_config: OnceLock::new(), habits: focus_dns::habits::Store::new(&dir), intentions: focus_dns::intentions::Store::open(&dir), dry, saved: Mutex::new(Saved::default()), state_write_pending: AtomicBool::new(false), hit: Mutex::new([0.0; 4]),
         judge_tickets: pause_judge::Tickets::default(),
         history_write: Mutex::new(()),
         event_sequence: Mutex::new(None),
@@ -975,7 +989,11 @@ fn main() {
             pause_judge::pause_judge_settings, pause_judge::pause_judge_settings_save, pause_judge::pause_judge_limits_sync,
             pause_judge::judge_pause, pause_judge::begin_pause_hold, pause_judge::cancel_pause_hold, pause_judge::apply_decision,
             emergency_shield::emergency_status, emergency_shield::emergency_recent_blocks,
-            emergency_shield::emergency_activate])
+            emergency_shield::emergency_activate,
+            intention_commands::intention_state, intention_commands::intention_parse,
+            intention_commands::intention_parse_local, intention_commands::intention_start,
+            intention_commands::intention_edit, intention_commands::intention_extend,
+            intention_commands::intention_end])
         .setup(move |app| {
             setup_core.log("setup: entered");
             let today = focus_dns::habits::local_clock(now_ms()).0;
@@ -1067,8 +1085,8 @@ fn main() {
 
             let (w, c) = (win.clone(), setup_core.clone());
             thread::spawn(move || hover_loop(w, c));
-            let (a, c) = (app.handle().clone(), setup_core.clone());
-            thread::spawn(move || watchdog_loop(a, c));
+            let (a, c, t) = (app.handle().clone(), setup_core.clone(), tracker.clone());
+            thread::spawn(move || watchdog_loop(a, c, t));
             let (a, d, c, t, h) = (
                 app.handle().clone(),
                 devices.clone(),

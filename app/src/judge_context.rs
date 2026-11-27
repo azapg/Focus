@@ -199,10 +199,19 @@ fn reason_terms(reason: &str, catalog: &Catalog) -> BTreeSet<String> {
     terms
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveIntentionContext {
+    pub label: String,
+    pub done_when: Option<String>,
+    pub elapsed_minutes: u64,
+    pub remaining_minutes: u64,
+}
+
 pub struct ContextMeta {
     pub habits_due: usize,
     pub wallet_balance_coins: i64,
     pub dns_check: Option<Value>,
+    pub active_intention: Option<ActiveIntentionContext>,
 }
 
 pub fn build(
@@ -268,6 +277,14 @@ pub fn build(
     });
     if let Some(check) = &meta.dns_check {
         payload["dns_check"] = check.clone();
+    }
+    if let Some(intent) = &meta.active_intention {
+        payload["active_intention"] = json!({
+            "label": summary_text(&intent.label),
+            "done_when": intent.done_when.as_deref().map(summary_text),
+            "elapsed_minutes": intent.elapsed_minutes,
+            "remaining_minutes": intent.remaining_minutes,
+        });
     }
     payload
 }
@@ -362,6 +379,12 @@ mod tests {
                 habits_due: 2,
                 wallet_balance_coins: 15,
                 dns_check: None,
+                active_intention: Some(ActiveIntentionContext {
+                    label: "Cleaning house https://docs.example.org/private-room".into(),
+                    done_when: Some("trash is out".into()),
+                    elapsed_minutes: 14,
+                    remaining_minutes: 31,
+                }),
             },
         );
         let serialized = context.to_string();
@@ -373,6 +396,7 @@ mod tests {
             "Private window fragment",
             "Private rating note",
             "channels/private",
+            "private-room",
         ] {
             assert!(!serialized.contains(private), "{serialized}");
         }
@@ -387,6 +411,10 @@ mod tests {
             0
         );
         assert_eq!(context["last_hour"]["sites"][0]["name"], "x.com");
+        assert_eq!(context["active_intention"]["label"], "Cleaning house docs.example.org");
+        assert_eq!(context["active_intention"]["done_when"], "trash is out");
+        assert_eq!(context["active_intention"]["elapsed_minutes"], 14);
+        assert_eq!(context["active_intention"]["remaining_minutes"], 31);
         std::fs::remove_dir_all(scratch).unwrap();
     }
 }

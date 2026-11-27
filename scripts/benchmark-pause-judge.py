@@ -142,11 +142,39 @@ cases = [
         ["discord"],
         3,
     ),
+    (
+        "intention-aligned",
+        "fictional",
+        "Find one short YouTube tutorial on folding pizza boxes flat for the trash.",
+        ["allow_services"],
+        ["youtube"],
+        3,
+        dict(label="Cleaning house", done_when="trash is out", elapsed_minutes=14, remaining_minutes=31),
+    ),
+    (
+        "intention-contradicted",
+        "fictional",
+        "Check Twitch to see who is streaming while I work.",
+        ["deny", "counter_offer"],
+        [],
+        0,
+        dict(label="FairGrade rubric PR", done_when="PR open", elapsed_minutes=20, remaining_minutes=40),
+    ),
+    (
+        "intention-isolation",
+        "fictional",
+        "full pause 5m",
+        ["deny"],
+        [],
+        0,
+        dict(label="FairGrade rubric PR", done_when="PR open", elapsed_minutes=15, remaining_minutes=45),
+    ),
 ]
 
 
 def run(case):
-    ident, origin, request, actions, services, max_minutes = case
+    ident, origin, request, actions, services, max_minutes, *rest = case
+    active_intention = rest[0] if rest else None
     cap = 2 if ident == "cap-pressure" else 10
     context = dict(
         request=request,
@@ -160,6 +188,8 @@ def run(case):
         services=catalog,
         max_minutes=cap,
     )
+    if active_intention is not None:
+        context["active_intention"] = active_intention
     response_schema = schema
     if context["has_peek_target"]:
         properties = schema["properties"]
