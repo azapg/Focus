@@ -1,20 +1,17 @@
-name: Product flow evidence
+name: Product entry freshness
 
 on:
   pull_request:
     paths:
+      - 'AGENTS.md'
+      - 'README.md'
       - 'docs/product/**'
       - 'docs/wallet.md'
-      - 'ui/widget.js'
-      - 'ui/src/devices.tsx'
-      - 'ui/src/wallet-store.tsx'
-      - 'ui/src/main.tsx'
-      - 'ui/components/ui/button.tsx'
-      - 'ui/lib/shadcn.css'
-      - 'ui/styles.css'
-      - 'ui/index.html'
-      - 'tests/wallet-store.py'
+      - 'ui/**'
+      - 'tests/fixtures/*.mock.js'
+      - 'tests/product-entry.py'
       - 'tests/screenshot_browser.py'
+      - 'tests/wallet-store.py'
       - 'tests/device-panel.py'
       - 'scripts/product-evidence.mjs'
       - 'package.json'
@@ -25,18 +22,15 @@ on:
   push:
     branches: [main]
     paths:
+      - 'AGENTS.md'
+      - 'README.md'
       - 'docs/product/**'
       - 'docs/wallet.md'
-      - 'ui/widget.js'
-      - 'ui/src/devices.tsx'
-      - 'ui/src/wallet-store.tsx'
-      - 'ui/src/main.tsx'
-      - 'ui/components/ui/button.tsx'
-      - 'ui/lib/shadcn.css'
-      - 'ui/styles.css'
-      - 'ui/index.html'
-      - 'tests/wallet-store.py'
+      - 'ui/**'
+      - 'tests/fixtures/*.mock.js'
+      - 'tests/product-entry.py'
       - 'tests/screenshot_browser.py'
+      - 'tests/wallet-store.py'
       - 'tests/device-panel.py'
       - 'scripts/product-evidence.mjs'
       - 'package.json'
@@ -49,20 +43,22 @@ permissions:
   contents: read
 
 jobs:
-  refresh:
+  check-entry:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: node scripts/product-evidence.mjs artifacts/product/index.html --built
-      - uses: actions/upload-artifact@v4
+      - run: npm run product:entry -- --check
+      - uses: actions/setup-python@v5
         with:
-          name: focus-product-flow-${{ github.sha }}
-          path: artifacts/product/index.html
-          if-no-files-found: error
-          retention-days: 14
+          python-version: '3.12'
+      - run: python -m pip install playwright==1.65.2
+      - run: python -m playwright install chromium
+      - run: python tests/product-entry.py
