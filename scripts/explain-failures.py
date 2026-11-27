@@ -17,7 +17,7 @@ BUILD = re.compile(r"[0-9a-f]{7,40}|dev|local|unknown")
 EVENTS = set("ask pause update lan dns nextdns intention".split())
 STAGES = set(("start laptop laptop_abandoned gateway eligibility decision apply reconcile cleanup check download "
               "verify install bind firewall network connect tls auth request reachability address pause resume "
-              "set edit extend end outcome nag_shown parse_fallback").split())
+              "set edit extend end outcome nag_shown parse_fallback sync nudge time_up").split())
 OUTCOMES = {"started", "ok", "failed", "skipped", "blocked"}
 CAUSES = {
     "ok": "Completed successfully",
@@ -71,6 +71,7 @@ CAUSES = {
     "lan_bind_failed": "Local listener failed to start",
     "firewall_failed": "Windows could not install the LAN firewall rule",
     "dns_apply_failed": "DNS change or verification failed",
+    "stale": "A queued change was older than the other device's, so it was skipped",
 }
 # An observed cause outranks a fallback summary. Direct eligibility and API
 # failures outrank broader symptoms such as a connection timing out.
