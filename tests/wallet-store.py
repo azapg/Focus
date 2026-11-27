@@ -9,7 +9,7 @@ from screenshot_browser import BUILD, capture_panel, fixture_browser, fixture_pa
 MOCK = r"""(() => {
   const invoke = window.__TAURI__.core.invoke;
   const wallet = window.__wallet = {
-    active: true, day: 20496, balance: 65, time_off_bought: 0,
+    active: true, day: 20496, balance: 0, time_off_bought: 0,
     time_off_limit: 15, time_off_price_per_minute: 3, needs_upgrade: [],
   };
   const receipts = new Set();
@@ -64,7 +64,16 @@ async def main(output=None):
         await page.goto((BUILD / "index.html").as_uri())
         await page.locator("#panel.open").wait_for()
         store = page.get_by_role("dialog", name="Store", exact=True)
+        fresh_wallet = page.get_by_role("button", name="Store, 0 coins")
+        await fresh_wallet.wait_for()
+        await fresh_wallet.click()
+        assert await store.get_by_role("button", name="15 coins").is_disabled()
+        assert not await store.get_by_text("Streak Freeze").count()
+        await page.keyboard.press("Escape")
+        await store.wait_for(state="hidden")
         await page.evaluate("""() => {
+            window.__wallet.balance = 65;
+            window.__handlers['wallet-updated']({});
             window.__wallet.active = false;
             window.__handlers['wallet-updated']({});
             window.__handlers['habits-updated']({});
@@ -156,7 +165,7 @@ async def main(output=None):
         freeze_requests = await page.evaluate("window.__calls.filter(c => c.c === 'streak_buy_freeze').map(c => c.args)")
         assert len(freeze_requests) == 2 and freeze_requests[0] == freeze_requests[1]
         assert not errors, errors
-        print("PASS: desktop Store opens without Clean Streak, with purchases, retries, cutover and freeze inventory covered.")
+        print("PASS: fresh zero-balance Store entrypoint opens without Clean Streak; purchases, retries, cutover and freeze inventory are covered.")
 
 
 if __name__ == "__main__":

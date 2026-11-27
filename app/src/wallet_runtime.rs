@@ -145,10 +145,14 @@ mod tests {
         )
         .unwrap();
 
-        core.habits.activate_wallet(day).unwrap();
+        assert_eq!(crate::wallet::activate_at_startup(core, day), Ok(true));
+        assert_eq!(core.habits.read().balance(), 0);
+        assert!(core.habits.read().wallet_active(day));
         assert!(focus_dns::streak_journal::authority_cursor(&core.habits).is_none());
         assert_eq!(award_completed_days(core, &tracker, &[], now, 2), Ok(5));
         assert_eq!(award_completed_days(core, &tracker, &[], now, 2), Ok(0));
+        assert_eq!(core.habits.read().balance(), 5);
+        assert_eq!(crate::wallet::activate_at_startup(core, day), Ok(false));
         assert_eq!(core.habits.read().balance(), 5);
     }
 }

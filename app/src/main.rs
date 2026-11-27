@@ -21,6 +21,7 @@ mod peek_panel;
 mod resource_telemetry;
 mod updater;
 mod wallet_runtime;
+mod wallet;
 #[cfg(test)]
 mod dns_tests;
 #[cfg(test)]
@@ -989,7 +990,7 @@ fn main() {
     let run_result = builder
         .manage(core)
         .manage(StartupPanel(open_panel))
-        .invoke_handler(tauri::generate_handler![focus_state_runtime::habits_feed_lock, streak_runtime::streak_view, streak_runtime::streak_buy_freeze, habit_commands::wallet_view, habit_commands::wallet_buy_time, habit_commands::habits_view, habit_commands::habits_change, habit_commands::habits_pause_limit, get_state, pause, resume, rate_pause, set_hit, grab_focus, history, lock, ui_log, return_focus, startup_panel, peek_panel::peek_link, activity_rules_load, activity_rules_save, activity_uncategorized_save, activity_categories_load, activity_icons_load, device_commands::device_nearby, device_commands::device_request_approval, device_commands::device_approval_status, device_commands::device_cancel_approval, device_commands::device_list, device_commands::device_probe, device_commands::device_pair, device_commands::device_refresh, device_commands::device_command, device_commands::device_forget, device_commands::laptop_incoming_approval, device_commands::laptop_approve_pairing, device_commands::laptop_decline_pairing, updater::updater_status, updater::updater_check, updater::updater_install, updater::updater_dismiss, updater::updater_set_token, updater::updater_set_enabled,
+        .invoke_handler(tauri::generate_handler![focus_state_runtime::habits_feed_lock, streak_runtime::streak_view, streak_runtime::streak_buy_freeze, wallet::wallet_view, wallet::wallet_buy_time, habit_commands::habits_view, habit_commands::habits_change, habit_commands::habits_pause_limit, get_state, pause, resume, rate_pause, set_hit, grab_focus, history, lock, ui_log, return_focus, startup_panel, peek_panel::peek_link, activity_rules_load, activity_rules_save, activity_uncategorized_save, activity_categories_load, activity_icons_load, device_commands::device_nearby, device_commands::device_request_approval, device_commands::device_approval_status, device_commands::device_cancel_approval, device_commands::device_list, device_commands::device_probe, device_commands::device_pair, device_commands::device_refresh, device_commands::device_command, device_commands::device_forget, device_commands::laptop_incoming_approval, device_commands::laptop_approve_pairing, device_commands::laptop_decline_pairing, updater::updater_status, updater::updater_check, updater::updater_install, updater::updater_dismiss, updater::updater_set_token, updater::updater_set_enabled,
             pause_judge::pause_judge_settings, pause_judge::pause_judge_settings_save, pause_judge::pause_judge_limits_sync,
             pause_judge::judge_pause, pause_judge::begin_pause_hold, pause_judge::cancel_pause_hold, pause_judge::apply_decision,
             emergency_shield::emergency_status, emergency_shield::emergency_recent_blocks,
@@ -1001,7 +1002,7 @@ fn main() {
         .setup(move |app| {
             setup_core.log("setup: entered");
             let today = focus_dns::habits::local_clock(now_ms()).0;
-            match setup_core.habits.activate_wallet(today) {
+            match wallet::activate_at_startup(&setup_core, today) {
                 Ok(true) => setup_core.log("Store wallet activated"),
                 Ok(false) => {}
                 Err(error) => setup_core.log(&format!("Could not activate Store wallet: {error}")),
