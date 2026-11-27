@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 const context = vm.createContext({ Date, URL });
+vm.runInContext(fs.readFileSync(new URL('../ui/features/intentions/calculations.js', import.meta.url), 'utf8'), context);
 vm.runInContext(fs.readFileSync(new URL('../ui/stats.js', import.meta.url), 'utf8') + '\nglobalThis.stats = Stats;', context);
 const S=context.stats, MIN=60000;
 const span=(s,e,title='Page',url='https://github.com/example-org/sample-project')=>({s,e,app:'Chrome',label:'github.com',source:'chromium_extension',browser:{url,title}});
