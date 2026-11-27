@@ -108,6 +108,12 @@ public final class Wallet {
     return day >= 18_262 && day <= 100_000;
   }
 
+  /** Open the default wallet on this device's current day, keeping any existing start. */
+  public void activate(int today) {
+    if (!validDay(today)) throw new IllegalArgumentException("Invalid wallet day");
+    if (start == null) start = today;
+  }
+
   /** Keep legacy credit on the cutover day. The earliest scheduled start wins across peers. */
   public void start(int today) {
     if (!validDay(Math.addExact(today, 1))) throw new IllegalArgumentException("Invalid wallet day");
@@ -169,7 +175,9 @@ public final class Wallet {
   }
 
   public int extraPauseMinutes(int day) {
-    return active(day) ? (int) Math.min(Integer.MAX_VALUE - 300, timeOffBought(day)) : habits.credit(day);
+    if (!active(day)) return habits.credit(day);
+    int carryover = start == day ? habits.legacyCredit(day) : 0;
+    return (int) Math.min(Integer.MAX_VALUE - 300, timeOffBought(day) + carryover);
   }
 
   public boolean earn(String key, String kind, int amount, String reference, long at, int day) {

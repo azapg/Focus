@@ -375,6 +375,31 @@ fn ledger_is_persisted_after_each_mutation() {
 }
 
 #[test]
+fn default_wallet_opens_and_persists_without_streak_enrollment() {
+    let path = std::env::temp_dir().join(format!("focus-default-wallet-{}", std::process::id()));
+    std::fs::create_dir_all(&path).unwrap();
+    let store = Store::new(&path);
+    store.update(|ledger| {
+        put(ledger, event("before-upgrade", "read", MON, MON));
+        Ok(())
+    }).unwrap();
+    assert!(store.activate_wallet(MON).unwrap());
+    let reopened = Store::new(&path);
+    assert!(!reopened.activate_wallet(MON + 1).unwrap());
+    let ledger = reopened.read();
+    assert!(ledger.streak_journal.is_none());
+    assert!(ledger.wallet_active(MON));
+    assert_eq!(ledger.balance(), 0);
+    assert_eq!(ledger.extra_pause_minutes(MON), 15);
+    assert_eq!(ledger.extra_pause_minutes(MON + 1), 0);
+    let invalid = "unreadable ledger";
+    std::fs::write(path.join("habits.json"), invalid).unwrap();
+    assert!(Store::new(&path).activate_wallet(MON).is_err());
+    assert_eq!(std::fs::read_to_string(path.join("habits.json")).unwrap(), invalid);
+    std::fs::remove_dir_all(&path).unwrap();
+}
+
+#[test]
 fn wallet_cutover_uses_qualified_habits_and_undo_can_create_debt() {
     let mut wallet = Ledger::default();
     wallet.start_wallet(MON).unwrap();
@@ -394,7 +419,7 @@ fn wallet_cutover_uses_qualified_habits_and_undo_can_create_debt() {
     assert_eq!(legacy_page.wallet_start, None);
     assert!(!legacy_page.events["new"].wallet_reward);
     assert_eq!(wallet.extra_pause_minutes(MON), 15);
-    assert_eq!(wallet.extra_pause_minutes(day), 0);
+    assert_eq!(wallet.extra_pause_minutes(day), 15);
     assert_eq!(wallet.balance(), 15);
 
     let mut relayed = legacy_page;
@@ -411,7 +436,7 @@ fn wallet_cutover_uses_qualified_habits_and_undo_can_create_debt() {
     assert!(relayed
         .buy_time_off_for_day("second", 1, at, day + 1, Some(day))
         .is_err());
-    assert_eq!(relayed.extra_pause_minutes(day), 5);
+    assert_eq!(relayed.extra_pause_minutes(day), 20);
     assert_eq!(relayed.extra_pause_minutes(day + 1), 0);
 
     let mut undo = event("undo", "walk", day, day);

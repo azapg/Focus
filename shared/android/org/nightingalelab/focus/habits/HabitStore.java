@@ -49,6 +49,12 @@ public final class HabitStore {
     } catch (IOException | JSONException e) {
       throw new IllegalStateException("Could not open habits", e);
     }
+    if (ledger.wallet.startDay() == null) {
+      updateWallet(wallet -> {
+        wallet.activate(Habits.day(System.currentTimeMillis()));
+        return null;
+      });
+    }
   }
 
   public synchronized Habits read() {

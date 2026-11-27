@@ -349,11 +349,19 @@ public final class Habits {
   }
 
   public int credit(int day) {
+    return creditFor(day, false);
+  }
+
+  int legacyCredit(int day) {
+    return creditFor(day, true);
+  }
+
+  private int creditFor(int day, boolean legacyOnly) {
     int total = 0;
     int limit = capOn(day);
     for (Map<Integer, Event> periods : completions().values()) {
       Event earned = today(periods, day);
-      if (earned != null) total += earned.reward;
+      if (earned != null && (!legacyOnly || !earned.walletReward)) total += earned.reward;
       if (total >= limit) return limit;
     }
     return total;

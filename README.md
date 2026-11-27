@@ -28,6 +28,7 @@ device using that profile.
 - **Hovering shows today's totals** at the left of the pill: time at the screen and time with DNS off.
 - **Click those numbers** and a wide stats panel drops down from the pill (Today / Week): a 24-hour timeline, where your time went, and every pause with its reason and what was actually on screen during it. Apps or sites your reason didn't mention are highlighted. Esc or clicking anywhere else closes it.
 - **The lock icon** locks Windows (same as Win+L). Agents keep running; screen time stops counting until you unlock.
+- **The coin balance in Today** opens the Store. Earn coins from habits and verified deep focus, then spend them on Free Time. See [how rewards work](docs/wallet.md).
 - **Only time you're actually there counts.** No mouse/keyboard for 2 minutes or a locked screen counts as away. The older title-based tracker allows 30 minutes for known video sites; extension-backed Chromium uses 2 minutes.
 - Windows-only tracking stores app/site labels. The optional [Chromium extension](docs/browser-activity.md) adds actual active-page URLs and titles, navigation and focus/idle state, stored locally. It captures no screenshots, page contents or keystrokes.
 

@@ -7,9 +7,22 @@ public final class WalletCoreTest {
   private static final long AT = DAY * 86_400_000L;
 
   public static void main(String[] args) {
+    opensByDefault();
     cutoverAndUndo();
     offlinePurchases();
     System.out.println("Android wallet core passed");
+  }
+
+  private static void opensByDefault() {
+    Habits ledger = new Habits();
+    ledger.put(event("before-upgrade", "read", DAY, false, null));
+    ledger.wallet.activate(DAY);
+    ledger.wallet.activate(DAY + 1);
+    ledger.put(event("after-upgrade", "walk", DAY, true, null));
+    check(ledger.wallet.active(DAY) && ledger.wallet.startDay() == DAY, "Wallet stays open from upgrade");
+    check(ledger.wallet.balance() == 15, "New rewards become coins");
+    check(ledger.wallet.extraPauseMinutes(DAY) == 15 && ledger.wallet.extraPauseMinutes(DAY + 1) == 0,
+        "Previously earned minutes survive until midnight");
   }
 
   private static void cutoverAndUndo() {
@@ -20,12 +33,12 @@ public final class WalletCoreTest {
     ledger.put(event("new", "walk", DAY, false, null));
     ledger.put(event("new", "walk", DAY, true, null)); // A legacy relay can arrive first.
     ledger.put(event("new-duplicate", "walk", DAY, true, null));
-    check(ledger.wallet.extraPauseMinutes(DAY - 1) == 15 && ledger.wallet.extraPauseMinutes(DAY) == 0,
-        "Legacy allowance survives the setup day");
+    check(ledger.wallet.extraPauseMinutes(DAY - 1) == 15 && ledger.wallet.extraPauseMinutes(DAY) == 15,
+        "Legacy rewards remain minutes through cutover");
     check(ledger.wallet.balance() == 15, "Only one wallet-qualified completion earns coins");
     check(ledger.wallet.buyTimeOff("request", 5, AT, DAY).status == BOUGHT, "Purchase accepted");
     check(ledger.wallet.buyTimeOff("request", 5, AT, DAY + 1).status == ALREADY_BOUGHT, "Retry across midnight");
-    check(ledger.wallet.extraPauseMinutes(DAY) == 5 && ledger.wallet.extraPauseMinutes(DAY + 1) == 0, "Local-day entitlement expires");
+    check(ledger.wallet.extraPauseMinutes(DAY) == 20 && ledger.wallet.extraPauseMinutes(DAY + 1) == 0, "Local-day entitlement expires");
     ledger.put(event("undo", "walk", DAY, false, "new"));
     check(ledger.wallet.balance() == 0, "Deduplicated check-off remains after undo");
     ledger.put(event("undo-duplicate", "walk", DAY, false, "new-duplicate"));

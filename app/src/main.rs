@@ -19,6 +19,7 @@ mod pause_judge;
 mod peek_panel;
 mod resource_telemetry;
 mod updater;
+mod wallet_runtime;
 #[cfg(test)]
 mod dns_tests;
 #[cfg(test)]
@@ -977,6 +978,12 @@ fn main() {
             emergency_shield::emergency_activate])
         .setup(move |app| {
             setup_core.log("setup: entered");
+            let today = focus_dns::habits::local_clock(now_ms()).0;
+            match setup_core.habits.activate_wallet(today) {
+                Ok(true) => setup_core.log("Store wallet activated"),
+                Ok(false) => {}
+                Err(error) => setup_core.log(&format!("Could not activate Store wallet: {error}")),
+            }
             let mut initial_state = setup_core.read_state_for_startup()?;
             if !setup_core.dry {
                 if let Err(error) = setup_core.dns("recover") {
@@ -1070,6 +1077,10 @@ fn main() {
                 laptop_host.clone(),
             );
             thread::spawn(move || device_commands::sync_loop(a, d, c, t, h));
+            if !setup_core.dry {
+                let (a, c, t, d) = (app.handle().clone(), setup_core.clone(), tracker, devices);
+                thread::spawn(move || wallet_runtime::run(a, c, t, d));
+            }
             let (a, u, c) = (app.handle().clone(), updater_state.clone(), setup_core.clone());
             thread::spawn(move || updater::poll_loop(a, u, c));
             setup_core.log("setup: complete");

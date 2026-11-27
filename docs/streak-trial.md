@@ -4,6 +4,9 @@ The native trial is off by default. It needs an explicit opt-in on the Windows
 authority and on each enrolled Android phone. Use a disposable profile with
 fictional activity for testing.
 
+The Store, habit coins, and verified focus rewards work without the trial.
+The trial enables Clean Streak tracking and Streak Freezes.
+
 - On each Android phone, place a file named `streak-trial` containing the paired Windows laptop ID in Focus's
   private files directory and restart its monitor. Only a phone with one
   approved manager includes coverage in its authenticated snapshot.
@@ -12,9 +15,8 @@ fictional activity for testing.
   a desktop-only trial. Enrollment waits for each selected phone to connect
   and report its opt-in.
 - The laptop is the one authority. Enrollment fixes the reporter IDs and
-  the laptop's current calendar timezone. Streak days and a previously dormant
-  wallet start on the next calendar day. The wallet start syncs to paired devices.
-  If the enrollment or timezone changes, finalization stops.
+  the laptop's current calendar timezone. Streak days start on the next
+  calendar day. If the enrollment or timezone changes, finalization stops.
 - Remove the Windows file to stop the trial. Remove the Android marker and
   restart the monitor to stop sending phone coverage.
 
