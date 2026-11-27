@@ -130,29 +130,6 @@ jobs:
           $env:FOCUS_PEEK_WORKER = (Resolve-Path browser-host/target/debug/focus-browser-host.exe).Path
           cargo test --manifest-path app/Cargo.toml
 
-      - name: Prove the fresh-profile test catches missing Store activation
-        if: github.event_name == 'pull_request' && github.event.pull_request.number == 18
-        shell: pwsh
-        run: |
-          $path = "app/src/main.rs"
-          $source = Get-Content $path -Raw
-          $mutated = $source.Replace("match core.habits.activate_wallet(today)", "match Ok::<bool, String>(false)")
-          if ($source -eq $mutated) { throw "Could not apply the activation mutation" }
-          try {
-            [IO.File]::WriteAllText((Resolve-Path $path).Path, $mutated)
-            $PSNativeCommandUseErrorActionPreference = $false
-            $env:FOCUS_PEEK_WORKER = (Resolve-Path browser-host/target/debug/focus-browser-host.exe).Path
-            $result = cargo test --manifest-path app/Cargo.toml --bin focus-dns wallet::tests::fresh_profile_open_activates_empty_store_and_persists_it -- --exact 2>&1
-            $code = $LASTEXITCODE
-            $result | Select-Object -Last 22 | Write-Host
-            if ($code -eq 0 -or ($result -join "`n") -notmatch "fresh profile must expose an active Store") {
-              throw "Expected the fresh-profile assertion to detect missing Store activation"
-            }
-          } finally {
-            git restore -- $path
-          }
-          exit 0
-
       - name: Replay synthetic focus history
         shell: pwsh
         run: |
