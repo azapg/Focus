@@ -497,3 +497,22 @@ test('saved reward categories survive while observed video/feed activity stays e
   assert.equal(ActivityClassifier.detectFocusSessions(renamedApps, 0, 30 * MIN, { userRules: sharedDisplayName }).totalMs, 0,
     'display aliases cannot join separate observed apps into one qualifying run');
 });
+
+test('channel feeds and extension-confirmed feeds interrupt focus under a work label', () => {
+  const end = 30 * MIN;
+  const span = {
+    s: 0, e: end, app: 'Chrome', label: 'youtube.com', source: 'chromium_extension',
+  };
+  const userRules = { rules: [{ match: 'host', value: 'youtube.com', category: 'learning' }] };
+  for (const [path, feed, expected] of [
+    ['/@fictional/videos', false, 0],
+    ['/@fictional', false, 0],
+    ['/policies/guide', true, 0],
+    ['/policies/guide', false, end],
+  ]) {
+    const browser = { url: 'https://www.youtube.com' + path, habit_feed: feed };
+    const history = { now: end, spans: [{ ...span, browser }], pauses: [] };
+    const result = ActivityClassifier.detectFocusSessions([{ kind: 'windows', history }], 0, end, { userRules });
+    assert.equal(result.totalMs, expected, path + ' feed=' + feed);
+  }
+});

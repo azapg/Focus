@@ -772,6 +772,10 @@ public final class PhoneCoreTest {
     FocusStats.View feedBreak = FocusStats.compute(feedMidRun, Collections.emptyList(), feedRules,
         now, tz, false, -1, null);
     check(feedBreak.focusMs == 0, "YouTube home feed breaks a run despite custom Writing labels");
+    List<ActivityClassifier.UserRule> hiddenFeed = Arrays.asList(exampleDeskRule.get(0),
+        new ActivityClassifier.UserRule("host", "youtube.com", "", "ignore"));
+    check(FocusStats.compute(feedMidRun, Collections.emptyList(), hiddenFeed, now, tz, false, -1, null).focusMs == 0,
+        "Hiding a feed from Stats still interrupts focus");
     check("watching".equals(ActivityClassifier.classify("com.android.chrome", "YouTube", "youtube.com", Collections.emptyList()).category),
         "YouTube home keeps its existing watching display category");
 

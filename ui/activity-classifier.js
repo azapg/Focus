@@ -462,7 +462,8 @@ const ActivityClassifier = (() => {
       const vid = urlObj.searchParams.get('v') || (base === 'youtu.be' ? path.slice(1) : '');
       const videoTitle = stripSuffix(title, [' - YouTube', ' · YouTube']);
       const videoRoute = base === 'youtu.be' || path === '/watch' || Boolean(vid) || /^\/(?:shorts|live|embed)\/[^/]+/.test(path);
-      const feedRoute = path === '/' || /^\/(?:feed|results|playlist|channel|c|user|@|shorts|live)(?:\/|$)/.test(path);
+      const feedRoute = path === '/' || /^\/@[^/]+/.test(path)
+        || /^\/(?:feed|results|playlist|channel|c|user|shorts|live)(?:\/|$)/.test(path);
       return {
         app: 'YouTube',
         category: 'watching',
@@ -1054,14 +1055,18 @@ const ActivityClassifier = (() => {
    */
   function focusEligibility(span, deviceKind = 'windows', userRules = null, cache = null) {
     const observed = classifySpan(span, deviceKind, null);
-    const display = classifySpan(span, deviceKind, userRules);
+    const display = userRules ? classifySpan(span, deviceKind, userRules) : observed;
     const fine = fineCategory(span, display, deviceKind, cache);
     const observedFine = fineCategory(span, observed, deviceKind, null);
     const routeKind = observed.activityKind;
-    const isWaste = routeKind === 'video' || routeKind === 'feed'
-      || (routeKind !== 'page' && FOCUS_WASTE_CATS.has(observedFine.id));
+    const confirmedFeed = span.source === 'chromium_extension' && span.browser?.habit_feed === true;
+    const isWaste = confirmedFeed || routeKind === 'video' || routeKind === 'feed'
+      || (routeKind !== 'page' && FOCUS_WASTE_CATS.has(observedFine.id))
+      || (fine.id !== observedFine.id && FOCUS_WASTE_CATS.has(fine.id));
     return {
-      appKey: observed.app,
+      appKey: observed.matchType === 'package' ? observed.matchValue : observed.app,
+      app: fine.app,
+      noise: Boolean(display.noise && !cache?.items?.[`app:${display.app}`]),
       category: fine.id,
       minMs: isWaste ? 0 : (FOCUS_THRESHOLDS[fine.id] || 0),
       isWaste,
@@ -1112,15 +1117,11 @@ const ActivityClassifier = (() => {
         const a = Math.max(s.s, from);
         const b = Math.min(s.e, boundTo);
         if (b <= a) continue;
-        const c = classifySpan(s, src.kind, userRules);
-        const f = fineCategory(s, c, src.kind, cache);
         const eligibility = focusEligibility(s, src.kind, userRules, cache);
-        const explicit = cache?.items?.[`app:${c.app}`];
-        if (c.noise && !explicit) continue;
-        const minMs = eligibility.minMs;
-        const isWaste = eligibility.isWaste;
+        if (eligibility.noise && !eligibility.isWaste) continue;
+        const { app, appKey, category, minMs, isWaste } = eligibility;
         for (const [pa, pb] of subtractIntervals(a, b, offs)) {
-          events.push({ s: pa, e: pb, app: f.app, appKey: eligibility.appKey, category: f.id, minMs, isWaste, isBreak: false });
+          events.push({ s: pa, e: pb, app, appKey, category, minMs, isWaste, isBreak: false });
         }
       }
       events.sort((x, y) => x.s - y.s || (x.isBreak ? -1 : y.isBreak ? 1 : 0));

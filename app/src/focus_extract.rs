@@ -64,15 +64,12 @@ globalThis.URL = function URL(raw) {
 
 const CLASSIFY_FINE: &str = r#"
 (span, kind, rules, cache) => {
-  const c = ActivityClassifier.classifySpan(span, kind, rules);
   const eligibility = ActivityClassifier.focusEligibility(span, kind, rules, cache || null);
-  const explicit = cache?.items?.[`app:${c.app}`];
-  const noise = Boolean(c.noise && !explicit);
   return {
-    eligible_app: eligibility.appKey || c.app || span.app || 'Unknown',
+    eligible_app: eligibility.appKey || span.app || 'Unknown',
     eligible_fine: eligibility.category,
     is_waste: eligibility.isWaste,
-    noise,
+    noise: eligibility.noise && !eligibility.isWaste,
   };
 }
 "#;

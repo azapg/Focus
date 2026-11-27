@@ -280,7 +280,6 @@ public final class FocusStats {
     for (InsightsEngine.SpanRecord sp : spans) {
       if (sp.e <= sp.s) continue;
       ActivityClassifier.Result c = ActivityClassifier.classify(sp.app, sp.label, sp.domain, rules);
-      if (c.noise) continue;
       String dev = deviceLabel(sp.deviceKind, sp.deviceName);
       classified.add(new ClassifiedSpan(sp, c, ActivityClassifier.fineCategory(c, sp.deviceKind), dev));
     }
@@ -359,11 +358,11 @@ public final class FocusStats {
     for (InsightsEngine.SpanRecord sp : spans) {
       if (sp.e <= sp.s) continue;
       ActivityClassifier.Result c = ActivityClassifier.classify(sp.app, sp.label, sp.domain, rules);
-      if (c.noise) continue;
       String dev = deviceLabel(sp.deviceKind, sp.deviceName);
       ActivityClassifier.Fine f = ActivityClassifier.fineCategory(c, sp.deviceKind);
       ClassifiedSpan cs = new ClassifiedSpan(sp, c, f, dev);
       classified.add(cs);
+      if (c.noise) continue;
       if (overlap(sp.s, sp.e, weekStart, now) > 0) v.devicesWithData.add(dev);
       if (scope != null && !scope.equals(dev)) continue;
 
@@ -525,6 +524,7 @@ public final class FocusStats {
     Map<String, Long> byApp = new HashMap<>();
     Map<String, ClassifiedSpan> sample = new HashMap<>();
     for (ClassifiedSpan cs : spans) {
+      if (cs.result.noise) continue;
       if (!cs.span.deviceKind.equals(p.deviceKind)) continue;
       if (!Objects.equals(cs.span.deviceName, p.deviceName)) continue;
       long d = overlap(cs.span.s, cs.span.e, ps.started, ps.effectiveEnd);
@@ -676,13 +676,10 @@ public final class FocusStats {
         long a = Math.max(cs.span.s, from);
         long b = Math.min(cs.span.e, to);
         if (b <= a) continue;
-        ActivityClassifier.Result observed = ActivityClassifier.classify(
-            cs.span.app, cs.span.label, cs.span.domain, null);
-        ActivityClassifier.Fine observedFine = ActivityClassifier.fineCategory(observed, cs.span.deviceKind);
-        boolean waste = ActivityClassifier.isWasteFine(observedFine.id);
-        long minMs = waste ? 0L : ActivityClassifier.focusMinMs(cs.fine.id);
+        if (cs.result.noise && !cs.waste) continue;
+        long minMs = cs.waste ? 0L : ActivityClassifier.focusMinMs(cs.fine.id);
         for (long[] piece : subtractIntervals(a, b, offs)) {
-          events.add(new FocusEvent(piece[0], piece[1], cs.result.app, observed.app, cs.fine.id, minMs, waste, false));
+          events.add(new FocusEvent(piece[0], piece[1], cs.result.app, cs.appKey, cs.fine.id, minMs, cs.waste, false));
         }
       }
       events.sort((x, y) -> {
@@ -774,12 +771,20 @@ public final class FocusStats {
     final ActivityClassifier.Result result;
     final ActivityClassifier.Fine fine;
     final String device;
+    final String appKey;
+    final boolean waste;
 
     ClassifiedSpan(InsightsEngine.SpanRecord span, ActivityClassifier.Result result, ActivityClassifier.Fine fine, String device) {
       this.span = span;
       this.result = result;
       this.fine = fine;
       this.device = device;
+      ActivityClassifier.Result observed = result.userRule
+          ? ActivityClassifier.classify(span.app, span.label, span.domain, null) : result;
+      ActivityClassifier.Fine observedFine = result.userRule
+          ? ActivityClassifier.fineCategory(observed, span.deviceKind) : fine;
+      appKey = "package".equals(observed.matchType) ? observed.matchValue : observed.app;
+      waste = ActivityClassifier.isWasteFine(observedFine.id) || ActivityClassifier.isWasteFine(fine.id);
     }
   }
 
