@@ -161,6 +161,31 @@ const Stats = (() => {
     return out;
   }
 
+  // Ask-approved service windows (history.grants) are on-plan by definition:
+  // the judge already decided the request served what the user was doing.
+  const serviceKey = (s) => String(s || '').toLowerCase().replace(/\s*\(.+\)$/, '')
+    .replace(/^www\./, '').replace(/\.(com|tv|gg)$/, '').replace(/[^a-z0-9]/g, '');
+
+  function approvedIntervals(grants, app, a, b) {
+    const key = serviceKey(app);
+    if (!key || !Array.isArray(grants)) return [];
+    const windows = grants
+      .filter((g) => (g.services || []).some((svc) => serviceKey(svc) === key))
+      .map((g) => [g.t, g.end]);
+    return mergeIntervals(intersectWithRange(windows, a, b));
+  }
+
+  function subtractIntervals(a, b, cut) {
+    const out = [];
+    let cursor = a;
+    for (const [x, y] of cut) {
+      if (x > cursor) out.push([cursor, Math.min(x, b)]);
+      cursor = Math.max(cursor, y);
+    }
+    if (b > cursor) out.push([cursor, b]);
+    return out.filter(([x, y]) => y > x);
+  }
+
   function doneWhenQuestion(doneWhen) {
     const raw = String(doneWhen || '').trim().replace(/[.!,;]+$/, '');
     if (!raw) return 'Done?';
@@ -226,11 +251,15 @@ const Stats = (() => {
     const intentionText = `${intention.label || ''} ${intention.done_when || ''} ${intention.raw || ''}`.trim();
     const byApp = Object.create(null);
     for (const s of spans || []) {
-      const d = overlap(s.s, s.e, from, now);
+      let d = overlap(s.s, s.e, from, now);
       if (!d) continue;
       const info = classifyForIntention(s, classifier, opts.userRules, opts.cache);
       if (!info) continue;
       const isWaste = WASTE_CATS.has(info.fineId) || COARSE_WASTE.has(info.coarse);
+      if (isWaste) {
+        d -= sumIntervals(approvedIntervals(opts.grants, info.app, Math.max(s.s, from), Math.min(s.e, now)));
+        if (d <= 0) continue;
+      }
       const offPlan = isWaste && !fitsIntention(intentionText, info.app, info.coarse, classifier);
       const cur = (byApp[info.app] ??= { app: info.app, ms: 0, offPlan: false });
       cur.ms += d;
@@ -248,6 +277,8 @@ const Stats = (() => {
         const minutes = Math.max(1, Math.round(topOff.ms / MIN));
         return { app: topOff.app, ms: topOff.ms, minutes, text: `${topOff.app} ${minutes}m off-plan` };
       }
+      // Watching something Ask just approved reads as "consuming" to the focus classifier.
+      if ((opts.grants || []).some((g) => g.t <= now && now < g.end)) return null;
       return { app: '', ms: 0, minutes: 0, text: 'Off-plan' };
     }
     return null;
@@ -319,13 +350,16 @@ const Stats = (() => {
         if (!info) continue;
         const d = b - a;
         const isWaste = WASTE_CATS.has(info.fineId) || COARSE_WASTE.has(info.coarse);
-        const isDrift = isWaste && !fitsIntention(intentionText, info.app, info.coarse, classifier);
-        const isMuted = !isDrift && MUTED_CATS.has(info.fineId);
+        const unfit = isWaste && !fitsIntention(intentionText, info.app, info.coarse, classifier);
+        const drift = unfit ? subtractIntervals(a, b, approvedIntervals(h.grants, info.app, a, b)) : [];
+        const isDrift = drift.length > 0;
+        const isMuted = !unfit && MUTED_CATS.has(info.fineId);
         activeIntervals.push([a, b]);
-        if (isDrift) driftIntervals.push([a, b]);
-        else if (isMuted) mutedIntervals.push([a, b]);
-        const entry = (byApp[info.app] ??= { app: info.app, ms: 0, isDrift: false });
+        driftIntervals.push(...drift);
+        if (isMuted) mutedIntervals.push([a, b]);
+        const entry = (byApp[info.app] ??= { app: info.app, ms: 0, driftMs: 0, isDrift: false });
         entry.ms += d;
+        entry.driftMs += sumIntervals(drift);
         entry.isDrift ||= isDrift;
       }
 
@@ -367,8 +401,8 @@ const Stats = (() => {
         details.push({ kind: 'away', text: `${fmt(awayMs)} away from screen` });
       }
       for (const a of appList) {
-        if (a.isDrift && a.ms >= 2 * MIN) {
-          details.push({ kind: 'drift', text: `${a.app} ${fmt(a.ms)} off-plan` });
+        if (a.isDrift && a.driftMs >= 2 * MIN) {
+          details.push({ kind: 'drift', text: `${a.app} ${fmt(a.driftMs)} off-plan` });
         } else {
           details.push({ kind: 'app', text: `${a.app} ${fmt(a.ms)}` });
         }

@@ -669,6 +669,8 @@ struct History {
     pauses: Vec<PauseRec>,
     peeks: Vec<u64>,
     intentions: Vec<focus_dns::intentions::IntentionRec>,
+    /// Ask-approved service windows, so approved use is not counted as drift.
+    grants: Vec<pause_history::ScopedGrant>,
 }
 
 /// Raw screen time + pauses between two times (ms). The UI does the math.
@@ -684,7 +686,9 @@ fn history(from: u64, to: u64, core: State<Arc<Core>>, tracker: State<Arc<Tracke
     let mut peeks = focus_browser_host::peek_history::timestamps(&core.dir, from, to);
     peeks.extend(peek_panel::timestamps(&core.dir, from, to));
     let intentions = core.intentions.history(from, to, now);
-    History { now, spans: tracker.spans(from, to), pauses, peeks, intentions }
+    let mut grants = pause_history::scoped_grants(&text, now);
+    grants.retain(|g| g.end > from && g.t < to);
+    History { now, spans: tracker.spans(from, to), pauses, peeks, intentions, grants }
 }
 
 /// Same as Win+L: agents keep running, screen time stops counting until you unlock.

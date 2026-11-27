@@ -39,6 +39,9 @@ MOCK = r'''(() => {
     pauses: [
       { t: at(11, 20), end: at(11, 24), minutes: 4, reason: 'Find how to fold pizza boxes on YouTube', check_in: 'specific', rating: 5 },
     ],
+    grants: [
+      { t: at(11, 20), end: at(11, 26), services: ['youtube'] },
+    ],
     intentions: [
       {
         id: 'int-1', start: at(9, 10), end: at(10, 42), planned_until: at(10, 40), planned_minutes: 90,

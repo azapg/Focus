@@ -173,4 +173,27 @@ test('intentions summary splits deep focus, on-screen, away, drift, and 15m+ no-
   assert.equal(S.doneWhenQuestion('the trash is out'), 'Is the trash out?');
   assert.equal(S.doneWhenQuestion('PR open'), 'PR open?');
   assert.equal(S.doneWhenQuestion(null), 'Done?');
+
+  // Without an Ask grant, the pizza-box video during cleaning counts as drift.
+  assert.equal(clean.driftMs, 6 * MIN);
+  assert.ok(clean.details.some((d) => d.kind === 'drift' && d.text === 'YouTube 6m off-plan'));
+
+  // With an Ask-approved YouTube window, it is on-plan: no orange, no off-plan label.
+  const granted = { ...history, grants: [{ t: at(11, 19), end: at(11, 26), services: ['youtube'] }] };
+  const approved = S.summarizeIntentions(granted, day, day + S.DAY, { classifier: AC }).rows[1];
+  assert.equal(approved.driftMs, 0);
+  assert.ok(!approved.segments.some((seg) => seg.kind === 'drift'));
+  assert.ok(approved.details.some((d) => d.kind === 'app' && d.text === 'YouTube 6m'));
+
+  // A grant only excuses its own service and window.
+  const partial = { ...history, grants: [{ t: at(11, 20), end: at(11, 23), services: ['youtube'] }, { t: at(11, 0), end: at(11, 45), services: ['discord'] }] };
+  assert.equal(S.summarizeIntentions(partial, day, day + S.DAY, { classifier: AC }).rows[1].driftMs, 3 * MIN);
+
+  // The live bar ignores approved time too.
+  const watching = [web(now - 4 * MIN, now, 'www.youtube.com', 'https://www.youtube.com/watch?v=box', 'Fold pizza box - YouTube')];
+  const cleaning = { ...history.intentions[1], end: null, active: true, start: now - 20 * MIN };
+  assert.ok(S.detectOffPlan(cleaning, watching, now, { classifier: AC, liveFocusState: 'drifting' }));
+  assert.equal(S.detectOffPlan(cleaning, watching, now, {
+    classifier: AC, liveFocusState: 'drifting', grants: [{ t: now - 5 * MIN, end: now + MIN, services: ['youtube'] }],
+  }), null);
 });

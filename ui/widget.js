@@ -14,7 +14,7 @@ const intentGo = document.getElementById('intentGo');
 const intentCard = document.getElementById('intentCard');
 const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtClock = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-let intentionView = null, lastHistorySpans = [], offPlan = null;
+let intentionView = null, lastHistorySpans = [], lastHistoryGrants = [], offPlan = null;
 let intentCardMode = null, intentDraft = null, intentEditing = false;
 let intentParsing = false, intentParseSeq = 0, intentCardBusy = false, intentCardError = '', lastIntentCardKey = '';
 let checkIn = null, keyboardPauseForm = false;
@@ -275,6 +275,7 @@ async function refreshToday() {
   } catch { activeDeepFocus = false; }
   today = { offMs, pauses };
   lastHistorySpans = h.spans || [];
+  lastHistoryGrants = h.grants || [];
   aOn.textContent = Stats.fmt(s.active);
   syncIntentionUI(false);
   updateAllowance();
@@ -405,6 +406,7 @@ function syncIntentionUI(resize = true) {
         classifier: window.ActivityClassifier,
         userRules: widgetRules,
         liveFocusState,
+        grants: lastHistoryGrants,
       })
     : null;
 
