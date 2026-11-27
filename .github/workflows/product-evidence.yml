@@ -1,0 +1,68 @@
+name: Product flow evidence
+
+on:
+  pull_request:
+    paths:
+      - 'docs/product/**'
+      - 'docs/wallet.md'
+      - 'ui/widget.js'
+      - 'ui/src/devices.tsx'
+      - 'ui/src/wallet-store.tsx'
+      - 'ui/src/main.tsx'
+      - 'ui/components/ui/button.tsx'
+      - 'ui/lib/shadcn.css'
+      - 'ui/styles.css'
+      - 'ui/index.html'
+      - 'tests/wallet-store.py'
+      - 'tests/screenshot_browser.py'
+      - 'tests/device-panel.py'
+      - 'scripts/product-evidence.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig.json'
+      - '.github/workflows/product-evidence.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/product/**'
+      - 'docs/wallet.md'
+      - 'ui/widget.js'
+      - 'ui/src/devices.tsx'
+      - 'ui/src/wallet-store.tsx'
+      - 'ui/src/main.tsx'
+      - 'ui/components/ui/button.tsx'
+      - 'ui/lib/shadcn.css'
+      - 'ui/styles.css'
+      - 'ui/index.html'
+      - 'tests/wallet-store.py'
+      - 'tests/screenshot_browser.py'
+      - 'tests/device-panel.py'
+      - 'scripts/product-evidence.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig.json'
+      - '.github/workflows/product-evidence.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/product-evidence.mjs artifacts/product/index.html --built
+      - uses: actions/upload-artifact@v4
+        with:
+          name: focus-product-flow-${{ github.sha }}
+          path: artifacts/product/index.html
+          if-no-files-found: error
+          retention-days: 14
