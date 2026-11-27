@@ -17,6 +17,7 @@ DESKTOP = {
     "devices": "device-panel.py",
     "updates": "updater-ui.py",
     "store": "wallet-store.py",
+    "intentions": "intentions-browser.py",
 }
 
 
