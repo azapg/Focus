@@ -70,6 +70,7 @@ public final class FocusEventCodes {
       OUTCOME_BLOCKED);
 
   public static final String LAPTOP_UNREACHABLE = "laptop_unreachable";
+  public static final String ASK_LAPTOP_REQUIRED = "ask_laptop_required";
   public static final String LAPTOP_TIMEOUT = "laptop_timeout";
   public static final String LAPTOP_TLS_MISMATCH = "laptop_tls_mismatch";
   public static final String LAPTOP_UNAUTHORIZED = "laptop_unauthorized";
@@ -123,7 +124,7 @@ public final class FocusEventCodes {
   public static final String STALE = "stale";
 
   static final Set<String> CAUSES = Set.of(
-      LAPTOP_UNREACHABLE, LAPTOP_TIMEOUT, LAPTOP_TLS_MISMATCH, LAPTOP_UNAUTHORIZED,
+      LAPTOP_UNREACHABLE, ASK_LAPTOP_REQUIRED, LAPTOP_TIMEOUT, LAPTOP_TLS_MISMATCH, LAPTOP_UNAUTHORIZED,
       LAPTOP_JUDGE_DISABLED, LAPTOP_UNSUPPORTED, LAPTOP_REJECTED, LAPTOP_INVALID_REPLY,
       GATEWAY_NO_KEY, GATEWAY_KEYSTORE, GATEWAY_HTTP_4XX, GATEWAY_HTTP_5XX,
       GATEWAY_CANCELLED, GATEWAY_TRANSPORT, GATEWAY_TIMEOUT, GATEWAY_UNREACHABLE,

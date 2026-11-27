@@ -40,6 +40,7 @@ public final class DeviceHub {
     public JSONObject snapshot;
     private ScopedAccessWindow scopedAccess;
     private long scopedRevision;
+    private boolean scopedRestoring;
     // Cached history can survive an outage, but only a confirmed snapshot can project live use.
     private JSONObject livePauseSnapshot;
     private long directSnapshotRequestedAt;
@@ -211,6 +212,7 @@ public final class DeviceHub {
         d.online = !"laptop".equals(d.kind) && d.lastSeen > 0 && (now - d.lastSeen) < 90_000L;
         d.snapshot = o.optJSONObject("snapshot");
         d.scopedRevision = o.optLong("scoped_revision");
+        d.scopedRestoring = o.optBoolean("scoped_restoring");
         d.scopedAccess = ScopedAccessWindow.restore(d.id, o.optJSONObject("scoped_access"), Store.get(context).boot());
         devices.add(d);
       }
@@ -240,7 +242,9 @@ public final class DeviceHub {
             .put("retired_snapshot_revision", d.retiredSnapshotRevision)
             .put("last_seen", d.lastSeen);
         if (d.snapshot != null) o.put("snapshot", d.snapshot);
-        if (d.scopedRevision > 0) o.put("scoped_revision", d.scopedRevision);
+        if (d.scopedRevision > 0) {
+          o.put("scoped_revision", d.scopedRevision).put("scoped_restoring", d.scopedRestoring);
+        }
         if (d.scopedAccess != null) o.put("scoped_access", d.scopedAccess.save(Store.get(context).boot()));
         arr.put(o);
       } catch (JSONException ignored) {}
@@ -421,10 +425,21 @@ public final class DeviceHub {
     }
     device.scopedRevision = Math.max(device.scopedRevision, revision);
     device.scopedAccess = next;
+    JSONObject dns = sample.optJSONObject("dns");
+    device.scopedRestoring = dns != null && dns.optBoolean("scoped_restoring");
     return true;
   }
 
   void scopedAccessApplied(PairedDevice laptop, JSONObject reply, long requestStarted) {
+    adoptScopeSample(laptop, reply, requestStarted, true);
+  }
+
+  void scopedAccessStatus(PairedDevice laptop, JSONObject reply, long requestStarted) {
+    adoptScopeSample(laptop, reply, requestStarted, false);
+    notifyUpdated();
+  }
+
+  private void adoptScopeSample(PairedDevice laptop, JSONObject reply, long requestStarted, boolean applied) {
     JSONObject sample = reply.optJSONObject("scoped_timer");
     if (sample == null) return; // Older laptops send the deadline in the next snapshot.
     synchronized (this) {
@@ -438,7 +453,7 @@ public final class DeviceHub {
         if (current == null || !current.sameGrant(
             ScopedAccessWindow.sample(laptop.id, sample, clockAnchor, null))) return;
       }
-      if (laptop.scopedAccess != null) laptop.scopedAccess = laptop.scopedAccess.appliedNow();
+      if (applied && laptop.scopedAccess != null) laptop.scopedAccess = laptop.scopedAccess.appliedNow();
       persist();
       refreshScopedNotification(false);
     }
@@ -501,6 +516,54 @@ public final class DeviceHub {
 
   public synchronized List<PairedDevice> list() {
     return new ArrayList<>(devices);
+  }
+
+  synchronized List<PairedDevice> eligibleAskLaptops() {
+    List<PairedDevice> laptops = new ArrayList<>();
+    for (PairedDevice device : devices) {
+      if ("laptop".equals(device.kind) && !device.relayed
+          && !device.fingerprint.isEmpty() && !device.token.isEmpty()) laptops.add(device);
+    }
+    return laptops;
+  }
+
+  synchronized PairedDevice askLaptop() {
+    List<PairedDevice> laptops = eligibleAskLaptops();
+    String selected = context.getSharedPreferences("focus-ask", Context.MODE_PRIVATE).getString("laptop", "");
+    for (PairedDevice laptop : laptops) {
+      if (laptop.id.equals(selected)) return laptop;
+    }
+    if (selected.isEmpty() && laptops.size() == 1 && selectAskLaptop(laptops.get(0))) return laptops.get(0);
+    return null;
+  }
+
+  synchronized boolean selectAskLaptop(PairedDevice laptop) {
+    if (!eligibleAskLaptops().contains(laptop)) return false;
+    SharedPreferences settings = context.getSharedPreferences("focus-ask", Context.MODE_PRIVATE);
+    PairedDevice current = findById(settings.getString("laptop", ""));
+    if (current != null && current != laptop && (current.scopedAccess != null || scopeRestoring(current))) {
+      return false;
+    }
+    return settings.edit().putString("laptop", laptop.id).commit();
+  }
+
+  synchronized boolean scopedRestorationPending() {
+    for (PairedDevice laptop : devices) {
+      if ("laptop".equals(laptop.kind) && !laptop.relayed && scopeRestoring(laptop)) return true;
+    }
+    return false;
+  }
+
+  private static boolean scopeRestoring(PairedDevice laptop) {
+    return laptop.scopedRestoring
+        || (laptop.scopedAccess != null && !laptop.scopedAccess.grantId.isEmpty()
+            && laptop.scopedAccess.remaining() == 0);
+  }
+
+  synchronized boolean hasActiveScopedGrant(PairedDevice laptop, String id) {
+    return findById(laptop.id) == laptop && !laptop.relayed
+        && laptop.scopedAccess != null && id.equals(laptop.scopedAccess.grantId)
+        && laptop.scopedAccess.remaining() > 0;
   }
 
   public synchronized PairedDevice findById(String id) {

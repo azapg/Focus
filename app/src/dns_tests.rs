@@ -473,7 +473,7 @@ fn scoped_startup_cleanup_does_not_create_a_dns_off_interval() {
 }
 
 #[test]
-fn laptop_snapshot_keeps_a_started_grant_until_cleanup_completes() {
+fn laptop_snapshot_shows_pending_until_cleanup_completes() {
     let fail_first_enable = AtomicBool::new(true);
     let f = Fixture::new(move |mode| {
         if mode == "on" && fail_first_enable.swap(false, Ordering::Relaxed) {
@@ -490,28 +490,32 @@ fn laptop_snapshot_keeps_a_started_grant_until_cleanup_completes() {
         timer: Some(nextdns::GrantTimer { id: "grant".into(), duration_ms: 180_000 }),
         services: vec!["x".into()],
         changes: Default::default(),
-        closing: true,
+        closing: false,
         in_flight: None,
         trace: None,
     });
-    let pending = f.core.laptop_pause_snapshot().unwrap();
-    assert_eq!(pending.scoped_until, until);
-    assert_eq!(pending.scoped_grant.unwrap().id, "grant");
+    let active = f.core.laptop_pause_snapshot().unwrap();
+    assert_eq!(active.scoped_until, until);
+    assert_eq!(active.scoped_grant.unwrap().id, "grant");
+    assert!(!active.scope_restoring);
 
     let sample = device_commands::scoped_apply_sample(&f.core, "grant", until, Instant::now()).unwrap().unwrap();
     assert_eq!(sample["dns"]["scoped_until"], until);
     assert_eq!(sample["dns"]["scoped_grant"]["duration_ms"], 180_000);
     assert_eq!(sample["dns"]["scoped_services"][0], "x");
     assert!(sample["now"].as_u64().unwrap() >= start);
-    assert!(sample["snapshot_revision"].as_u64().unwrap() > pending.revision);
+    assert!(sample["snapshot_revision"].as_u64().unwrap() > active.revision);
     assert!(device_commands::scoped_apply_sample(&f.core, "old-grant", until, Instant::now()).unwrap().is_none());
     assert!(!device_commands::end_scoped_access(&f.core, "old-grant").unwrap());
     assert!(f.calls.lock().unwrap().is_empty());
     assert_eq!(device_commands::end_scoped_access(&f.core, "grant").unwrap_err(), "Could not reapply adapter DNS");
-    assert_eq!(f.core.laptop_pause_snapshot().unwrap().scoped_until, until);
+    f.core.saved.lock().unwrap().scoped_pause.as_mut().unwrap().until = now_ms() - 1;
+    assert!(f.core.laptop_pause_snapshot().unwrap().scope_restoring);
+    assert_eq!(device_commands::scoped_access_status(&f.core, "grant", Instant::now()).unwrap()["status"], "restoring");
     assert!(f.events().is_empty());
     assert!(device_commands::end_scoped_access(&f.core, "grant").unwrap());
     assert_eq!(f.core.laptop_pause_snapshot().unwrap().scoped_until, 0);
+    assert!(!f.core.laptop_pause_snapshot().unwrap().scope_restoring);
     assert_eq!(*f.calls.lock().unwrap(), ["on", "on"]);
     assert_eq!(f.events()[0]["type"], "scoped_resume");
 }

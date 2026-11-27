@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Smart Ask benchmark · Focus</title>
+<style>
+/* SITE STYLES */
+</style>
+</head>
+<body>
+<main class="shell">
+  <header class="hero">
+    <div>
+      <h1>Smart Ask benchmark</h1>
+      <p id="dataset" class="muted"></p>
+      <p id="run-source" class="muted source" hidden></p>
+    </div>
+    <div class="hero-controls">
+      <button type="button" data-open="method">Methodology</button>
+      <button type="button" id="import" class="primary">Open reports</button>
+      <input id="files" type="file" accept=".json,application/json" multiple hidden>
+    </div>
+  </header>
+  <p id="load-status" class="load-status" role="status" hidden></p>
+  <nav class="views" aria-label="Benchmark view">
+    <button id="show-results" type="button" aria-controls="results-view" aria-pressed="true">Results</button>
+    <button id="show-suite" type="button" aria-controls="suite-view" aria-pressed="false">Suite</button>
+  </nav>
+  <div id="results-view">
+  <form class="filters" aria-label="Benchmark scope">
+    <label>Run<select id="run"></select></label>
+    <label>Model<select id="model"></select></label>
+    <label>Route<select id="route"></select></label>
+    <label>Reasoning<select id="reasoning"></select></label>
+    <label>History<select id="history"></select></label>
+  </form>
+  <section class="metrics" aria-label="Run summary" id="metrics"></section>
+  <div class="workspace">
+    <section class="categories" aria-labelledby="category-title">
+      <header>
+        <h2 id="category-title">Passes by category</h2>
+        <button id="all-categories" type="button">All categories</button>
+      </header>
+      <div id="categories"></div>
+    </section>
+    <section class="results" aria-labelledby="results-title">
+      <header class="results-header">
+        <h2 id="results-title">Cases <span class="muted" id="match-count"></span></h2>
+        <div class="results-controls">
+          <label><span class="sr-only">Search cases</span><input id="search" type="search" placeholder="Search cases"></label>
+          <label><span class="sr-only">Result</span><select id="outcome">
+            <option value="">All results</option>
+            <option value="overgrant">Overgrants</option>
+            <option value="mismatch">Other mismatches</option>
+            <option value="error">Invalid replies and errors</option>
+            <option value="pass">Passed</option>
+          </select></label>
+        </div>
+      </header>
+      <table class="case-table" aria-label="Matching benchmark cases">
+        <thead><tr><th scope="col">Request / category</th><th scope="col">Model / route</th><th scope="col">Result</th></tr></thead>
+        <tbody id="cases"></tbody>
+      </table>
+      <p class="empty muted" id="empty" role="status" hidden>No cases match these filters.</p>
+      <nav class="pagination" id="pagination" aria-label="Case pages">
+        <span id="page-status" class="muted" aria-live="polite"></span>
+        <button id="prev" type="button">Previous</button>
+        <button id="next" type="button">Next</button>
+      </nav>
+    </section>
+  </div>
+  </div>
+  <section id="suite-view" class="suite" aria-labelledby="suite-title" hidden>
+    <header class="results-header">
+      <h2 id="suite-title">Current cases <span class="muted" id="suite-count"></span></h2>
+      <div class="results-controls">
+        <label><span class="sr-only">Search suite</span><input id="suite-search" type="search" placeholder="Search suite"></label>
+        <label><span class="sr-only">Suite category</span><select id="suite-category"></select></label>
+      </div>
+    </header>
+    <table class="case-table suite-table" aria-label="Current benchmark cases">
+      <thead><tr><th scope="col">Request / category</th><th scope="col">Desktop expects</th><th scope="col">Phone direct expects</th></tr></thead>
+      <tbody id="suite-cases"></tbody>
+    </table>
+    <p class="empty muted" id="suite-empty" role="status" hidden>No cases match these filters.</p>
+    <nav class="pagination" id="suite-pagination" aria-label="Suite pages">
+      <span id="suite-page-status" class="muted" aria-live="polite"></span>
+      <button id="suite-prev" type="button">Previous</button>
+      <button id="suite-next" type="button">Next</button>
+    </nav>
+  </section>
+</main>
+<dialog id="detail" aria-labelledby="case-title">
+  <header class="dialog-header">
+    <div>
+      <p class="muted" id="case-meta"></p>
+      <h2 id="case-title" tabindex="-1">Case details</h2>
+    </div>
+    <form method="dialog"><button type="submit" autofocus>Close</button></form>
+  </header>
+  <div id="case-detail"></div>
+</dialog>
+<dialog id="method" aria-labelledby="method-title">
+  <header class="dialog-header">
+    <h2 id="method-title">Methodology</h2>
+    <form method="dialog"><button type="submit" autofocus>Close</button></form>
+  </header>
+  <div class="method-body">
+    <p>Each sample is one live Gateway response to a fictional request in Focus’s desktop or phone-direct format. A case can appear again in another run, model, route or trial.</p>
+    <p>The rubric checks the action, exact scope, duration and any required Store or habit guidance. An overgrant opens access the rubric forbids or grants more scope or time than the case allows. Other mismatches include conservative decisions and missing guidance.</p>
+    <p>History off clears prior pause reasons, matching outcomes and ratings. Reasoning default uses the app’s Gateway configuration. Phone direct has no desktop DNS evidence or scoped grants.</p>
+    <p>Latency is wall-clock time for the sample, including transport retries. P95 uses judged samples. Cost totals include values Gateway reported. The benchmark ends at the proposal, before the app applies a hold or changes DNS.</p>
+    <p>Imported reports stay in this tab and disappear when it closes. Rebuild the page from the Focus report directory to keep new runs available.</p>
+  </div>
+</dialog>
+<script id="benchmark-reports" type="application/json">[]</script>
+<script id="benchmark-suite" type="application/json">{}</script>
+<script>
+/* SITE SCRIPT */
+</script>
+</body>
+</html>

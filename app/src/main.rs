@@ -88,12 +88,21 @@ struct Saved {
     scope_revision: u64,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pending_grants: std::collections::BTreeMap<String, nextdns::PendingGrant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scope_receipt: Option<nextdns::GrantReceipt>,
     #[serde(default)]
     rating_prompt: Option<RatingPrompt>,
     #[serde(default)]
     free_time: bool,
     #[serde(default)]
     emergency_shield: bool,
+}
+
+impl Saved {
+    fn scope_restoring(&self, now: u64) -> bool {
+        !self.pending_grants.is_empty()
+            || self.scoped_pause.as_ref().is_some_and(|lease| lease.needs_cleanup(now, false))
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -125,6 +134,7 @@ struct LaptopPauseSnapshot {
     active_pause: Option<(u64, Option<u64>)>,
     paused_until: u64,
     scoped_until: u64,
+    scope_restoring: bool,
     scoped_grant: Option<nextdns::GrantTimer>,
     scoped_services: Vec<String>,
     history: String,
@@ -213,14 +223,14 @@ impl Core {
         let now = now_ms();
         // Sample the settings while snapshots are still serialized by the saved-state lock.
         let desktop_limit = self.habits.desktop_limit();
-        // Access can still be open if an early End is waiting for NextDNS cleanup.
-        let scope = saved.scoped_pause.as_ref().filter(|lease| lease.started.is_some());
+        let scope = saved.scoped_pause.as_ref().filter(|lease| !lease.needs_cleanup(now, false));
         Ok(LaptopPauseSnapshot {
             now,
             revision: self.next_event_sequence(now)?,
             active_pause: (saved.paused_at != 0).then_some((saved.paused_at, saved.pause_id)),
             paused_until: saved.paused_until,
             scoped_until: scope.map_or(0, |lease| lease.until),
+            scope_restoring: saved.scope_restoring(now),
             scoped_grant: scope.and_then(|lease| lease.timer.clone()),
             scoped_services: scope.map(|lease| lease.services.clone()).unwrap_or_default(),
             history,
@@ -259,10 +269,9 @@ impl Core {
     }
 
     fn view_locked(&self, s: &Saved) -> View {
-        let scoped_until = s.scoped_pause.as_ref().map(|lease| {
-            if lease.closing || lease.started.is_none() { 0 } else { lease.until }
-        });
         let now = now_ms();
+        let scoped_until = if s.scope_restoring(now) { Some(0) }
+            else { s.scoped_pause.as_ref().map(|lease| lease.until) };
         View {
             paused_at: s.paused_at, paused_until: s.paused_until, now, dry_run: self.dry, scoped_until,
             dns_configured: self.dry || self.dns_profile().is_some(),
@@ -408,6 +417,7 @@ impl Core {
         }
         next.scoped_pause = s.scoped_pause.take();
         next.pending_grants = std::mem::take(&mut s.pending_grants);
+        next.scope_receipt = s.scope_receipt.take();
         *s = next;
         self.save(s);
         self.log(&format!("protection ON ({why})"));
@@ -559,6 +569,7 @@ impl Core {
                     scoped_pause: s.scoped_pause.take(),
                     scope_revision: s.scope_revision,
                     pending_grants: std::mem::take(&mut s.pending_grants),
+                    scope_receipt: s.scope_receipt.take(),
                     ..Saved::default()
                 };
                 self.save(&s);
@@ -1051,8 +1062,11 @@ fn main() {
                 }
             }
             let pending_core = setup_core.clone();
+            let pending_app = app.handle().clone();
             thread::spawn(move || loop {
-                pause_judge::sweep_pending(&pending_core);
+                if pause_judge::sweep_pending(&pending_core) {
+                    pending_core.publish(&pending_app);
+                }
                 thread::sleep(Duration::from_secs(30));
             });
             updater::cleanup_old_binaries(&setup_core);
