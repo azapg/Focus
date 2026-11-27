@@ -112,19 +112,19 @@ fn award_completed_days(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
     use serde_json::json;
     use std::fs;
 
     #[test]
     fn verified_focus_pays_without_clean_streak_and_cannot_pay_twice() {
         let fixture = crate::dns_tests::Fixture::new(|_| panic!("unexpected DNS operation"));
-        let core = crate::Core::open_profile(fixture.core.dir.clone(), true);
-        let core = &core;
-        let tracker = Tracker::new(&core.dir);
-        let now = Local::now();
+        let now = Local.with_ymd_and_hms(2026, 2, 12, 9, 0, 0).unwrap();
         let date = now.date_naive() - Days::new(1);
-        let day = local_clock(now.timestamp_millis() as u64).0 - 1;
         let start = local_day_start(&Local, date).unwrap();
+        let day = local_clock(start).0;
+        let core = crate::Core::open_profile(fixture.core.dir.clone(), true, start);
+        let tracker = Tracker::new(&core.dir);
         let minute = 60_000;
         let spans = [
             json!({ "s": start, "e": start + 35 * minute, "app": "T3 Code", "label": "T3 Code" }),
@@ -148,9 +148,8 @@ mod tests {
         assert_eq!(core.habits.read().balance(), 0);
         assert!(core.habits.read().wallet_active(day));
         assert!(focus_dns::streak_journal::authority_cursor(&core.habits).is_none());
-        assert_eq!(award_completed_days(core, &tracker, &[], now, 2), Ok(5));
-        assert_eq!(award_completed_days(core, &tracker, &[], now, 2), Ok(0));
-        assert_eq!(core.habits.read().balance(), 5);
+        assert_eq!(award_completed_days(&core, &tracker, &[], now, 2), Ok(5));
+        assert_eq!(award_completed_days(&core, &tracker, &[], now, 2), Ok(0));
         assert_eq!(core.habits.read().balance(), 5);
     }
 }

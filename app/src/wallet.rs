@@ -41,8 +41,8 @@ fn wallet_value(
         "time_off_bought": ledger.time_off_bought(day),
         "time_off_limit": ledger.time_off_limit(day),
         "time_off_price_per_minute": TIME_OFF_PRICE_PER_MINUTE,
-        "focus_coins_today": focus_dns::habits::focus_rewards::focus_coins_for_day(&ledger, day),
-        "focus_coins_week": focus_dns::habits::focus_rewards::focus_coins_in_range(&ledger, day - 6, day),
+        "focus_coins_today": focus_dns::habits::focus_rewards::focus_coins_for_day(ledger, day),
+        "focus_coins_week": focus_dns::habits::focus_rewards::focus_coins_in_range(ledger, day - 6, day),
         "needs_upgrade": needs_upgrade
     })
 }
@@ -132,16 +132,22 @@ mod tests {
     #[test]
     fn fresh_profile_open_activates_empty_store_and_persists_it() {
         let dir = test_profile("fresh");
-        let first = Core::open_profile(dir.clone(), true);
+        let first = Core::open_profile(dir.clone(), true, now_ms());
         let today = local_clock(now_ms()).0;
         let view = wallet_view(&first);
-        assert_eq!(view["active"], true);
+        assert_eq!(
+            view["active"], true,
+            "fresh profile must expose an active Store"
+        );
         assert_eq!(view["balance"], 0);
         assert!(first.habits.read().wallet_active(today));
         assert!(focus_dns::streak_journal::authority_cursor(&first.habits).is_none());
         drop(first);
+        assert!(focus_dns::habits::Store::new(&dir)
+            .read()
+            .wallet_active(today));
 
-        let reopened = Core::open_profile(dir.clone(), true);
+        let reopened = Core::open_profile(dir.clone(), true, now_ms());
         let view = wallet_view(&reopened);
         assert_eq!(view["active"], true);
         assert_eq!(view["balance"], 0);
@@ -163,13 +169,13 @@ mod tests {
             })
             .unwrap();
 
-        let first = Core::open_profile(dir.clone(), true);
+        let first = Core::open_profile(dir.clone(), true, now_ms());
         let view = wallet_view(&first);
         assert_eq!(view["active"], true);
         assert_eq!(view["balance"], 12);
         drop(first);
 
-        let reopened = Core::open_profile(dir.clone(), true);
+        let reopened = Core::open_profile(dir.clone(), true, now_ms());
         let view = wallet_view(&reopened);
         assert_eq!(view["active"], true);
         assert_eq!(view["balance"], 12);

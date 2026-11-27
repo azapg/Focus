@@ -155,18 +155,27 @@ struct Core {
 
 impl Core {
     /// Open a Focus profile exactly as desktop startup does, including Store activation.
-    pub(crate) fn open_profile(dir: PathBuf, dry: bool) -> Self {
+    fn open_profile(dir: PathBuf, dry: bool, opened_at: u64) -> Self {
         let _ = fs::create_dir_all(&dir);
         let core = Self {
-            dir: dir.clone(), dns_config: OnceLock::new(), habits: focus_dns::habits::Store::new(&dir), intentions: focus_dns::intentions::Store::open(&dir), dry, saved: Mutex::new(Saved::default()), state_write_pending: AtomicBool::new(false), hit: Mutex::new([0.0; 4]),
+            habits: focus_dns::habits::Store::new(&dir),
+            intentions: focus_dns::intentions::Store::open(&dir),
+            dir,
+            dns_config: OnceLock::new(),
+            dry,
+            saved: Mutex::new(Saved::default()),
+            state_write_pending: AtomicBool::new(false),
+            hit: Mutex::new([0.0; 4]),
             judge_tickets: pause_judge::Tickets::default(),
             history_write: Mutex::new(()),
             event_sequence: Mutex::new(None),
-            dns_lock: Mutex::new(()), dns_sequence: AtomicU64::new(1), prev_fg: Mutex::new(0),
+            dns_lock: Mutex::new(()),
+            dns_sequence: AtomicU64::new(1),
+            prev_fg: Mutex::new(0),
             #[cfg(test)]
             dns_override: Box::new(|_| panic!("tests must supply a DNS fake")),
         };
-        let today = focus_dns::habits::local_clock(now_ms()).0;
+        let today = focus_dns::habits::local_clock(opened_at).0;
         match core.habits.activate_wallet(today) {
             Ok(true) => core.log("Store wallet activated"),
             Ok(false) => {}
@@ -967,11 +976,9 @@ fn main() {
         return;
     }
 
-    let core = Arc::new(Core::open_profile(dir.clone(), dry));
-
     let already_running = !dry && overlay::is_single_instance_mutex_held(APP_IDENTIFIER);
     if already_running {
-        core.log(&format!(
+        overlay::append_log(&dir, &format!(
             "single-instance: another FocusDNS instance is already running (pid={}), handing off and exiting",
             std::process::id()
         ));
@@ -984,14 +991,14 @@ fn main() {
     let webview_dir = dir.join("webview");
     std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_dir);
     if !already_running {
-        core.log(&format!("starting tauri runtime (webview_dir={})", webview_dir.display()));
+        overlay::append_log(&dir, &format!("starting tauri runtime (webview_dir={})", webview_dir.display()));
     }
 
     let mut builder = tauri::Builder::default();
     if !dry {
-        let si_core = core.clone();
+        let log_dir = dir.clone();
         builder = builder.plugin(tauri_plugin_single_instance::init(move |app, args, _cwd| {
-            si_core.log(&format!(
+            overlay::append_log(&log_dir, &format!(
                 "single-instance: second launch detected (args={args:?}), asserting overlay"
             ));
             if let Some(win) = app.get_webview_window("main") {
@@ -999,11 +1006,8 @@ fn main() {
             }
         }));
     }
-    let setup_core = core.clone();
     let setup_dir = dir.clone();
-    let exit_core = core.clone();
     let run_result = builder
-        .manage(core)
         .manage(StartupPanel(open_panel))
         .invoke_handler(tauri::generate_handler![focus_state_runtime::habits_feed_lock, streak_runtime::streak_view, streak_runtime::streak_buy_freeze, wallet::wallet_view, wallet::wallet_buy_time, habit_commands::habits_view, habit_commands::habits_change, habit_commands::habits_pause_limit, get_state, pause, resume, rate_pause, set_hit, grab_focus, history, lock, ui_log, return_focus, startup_panel, peek_panel::peek_link, activity_rules_load, activity_rules_save, activity_uncategorized_save, activity_categories_load, activity_icons_load, device_commands::device_nearby, device_commands::device_request_approval, device_commands::device_approval_status, device_commands::device_cancel_approval, device_commands::device_list, device_commands::device_probe, device_commands::device_pair, device_commands::device_refresh, device_commands::device_command, device_commands::device_forget, device_commands::laptop_incoming_approval, device_commands::laptop_approve_pairing, device_commands::laptop_decline_pairing, updater::updater_status, updater::updater_check, updater::updater_install, updater::updater_dismiss, updater::updater_set_token, updater::updater_set_enabled,
             pause_judge::pause_judge_settings, pause_judge::pause_judge_settings_save, pause_judge::pause_judge_limits_sync,
@@ -1015,6 +1019,8 @@ fn main() {
             intention_commands::intention_edit, intention_commands::intention_extend,
             intention_commands::intention_end])
         .setup(move |app| {
+            let setup_core = Arc::new(Core::open_profile(setup_dir.clone(), dry, now_ms()));
+            app.manage(setup_core.clone());
             setup_core.log("setup: entered");
             let mut initial_state = setup_core.read_state_for_startup()?;
             if !setup_core.dry {
@@ -1121,7 +1127,7 @@ fn main() {
         .run(tauri::generate_context!());
 
     if let Err(e) = run_result {
-        exit_core.log(&format!("tauri run failed: {e:?}"));
+        overlay::append_log(&dir, &format!("tauri run failed: {e:?}"));
         std::process::exit(1);
     }
 }
