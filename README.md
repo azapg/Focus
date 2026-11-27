@@ -32,6 +32,7 @@ Hover the bar and click **What are you on?**. Type one sentence about what you a
 - **It checks in at the end.** When time runs out, a card asks if you finished. Pick **Done**, **Partly**, **10 more min**, or **No**.
 - **Ask sees your plan.** When you ask for a pause, the judge sees your active intention. Requests that clearly fit the plan get a fairer look; requests that pull away from it get turned down faster.
 - **Today shows the full story.** The stats panel lists each intention above Screen time, next to what was actually on screen during it. Any 15-minute stretch with no intention shows up as its own orange row.
+- **Same intention on your phone.** The paired phone shows it at the top of Today and in the always-on Focus notification. Set it, mark it done or add 10 minutes on either device. See [Focus for Android](android/README.md).
 
 ## Screen time and stats
 
