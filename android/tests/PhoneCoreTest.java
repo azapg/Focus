@@ -223,6 +223,14 @@ public final class PhoneCoreTest {
         "address bar lookup is restricted to supported browsers");
     check(BrowserUrlParser.isNonPageView("com.android.chrome", "com.android.chrome:id/incognito_new_tab_page"),
         "blank incognito page recognized");
+    check(BrowserUrlParser.tabStripItemViewId("com.android.chrome:id/incognito_new_tab_page") == null,
+        "new tab pages cannot be grouped pages");
+    for (String name : new String[] {"tab_list_recycler_view", "tab_list_view"}) {
+      String listId = "com.android.chrome:id/" + name;
+      check(BrowserUrlParser.isNonPageView("com.chrome.beta", listId), "Chrome tab grid recognized");
+      check("com.android.chrome:id/tab_strip_item_button".equals(BrowserUrlParser.tabStripItemViewId(listId)),
+          "Chrome tab strip marker uses the list resource namespace");
+    }
   }
 
   private static void testClassifierAndHonesty() {

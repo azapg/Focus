@@ -2,10 +2,23 @@ use std::{fs, io, path::Path};
 
 // The app binary is already checked by the nightly updater. Ship the extension changes inside it.
 const MANIFEST: &[u8] = include_bytes!("../../extension/manifest.json");
+// Install dependencies before the scripts that load them, and the manifest last.
 const FILES: &[(&str, &[u8])] = &[
+    ("capture.js", include_bytes!("../../extension/capture.js")),
     ("habit-feeds.js", include_bytes!("../../extension/habit-feeds.js")),
-    ("background.js", include_bytes!("../../extension/background.js")),
+    ("overlay.js", include_bytes!("../../extension/overlay.js")),
+    ("public-tlds.js", include_bytes!("../../extension/public-tlds.js")),
     ("protection.js", include_bytes!("../../extension/protection.js")),
+    ("telemetry.js", include_bytes!("../../extension/telemetry.js")),
+    ("peek-page.js", include_bytes!("../../extension/peek-page.js")),
+    ("peek.css", include_bytes!("../../extension/peek.css")),
+    ("peek.html", include_bytes!("../../extension/peek.html")),
+    ("peek-navigation.js", include_bytes!("../../extension/peek-navigation.js")),
+    ("background.js", include_bytes!("../../extension/background.js")),
+    ("icons/icon-16.png", include_bytes!("../../extension/icons/icon-16.png")),
+    ("icons/icon-32.png", include_bytes!("../../extension/icons/icon-32.png")),
+    ("icons/icon-48.png", include_bytes!("../../extension/icons/icon-48.png")),
+    ("icons/icon-128.png", include_bytes!("../../extension/icons/icon-128.png")),
     ("manifest.json", MANIFEST),
 ];
 
@@ -24,6 +37,7 @@ pub fn update_installed(dir: &Path) -> io::Result<()> {
     for (name, bytes) in FILES {
         let path = extension.join(name);
         if !fs::read(&path).is_ok_and(|current| current == *bytes) {
+            fs::create_dir_all(path.parent().unwrap())?;
             focus_browser_host::atomic_write(&path, bytes)?;
         }
     }
@@ -117,22 +131,37 @@ fn process_alive(pid: u32) -> bool {
 mod tests {
     use super::*;
 
+    fn assert_runtime_files_match(source: &Path, installed: &Path) {
+        for entry in fs::read_dir(source).unwrap().map(Result::unwrap) {
+            let name = entry.file_name();
+            if name == "package.json" {
+                continue; // Node module settings for development and tests.
+            }
+            let target = installed.join(&name);
+            if entry.file_type().unwrap().is_dir() {
+                assert_runtime_files_match(&entry.path(), &target);
+            } else {
+                assert_eq!(fs::read(&target).unwrap_or_else(|err| panic!("{}: {err}", target.display())),
+                    fs::read(entry.path()).unwrap(), "{}", target.display());
+            }
+        }
+    }
+
     #[test]
-    fn existing_managed_extensions_get_the_files_on_app_startup() {
+    fn existing_managed_extensions_get_all_runtime_files_on_app_startup() {
         let dir = std::env::temp_dir().join(format!("focus-extension-update-{}-{}", std::process::id(), focus_browser_host::now_ms()));
         let installed = dir.join("browser-bridge/extension");
         update_installed(&dir).unwrap();
         assert!(!installed.exists());
         fs::create_dir_all(&installed).unwrap();
         let mut old: serde_json::Value = serde_json::from_slice(MANIFEST).unwrap();
-        old["version"] = "0.1.0".into();
+        old["version"] = "0.2.1".into();
         fs::write(installed.join("manifest.json"), old.to_string()).unwrap();
         fs::write(installed.join("background.js"), b"old").unwrap();
         fs::write(installed.join("protection.js"), b"old").unwrap();
         update_installed(&dir).unwrap();
-        for (name, bytes) in FILES {
-            assert_eq!(fs::read(installed.join(name)).unwrap(), *bytes);
-        }
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../extension");
+        assert_runtime_files_match(&source, &installed);
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -7,12 +7,18 @@ from playwright.async_api import async_playwright
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ID = 'mfafgohdpfnknfgedjiicnmgomjpdock'
 CHROME = os.environ.get('FOCUS_TEST_CHROME', str(pathlib.Path.home()/'.cache/ms-playwright/chromium-1254/chrome-linux64/chrome'))
+EXTENSION = pathlib.Path(os.environ.get('FOCUS_TEST_EXTENSION', ROOT/'extension')).resolve()
 
 async def verify_gate(context, worker, data, allowed):
     state = data/'FocusDNS/state.json'
+    profile = 'a1b2c3'
+    state.with_name('nextdns.json').write_text(json.dumps({
+        'profile': profile, 'legacyConfirmed': False,
+        'servers': ['192.0.2.10', '198.51.100.20', '2001:db8::10', '2001:db8::20'],
+    }))
     def save(paused_until=0, ended_at=None):
         tmp = state.with_suffix('.tmp')
-        tmp.write_text(json.dumps({'paused_until': paused_until, 'pause_ended_at': ended_at}))
+        tmp.write_text(json.dumps({'paused_until': paused_until, 'pause_ended_at': ended_at, 'profile': profile}))
         tmp.replace(state)
 
     await worker.evaluate("""() => {
@@ -124,7 +130,7 @@ async def main():
         data = base/'data'; data.mkdir()
         env = {**os.environ, 'HOME':str(base), 'XDG_CONFIG_HOME':str(base/'config'), 'LOCALAPPDATA':str(data)}
         async with async_playwright() as p:
-            context = await p.chromium.launch_persistent_context(str(base/'profile'), executable_path=CHROME, headless=True, env=env, ignore_default_args=['--disable-back-forward-cache'], args=[f'--disable-extensions-except={ROOT}/extension', f'--load-extension={ROOT}/extension', '--no-sandbox', '--autoplay-policy=no-user-gesture-required'])
+            context = await p.chromium.launch_persistent_context(str(base/'profile'), executable_path=CHROME, headless=True, env=env, ignore_default_args=['--disable-back-forward-cache'], args=[f'--disable-extensions-except={EXTENSION}', f'--load-extension={EXTENSION}', '--no-sandbox', '--autoplay-policy=no-user-gesture-required'])
             try:
                 worker = context.service_workers[0] if context.service_workers else await context.wait_for_event('serviceworker')
                 await context.route('https://focus-test.example.org/**', lambda route: route.fulfill(body='<html><title>Focus test project</title><h1>Project</h1></html>',content_type='text/html'))
@@ -175,7 +181,7 @@ async def main():
                 await worker.evaluate('chrome.storage.local.set({enabled:false})')
                 await wait_for(lambda e: not e['enabled'])
                 await context.close()
-                context = await p.chromium.launch_persistent_context(str(base/'profile'), executable_path=CHROME, headless=True, env=env, args=[f'--disable-extensions-except={ROOT}/extension', f'--load-extension={ROOT}/extension', '--no-sandbox'])
+                context = await p.chromium.launch_persistent_context(str(base/'profile'), executable_path=CHROME, headless=True, env=env, args=[f'--disable-extensions-except={EXTENSION}', f'--load-extension={EXTENSION}', '--no-sandbox'])
                 await context.route('https://focus-test.example.org/**', lambda route: route.fulfill(body='<html><title>Focus test project</title><h1>Project</h1></html>',content_type='text/html'))
                 worker = context.service_workers[0] if context.service_workers else await context.wait_for_event('serviceworker')
                 page = context.pages[0]

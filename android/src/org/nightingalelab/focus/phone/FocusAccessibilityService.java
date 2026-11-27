@@ -323,7 +323,11 @@ public final class FocusAccessibilityService extends AccessibilityService {
           }
           String id = node.getViewIdResourceName();
           if (node.isVisibleToUser()) {
-            if (BrowserUrlParser.isNonPageView(pkg, id)) return empty;
+            if (BrowserUrlParser.isNonPageView(pkg, id)) {
+              String stripItem = BrowserUrlParser.tabStripItemViewId(id);
+              if (stripItem == null || !hasVisibleView(node, stripItem)) return empty;
+              continue;
+            }
             if (BrowserUrlParser.isAddressBar(pkg, id) && !(node.isEditable() && node.isFocused())) {
               BrowserUrlParser.Parsed parsed = node.isShowingHintText() ? null : parseAddress(node);
               if (parsed != null) {
@@ -352,6 +356,18 @@ public final class FocusAccessibilityService extends AccessibilityService {
       return page != null ? page : sawEmptyBar ? empty : null;
     } finally {
       for (AccessibilityNodeInfo node : queue) node.recycle();
+    }
+  }
+
+  private static boolean hasVisibleView(AccessibilityNodeInfo root, String viewId) {
+    List<AccessibilityNodeInfo> matches = root.findAccessibilityNodeInfosByViewId(viewId);
+    try {
+      for (AccessibilityNodeInfo node : matches) {
+        if (node.isVisibleToUser()) return true;
+      }
+      return false;
+    } finally {
+      for (AccessibilityNodeInfo node : matches) node.recycle();
     }
   }
 
