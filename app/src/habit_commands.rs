@@ -2,6 +2,7 @@ use crate::device_commands::{sync_habits, Devices, LaptopHost};
 use crate::{now_ms, Core, Tracker};
 use focus_dns::habits::{
     away_minutes, local_clock, CreditCap, DesktopLimit, Habit, Ledger, Revision, Screen,
+    WALLET_SYNC_VERSION,
 };
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
