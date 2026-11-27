@@ -23,6 +23,16 @@ Windows or the Android phone. Focus can open only the relevant services
 while NextDNS stays on. Temporary allowlist changes are shared by every
 device using that profile.
 
+## Say what you're on
+
+Hover the bar and click **What are you on?**. Type one sentence about what you are doing, for how long, and what done looks like. For example: "cleaning the house, 45 min, done when the trash is out".
+
+- **One sentence, three parts.** Focus reads back what you are doing, when it ends (60 minutes by default, up to 4 hours), and what done looks like. Start it and the hover bar shows the label and minutes left. Click the label to edit, mark it done, or clear it.
+- **It speaks up when you drift.** After 15 minutes of active screen time with no intention, the bar and idle pill turn orange. If an intention is running and you spend time on an unrelated feed or video, the bar calls it out in orange.
+- **It checks in at the end.** When time runs out, a card asks if you finished. Pick **Done**, **Partly**, **10 more min**, or **No**.
+- **Ask sees your plan.** When you ask for a pause, the judge sees your active intention. Requests that clearly fit the plan get a fairer look; requests that pull away from it get turned down faster.
+- **Today shows the full story.** The stats panel lists each intention above Screen time, next to what was actually on screen during it. Any 15-minute stretch with no intention shows up as its own orange row.
+
 ## Screen time and stats
 
 - **Hovering shows today's totals** at the left of the pill: time at the screen and time with DNS off.
@@ -80,6 +90,7 @@ Everything lives in `%LOCALAPPDATA%\FocusDNS`:
 | File | What's in it |
 | --- | --- |
 | `pauses.jsonl` | Every pause (when, how long, the reason you gave) and when it really ended |
+| `intentions.jsonl` | Every intention you set (what, planned time, done-when, extensions, and outcome) |
 | `activity\<day>.jsonl` | Screen time: which app or site was in front, and when |
 | `services.json` | Service-to-domain catalog for the pause judge |
 | `nextdns.json` | Local NextDNS profile and Windows DoH server addresses |
