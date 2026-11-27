@@ -300,6 +300,10 @@ public final class MainActivity extends Activity {
     }
     String quickHabit = intent.getStringExtra("habit");
     if (quickHabit != null) uiHandler.post(() -> openHabitCard(quickHabit));
+    if (intent.getBooleanExtra("open_intention", false)) {
+      intent.removeExtra("open_intention");
+      uiHandler.postDelayed(() -> IntentionSheet.show(this, this::render), 250);
+    }
     if (intent.getBooleanExtra("open_pause_sheet", false)) {
       uiHandler.postDelayed(this::openPauseSheet, 250);
     }
@@ -380,6 +384,7 @@ public final class MainActivity extends Activity {
     HabitStore.get(this).addListener(habitsChanged);
     IntentFilter filter = new IntentFilter();
     filter.addAction(DeviceHub.ACTION_DEVICES_UPDATED);
+    filter.addAction(IntentionStore.ACTION_CHANGED);
     filter.addAction(PhoneUpdater.ACTION_STATE);
     if (Build.VERSION.SDK_INT >= 33) {
       registerReceiver(syncReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
@@ -698,8 +703,14 @@ public final class MainActivity extends Activity {
       Theme.gap(scrollContent, 12);
     }
 
+    // Intention headline: always there on Today, same height in every state, so nothing below moves.
+    if (!isWeek) {
+      scrollContent.addView(buildIntentionHeadline(), new LinearLayout.LayoutParams(-1, Theme.dp(this, 104)));
+      Theme.gap(scrollContent, 14);
+    }
+
     // Hero total + one-sentence breakdown (building in white, drifting in amber)
-    TextView totalTv = Theme.text(this, FocusStats.fmt(v.totalMs), 31f, Theme.FG, true);
+    TextView totalTv = Theme.text(this, FocusStats.fmt(v.totalMs), isWeek ? 31f : 24f, Theme.FG, true);
     totalTv.setLetterSpacing(-0.025f);
     scrollContent.addView(totalTv);
 
@@ -948,6 +959,68 @@ public final class MainActivity extends Activity {
     boolean rightSide = loc[0] > getResources().getDisplayMetrics().widthPixels / 2;
     int xOff = rightSide ? anchor.getWidth() - Theme.dp(this, 176) : 0;
     popup.showAsDropDown(anchor, xOff, Theme.dp(this, 6));
+  }
+
+  private View buildIntentionHeadline() {
+    Intention current = IntentionStore.get(this).current();
+    long now = System.currentTimeMillis();
+    LinearLayout block = Theme.column(this);
+    block.setOnClickListener(view -> IntentionSheet.show(this, this::render));
+    if (current == null) {
+      block.setContentDescription("What are you on? Set an intention");
+      TextView title = Theme.text(this, "What are you on?", 25f, 0xFF52525B, true);
+      title.setLetterSpacing(-0.02f);
+      block.addView(title);
+      TextView copy = Theme.text(this,
+          "Register your focus: what you're doing, for how long, and when it's done.", 12.5f, Theme.MUTED, false);
+      copy.setMaxLines(2);
+      LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(-1, -2);
+      copyLp.topMargin = Theme.dp(this, 3);
+      block.addView(copy, copyLp);
+      return block;
+    }
+    boolean up = current.timeUp(now);
+    Intention.Drift drift = IntentionMonitor.drift;
+    String left = up ? "time's up" : Intention.left(current.remainingMs(now));
+    block.setContentDescription(current.label + ", " + left);
+    block.addView(Theme.text(this, "Now \u00b7 until " + IntentionMonitor.clock(this, current.until),
+        11.5f, Theme.MUTED, false));
+    TextView title = Theme.text(this, current.label, 25f, Theme.FG, true);
+    title.setLetterSpacing(-0.02f);
+    title.setSingleLine(true);
+    title.setEllipsize(TextUtils.TruncateAt.END);
+    LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(-1, -2);
+    titleLp.topMargin = Theme.dp(this, 2);
+    block.addView(title, titleLp);
+    android.text.SpannableStringBuilder meta = new android.text.SpannableStringBuilder();
+    if (up) {
+      meta.append("Time's up \u00b7 ").append(current.question());
+    } else if (drift.showing()) {
+      meta.append(drift.text());
+      meta.setSpan(new android.text.style.ForegroundColorSpan(Theme.WARN), 0, meta.length(),
+          android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+      meta.append(" \u00b7 ").append(left);
+    } else {
+      meta.append(left);
+      if (!current.doneWhen.isEmpty()) meta.append(" \u00b7 done when ").append(current.doneWhen);
+    }
+    TextView metaTv = Theme.text(this, meta, 12.5f, Theme.MUTED, false);
+    metaTv.setSingleLine(true);
+    metaTv.setEllipsize(TextUtils.TruncateAt.END);
+    LinearLayout.LayoutParams metaLp = new LinearLayout.LayoutParams(-1, -2);
+    metaLp.topMargin = Theme.dp(this, 3);
+    block.addView(metaTv, metaLp);
+    View spacer = new View(this);
+    block.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1f));
+    LinearLayout track = Theme.row(this);
+    track.setBackground(Theme.roundRect(this, 0xFF1C1C20, 0, 2));
+    float progress = current.progress(now);
+    View fill = new View(this);
+    fill.setBackground(Theme.roundRect(this, drift.showing() && !up ? Theme.WARN : 0xFFD4D4D8, 0, 2));
+    track.addView(fill, new LinearLayout.LayoutParams(0, -1, progress));
+    track.addView(new View(this), new LinearLayout.LayoutParams(0, -1, 1f - progress));
+    block.addView(track, new LinearLayout.LayoutParams(-1, Theme.dp(this, 2)));
+    return block;
   }
 
   private TextView buildHeroSentence(FocusStats.View v) {
