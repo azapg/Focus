@@ -53,6 +53,7 @@ public final class PhoneCoreTest {
     testApprovalPairing();
     testUpdateManifest();
     testDeepFocusSessions();
+    testFocusEligibilityRules();
     testApkDownloadBounds();
     testUpdateManifestReleaseNotes();
     testPauseCapsAndDailyLimit();
@@ -713,5 +714,74 @@ public final class PhoneCoreTest {
       if ("YouTube".equals(a.name)) check(a.focusMs == 0, "YouTube never gets focus credit");
       if ("Notion".equals(a.name)) check(a.focusMs == 0, "Notion broken by X gets 0 focus");
     }
+  }
+
+  private static void testFocusEligibilityRules() {
+    TimeZone tz = TimeZone.getTimeZone("UTC");
+    Calendar cal = Calendar.getInstance(tz);
+    cal.set(2026, Calendar.NOVEMBER, 23, 18, 0, 0);
+    cal.set(Calendar.MILLISECOND, 0);
+    long now = cal.getTimeInMillis();
+    long t0 = InsightsEngine.dayStart(now, tz);
+    long M = FocusStats.MIN;
+
+    // Android's actual FocusStats path must honor saved non-waste categories for unknown apps.
+    List<ActivityClassifier.UserRule> exampleDeskRule = Collections.singletonList(
+        new ActivityClassifier.UserRule("app", "ExampleDesk", "Writing workspace", "writing"));
+    List<InsightsEngine.SpanRecord> exampleDesk = Collections.singletonList(
+        new InsightsEngine.SpanRecord(t0 + 9 * 60 * M, t0 + 9 * 60 * M + 30 * M,
+            "ExampleDesk", "ExampleDesk", "", "phone", "Phone"));
+    FocusStats.View customWriting = FocusStats.compute(exampleDesk, Collections.emptyList(), exampleDeskRule,
+        now, tz, false, -1, null);
+    check(customWriting.focusMs == 30 * M, "Saved Writing rule keeps ExampleDesk eligible for 30m focus");
+    check("Writing workspace".equals(customWriting.focusRuns.get(0).app), "User facing app label remains customized");
+
+    List<ActivityClassifier.UserRule> businessRule = Collections.singletonList(
+        new ActivityClassifier.UserRule("app", "BusinessDesk", "Business workspace", "business"));
+    List<InsightsEngine.SpanRecord> businessDesk = Collections.singletonList(
+        new InsightsEngine.SpanRecord(t0 + 9 * 60 * M, t0 + 9 * 60 * M + 25 * M,
+            "BusinessDesk", "BusinessDesk", "", "phone", "Phone"));
+    FocusStats.View customBusiness = FocusStats.compute(businessDesk, Collections.emptyList(), businessRule,
+        now, tz, false, -1, null);
+    check(customBusiness.focusMs == 25 * M, "Legacy Business classification keeps its 25m threshold");
+
+    // User-facing aliases do not allow separate observed apps to join one unbroken run.
+    List<ActivityClassifier.UserRule> aliasRules = Arrays.asList(
+        new ActivityClassifier.UserRule("app", "ExampleDesk", "Shared work label", "writing"),
+        new ActivityClassifier.UserRule("app", "SecondDesk", "Shared work label", "writing"));
+    List<InsightsEngine.SpanRecord> aliasedApps = Arrays.asList(
+        new InsightsEngine.SpanRecord(t0 + 9 * 60 * M, t0 + 9 * 60 * M + 15 * M,
+            "ExampleDesk", "ExampleDesk", "", "phone", "Phone"),
+        new InsightsEngine.SpanRecord(t0 + 9 * 60 * M + 15 * M, t0 + 9 * 60 * M + 30 * M,
+            "SecondDesk", "SecondDesk", "", "phone", "Phone"));
+    FocusStats.View noAliasJoin = FocusStats.compute(aliasedApps, Collections.emptyList(), aliasRules,
+        now, tz, false, -1, null);
+    check(noAliasJoin.focusMs == 0, "Shared display label does not merge different observed apps");
+
+    // A feed remains a hard break even when it is visible for less than the glance grace.
+    List<ActivityClassifier.UserRule> feedRules = Arrays.asList(
+        new ActivityClassifier.UserRule("app", "ExampleDesk", "Writing workspace", "writing"),
+        new ActivityClassifier.UserRule("host", "youtube.com", "Lessons", "writing"));
+    long start = t0 + 10 * 60 * M;
+    List<InsightsEngine.SpanRecord> feedMidRun = Arrays.asList(
+        new InsightsEngine.SpanRecord(start, start + 15 * M, "ExampleDesk", "ExampleDesk", "", "phone", "Phone"),
+        new InsightsEngine.SpanRecord(start + 15 * M, start + 15 * M + 10_000,
+            "com.android.chrome", "YouTube", "youtube.com", "phone", "Phone"),
+        new InsightsEngine.SpanRecord(start + 15 * M + 10_000, start + 30 * M + 10_000,
+            "ExampleDesk", "ExampleDesk", "", "phone", "Phone"));
+    FocusStats.View feedBreak = FocusStats.compute(feedMidRun, Collections.emptyList(), feedRules,
+        now, tz, false, -1, null);
+    check(feedBreak.focusMs == 0, "YouTube home feed breaks a run despite custom Writing labels");
+    check("watching".equals(ActivityClassifier.classify("com.android.chrome", "YouTube", "youtube.com", Collections.emptyList()).category),
+        "YouTube home keeps its existing watching display category");
+
+    // Known watch package remains excluded when its saved category is Learning.
+    List<ActivityClassifier.UserRule> youtubeLearning = Collections.singletonList(
+        new ActivityClassifier.UserRule("package", "com.google.android.youtube", "Lessons", "learning"));
+    List<InsightsEngine.SpanRecord> youtubeWatch = Collections.singletonList(
+        new InsightsEngine.SpanRecord(start, start + 30 * M, "com.google.android.youtube", "YouTube", "", "phone", "Phone"));
+    FocusStats.View watch = FocusStats.compute(youtubeWatch, Collections.emptyList(), youtubeLearning,
+        now, tz, false, -1, null);
+    check(watch.focusMs == 0, "Known YouTube watch stays ineligible with a saved Learning category");
   }
 }

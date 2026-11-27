@@ -465,10 +465,12 @@ const ActivityClassifier = (() => {
       const feedRoute = path === '/' || /^\/(?:feed|results|playlist|channel|c|user|@|shorts|live)(?:\/|$)/.test(path);
       return {
         app: 'YouTube',
-        category: videoRoute ? 'watching' : feedRoute ? 'browsing' : 'unknown',
+        category: 'watching',
         itemKey: vid ? `yt:${vid}` : `yt:${path}`,
         itemTitle: videoTitle || 'YouTube',
-        itemKind: videoRoute ? 'video' : feedRoute ? 'feed' : 'page',
+        // Keep the established display model. Route evidence below only controls focus eligibility.
+        itemKind: vid ? 'video' : 'feed',
+        activityKind: videoRoute ? 'video' : feedRoute ? 'feed' : 'page',
         matchType: 'host',
         matchValue: base,
       };
@@ -590,6 +592,7 @@ const ActivityClassifier = (() => {
             itemKey: null,
             itemTitle: null,
             itemKind: 'phone_web',
+            activityKind: web.activityKind || '',
             noise: Boolean(web.noise),
             source: 'phone_browser',
             matchType: 'host',
@@ -636,6 +639,7 @@ const ActivityClassifier = (() => {
           itemKey: web.itemKey,
           itemTitle: web.itemTitle,
           itemKind: web.itemKind || 'page',
+          activityKind: web.activityKind || '',
           itemMeta: web.itemMeta || '',
           lowQualityTitle: Boolean(web.lowQualityTitle),
           audible: Boolean(span.browser.audible),
@@ -662,7 +666,7 @@ const ActivityClassifier = (() => {
           const fakeUrl = safeUrl(`https://${rawLabel}/`);
           if (fakeUrl) {
             const web = classifyWeb(fakeUrl, '', false);
-            const res = { app: web.app, category: web.category, itemKey: null, itemTitle: null, itemKind: 'web_coarse', noise: Boolean(web.noise), source: span.source || 'window_title', matchType: 'host', matchValue: web.matchValue };
+            const res = { app: web.app, category: web.category, itemKey: null, itemTitle: null, itemKind: 'web_coarse', activityKind: web.activityKind || '', noise: Boolean(web.noise), source: span.source || 'window_title', matchType: 'host', matchValue: web.matchValue };
             const override = findUserRule(rules, { host: fakeUrl.hostname, app: res.app, label: rawLabel });
             return applyRuleOverride(res, override);
           }
@@ -1044,19 +1048,23 @@ const ActivityClassifier = (() => {
   const FOCUS_AWAY_MS = 2 * MIN;
 
   /**
-   * Reward eligibility from the underlying observed activity. User rules and the
-   * category cache are display choices; they cannot turn a video/feed into focus
-   * or make an unknown app eligible. Known reading and learning apps remain eligible.
+   * Reward category follows the saved classification, while hard exclusions and app
+   * identity come from observed activity. This preserves custom writing/Business
+   * classifications without letting labels turn video or feeds into focus.
    */
-  function focusEligibility(span, deviceKind = 'windows') {
+  function focusEligibility(span, deviceKind = 'windows', userRules = null, cache = null) {
     const observed = classifySpan(span, deviceKind, null);
-    const fine = fineCategory(span, observed, deviceKind, null);
-    const minMs = FOCUS_THRESHOLDS[fine.id] || 0;
+    const display = classifySpan(span, deviceKind, userRules);
+    const fine = fineCategory(span, display, deviceKind, cache);
+    const observedFine = fineCategory(span, observed, deviceKind, null);
+    const routeKind = observed.activityKind;
+    const isWaste = routeKind === 'video' || routeKind === 'feed'
+      || (routeKind !== 'page' && FOCUS_WASTE_CATS.has(observedFine.id));
     return {
       appKey: observed.app,
       category: fine.id,
-      minMs,
-      isWaste: FOCUS_WASTE_CATS.has(fine.id) || observed.itemKind === 'video' || observed.itemKind === 'feed',
+      minMs: isWaste ? 0 : (FOCUS_THRESHOLDS[fine.id] || 0),
+      isWaste,
     };
   }
 
@@ -1106,7 +1114,7 @@ const ActivityClassifier = (() => {
         if (b <= a) continue;
         const c = classifySpan(s, src.kind, userRules);
         const f = fineCategory(s, c, src.kind, cache);
-        const eligibility = focusEligibility(s, src.kind);
+        const eligibility = focusEligibility(s, src.kind, userRules, cache);
         const explicit = cache?.items?.[`app:${c.app}`];
         if (c.noise && !explicit) continue;
         const minMs = eligibility.minMs;

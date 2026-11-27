@@ -568,15 +568,17 @@ public final class FocusStats {
     final long s;
     final long e;
     final String app;
+    final String appKey;
     final String catId;
     final long minMs;
     final boolean waste;
     final boolean isBreak;
 
-    FocusEvent(long s, long e, String app, String catId, long minMs, boolean waste, boolean isBreak) {
+    FocusEvent(long s, long e, String app, String appKey, String catId, long minMs, boolean waste, boolean isBreak) {
       this.s = s;
       this.e = e;
       this.app = app;
+      this.appKey = appKey;
       this.catId = catId;
       this.minMs = minMs;
       this.waste = waste;
@@ -586,6 +588,7 @@ public final class FocusStats {
 
   private static final class OpenRun {
     final String app;
+    final String appKey;
     final String catId;
     final long minMs;
     final long start;
@@ -595,6 +598,7 @@ public final class FocusStats {
 
     OpenRun(FocusEvent ev) {
       this.app = ev.app;
+      this.appKey = ev.appKey;
       this.catId = ev.catId;
       this.minMs = ev.minMs;
       this.start = ev.s;
@@ -666,16 +670,19 @@ public final class FocusStats {
       }
       List<FocusEvent> events = new ArrayList<>();
       for (long[] iv : offs) {
-        events.add(new FocusEvent(iv[0], iv[1], "", "", 0L, false, true));
+        events.add(new FocusEvent(iv[0], iv[1], "", "", "", 0L, false, true));
       }
       for (ClassifiedSpan cs : devEntry.getValue()) {
         long a = Math.max(cs.span.s, from);
         long b = Math.min(cs.span.e, to);
         if (b <= a) continue;
-        long minMs = ActivityClassifier.focusMinMs(cs.fine.id);
-        boolean waste = ActivityClassifier.isWasteFine(cs.fine.id);
+        ActivityClassifier.Result observed = ActivityClassifier.classify(
+            cs.span.app, cs.span.label, cs.span.domain, null);
+        ActivityClassifier.Fine observedFine = ActivityClassifier.fineCategory(observed, cs.span.deviceKind);
+        boolean waste = ActivityClassifier.isWasteFine(observedFine.id);
+        long minMs = waste ? 0L : ActivityClassifier.focusMinMs(cs.fine.id);
         for (long[] piece : subtractIntervals(a, b, offs)) {
-          events.add(new FocusEvent(piece[0], piece[1], cs.result.app, cs.fine.id, minMs, waste, false));
+          events.add(new FocusEvent(piece[0], piece[1], cs.result.app, observed.app, cs.fine.id, minMs, waste, false));
         }
       }
       events.sort((x, y) -> {
@@ -709,7 +716,7 @@ public final class FocusStats {
             return;
           }
           long gap = ev.s - cur[0].end;
-          if (ev.app.equals(cur[0].app) && ev.minMs > 0) {
+          if (ev.appKey.equals(cur[0].appKey) && ev.minMs > 0) {
             boolean ok = pending.isEmpty() ? gap <= FOCUS_AWAY_MS : gap <= FOCUS_GLANCE_MS;
             if (ok) {
               long addS = Math.max(ev.s, cur[0].end);

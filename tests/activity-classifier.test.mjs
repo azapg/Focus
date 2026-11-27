@@ -396,7 +396,7 @@ test('detectFocusSessions rewards unbroken single-app runs (25m build/write, 15m
   assert.equal(byApp['NotebookLM'].focusMs, 18 * m);
 });
 
-test('observed video/feed eligibility stays separate from Learning display labels on desktop and phone', () => {
+test('saved reward categories survive while observed video/feed activity stays excluded', () => {
   const { durationMs, youtubeWatch, youtubeOtherPage, learningControls, readingControl } = focusEligibilityFixtures;
   const desktopRule = { rules: [{ match: 'host', value: 'youtube.com', ...youtubeWatch.displayRule }] };
   const phoneRule = { rules: [{ match: 'package', value: youtubeWatch.phonePackage, ...youtubeWatch.displayRule }] };
@@ -422,7 +422,7 @@ test('observed video/feed eligibility stays separate from Learning display label
   }).totalMs, 0, 'a legacy per-app Learning category cannot grant focus eligibility');
   assert.equal(ActivityClassifier.detectFocusSessions([sources[1]], 0, durationMs, { userRules: phoneRule }).totalMs, 0,
     'the phone YouTube package stays ineligible when a package rule displays Learning');
-  const homeFeed = { ...desktopWatch, browser: { ...desktopWatch.browser, url: 'https://www.youtube.com/' } };
+  const homeFeed = { ...desktopWatch, browser: { ...desktopWatch.browser, url: youtubeWatch.homeUrl } };
   assert.equal(ActivityClassifier.detectFocusSessions([{
     id: 'laptop', name: 'Laptop', kind: 'windows', history: { now: durationMs, spans: [homeFeed], pauses: [] },
   }], 0, durationMs, { userRules: desktopRule }).totalMs, 0, 'the YouTube home feed remains excluded when displayed as Learning');
@@ -432,14 +432,19 @@ test('observed video/feed eligibility stays separate from Learning display label
     browser: { ...desktopWatch.browser, url: youtubeOtherPage.desktopUrl },
   };
   const observedPage = ActivityClassifier.classifySpan(otherPage, 'windows');
-  assert.equal(observedPage.itemKind, 'page');
+  assert.equal(observedPage.category, 'watching', 'YouTube display category keeps its existing warning behavior');
+  assert.equal(observedPage.itemKind, 'feed', 'legacy item display type remains unchanged');
+  assert.equal(observedPage.activityKind, 'page', 'focus eligibility still distinguishes non-feed routes');
   assert.equal(ActivityClassifier.classifySpan(homeFeed, 'windows').itemKind, 'feed');
   assert.equal(ActivityClassifier.classifySpan({ ...homeFeed, browser: { ...homeFeed.browser, url: 'https://www.youtube.com/shorts' } }, 'windows').itemKind, 'feed');
   assert.equal(ActivityClassifier.classifySpan(desktopWatch, 'windows').itemKind, 'video');
   assert.equal(ActivityClassifier.focusEligibility(otherPage, 'windows').isWaste, false,
     'a non-video YouTube URL is not blanket-classified as a video or feed');
-  assert.equal(ActivityClassifier.focusEligibility(otherPage, 'windows').minMs, 0,
-    'an unknown page also cannot become eligible from its display label');
+  const pageWritingRule = { rules: [{ match: 'host', value: 'youtube.com', app: 'Guide', category: 'writing' }] };
+  const categorizedOtherPage = ActivityClassifier.focusEligibility(otherPage, 'windows', pageWritingRule);
+  assert.equal(categorizedOtherPage.category, 'writing');
+  assert.equal(categorizedOtherPage.minMs, 25 * MIN,
+    'a saved non-waste category can qualify on a route that is not observed as video or feed');
 
   const controlSources = [
     { id: 'phone', name: 'Phone', kind: 'phone', history: { now: learningControls.durationMs, spans: [
@@ -454,6 +459,32 @@ test('observed video/feed eligibility stays separate from Learning display label
     'known phone Learning remains eligible at the 15m boundary');
   assert.equal(ActivityClassifier.detectFocusSessions([controlSources[1]], 0, readingControl.durationMs).totalMs, readingControl.durationMs,
     'known desktop Reading remains eligible at the 15m boundary');
+
+  const custom = focusEligibilityFixtures.customWritingApp;
+  const customRule = { rules: [custom.rule] };
+  const exampleDesk = [{ id: 'laptop', name: 'Laptop', kind: 'windows', history: { now: custom.durationMs, spans: [
+    { s: 0, e: custom.durationMs, app: custom.app, label: custom.app },
+  ], pauses: [] } }];
+  assert.equal(ActivityClassifier.detectFocusSessions(exampleDesk, 0, custom.durationMs, { userRules: customRule }).totalMs, custom.durationMs,
+    'saved Writing rules preserve an otherwise unknown app as eligible');
+  const business = focusEligibilityFixtures.businessApp;
+  const businessSource = [{ id: 'laptop', name: 'Laptop', kind: 'windows', history: { now: business.durationMs, spans: [
+    { s: 0, e: business.durationMs, app: business.app, label: business.app },
+  ], pauses: [] } }];
+  assert.equal(ActivityClassifier.detectFocusSessions(businessSource, 0, business.durationMs, {
+    cache: { items: { [`app:${business.app}`]: 'business' } },
+  }).totalMs, business.durationMs, 'legacy Business category keeps its 25m threshold');
+  const midRunFeed = [{ id: 'laptop', name: 'Laptop', kind: 'windows', history: { now: custom.durationMs, spans: [
+    { s: 0, e: 15 * MIN, app: custom.app, label: custom.app },
+    { ...homeFeed, s: 15 * MIN, e: 15 * MIN + 10_000 },
+    { s: 15 * MIN + 10_000, e: custom.durationMs, app: custom.app, label: custom.app },
+  ], pauses: [] } }];
+  const feedBreakRules = { rules: [custom.rule, { match: 'host', value: 'youtube.com', app: 'Lessons', category: 'writing' }] };
+  const feedMidRun = ActivityClassifier.detectFocusSessions(midRunFeed, 0, custom.durationMs, { userRules: feedBreakRules });
+  assert.equal(feedMidRun.totalMs, 0, 'a feed is a hard break even when its saved display category is Writing');
+  const displayedFeed = ActivityClassifier.classifySpan(homeFeed, 'windows');
+  assert.equal(ActivityClassifier.fineCategory(homeFeed, displayedFeed, 'windows').id, 'video',
+    'YouTube home remains displayed as video/warning');
 
   const sharedDisplayName = { rules: [
     { match: 'app', value: 'T3 Code', app: 'Shared work label', category: 'writing' },
