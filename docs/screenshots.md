@@ -31,7 +31,7 @@ fixtures. Browser notifications are disabled.
   pairing code. The fixture simulates approval, cancellation and offline errors.
 - **Updates** captures protection settings and the update card and settings using
   invented build metadata.
-- **Store** captures a 15-minute time-off purchase with a fictional balance.
+- **Store** captures a 5-minute Free Time purchase with a fictional balance.
 
 The regenerated device previews are [stats and settings](previews/implemented-devices.html)
 and [nearby pairing](previews/nearby-pairing.html).

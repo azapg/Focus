@@ -119,6 +119,18 @@ pub(super) fn decode_entries<'de, D: Deserializer<'de>>(
 }
 
 impl Ledger {
+    /// Open the default wallet on this device's current day, keeping any existing start.
+    pub(super) fn activate_wallet(&mut self, today: i32) -> Result<bool, String> {
+        if !valid_day(today) {
+            return Err("Invalid wallet day".into());
+        }
+        if self.wallet_start.is_some() {
+            return Ok(false);
+        }
+        self.wallet_start = Some(today);
+        Ok(true)
+    }
+
     /// Schedule the cutover for the next local calendar day. Take the earliest
     /// scheduled start seen across peers, including when a device upgrades late.
     pub fn start_wallet(&mut self, today: i32) -> Result<(), String> {
@@ -208,11 +220,16 @@ impl Ledger {
     }
 
     pub fn extra_pause_minutes(&self, day: i32) -> i32 {
-        if self.wallet_active(day) {
-            self.time_off_bought(day).min(i64::from(i32::MAX - 300)) as i32
-        } else {
-            i32::from(self.credit(day))
+        if !self.wallet_active(day) {
+            return i32::from(self.credit(day));
         }
+        // Legacy check-offs keep their allowance through cutover day.
+        let carryover = if self.wallet_start == Some(day) {
+            self.legacy_credit(day)
+        } else {
+            0
+        };
+        (self.time_off_bought(day) + i64::from(carryover)).min(i64::from(i32::MAX - 300)) as i32
     }
 
     pub fn earn(

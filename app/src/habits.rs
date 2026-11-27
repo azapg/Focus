@@ -404,7 +404,16 @@ impl Ledger {
     }
 
     pub fn credit(&self, day: i32) -> u16 {
-        let total: u32 = self.completions().into_values().filter(|event| event.day == day)
+        self.credit_for(day, false)
+    }
+
+    fn legacy_credit(&self, day: i32) -> u16 {
+        self.credit_for(day, true)
+    }
+
+    fn credit_for(&self, day: i32, legacy_only: bool) -> u16 {
+        let total: u32 = self.completions().into_values()
+            .filter(|event| event.day == day && (!legacy_only || !event.wallet_reward))
             .map(|event| u32::from(event.reward)).sum();
         total.min(u32::from(self.cap_on(day))) as u16
     }
@@ -725,6 +734,24 @@ impl Store {
 
     pub fn read(&self) -> Ledger {
         self.ledger.lock().unwrap().clone()
+    }
+
+    pub fn activate_wallet(&self, today: i32) -> Result<bool, String> {
+        self.update(|ledger| {
+            if ledger.wallet_start.is_some() {
+                return Ok(false);
+            }
+            // Startup must leave an unreadable ledger available for recovery.
+            match std::fs::read(&self.path) {
+                Ok(raw) => {
+                    serde_json::from_slice::<Ledger>(&raw)
+                        .map_err(|error| format!("Could not read the existing habit ledger: {error}"))?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.to_string()),
+            }
+            ledger.activate_wallet(today)
+        })
     }
 
     pub fn update<T>(

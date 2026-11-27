@@ -1,8 +1,9 @@
 # Wallet integration
 
-The desktop Store reads `wallet_view` and calls `wallet_buy_time`. The phone
-Store reads and updates the same ledger through `HabitStore`. The TV applies
-synced purchases. The desktop purchase response is
+On Windows and Android phone, the coin balance in Today opens the Store.
+Free Time is also available from the TV block screen. The desktop Store
+reads `wallet_view` and calls `wallet_buy_time`. The phone and TV read and
+update the same ledger through `HabitStore`. The desktop purchase response is
 `{status: "bought" | "already_bought" | "limit_reached"}` or
 `{status: "not_enough", missing: number}`. Generate a fresh request ID for
 each confirmation and reuse it for retries, even after midnight. Pass the
@@ -27,12 +28,12 @@ fail together if the caller propagates a validation error. Keep `earn`, `spend`,
   interface before it can offer freezes. A purchase and its inventory change
   belong in the same transaction. A freeze preserves the previous streak count
   on a qualifying future day.
-- Only a finalized focus aggregator should call `earn` with kind `focus`.
-  Use stable milestone keys shared by all devices, such as
-  `focus:YYYY-MM-DD:1`, without device IDs. The aggregator owns the rate, daily
-  cap, profile timezone and finalization, including late evidence. Count the
-  union of verified focus intervals, excluding drift, breaks and non-focus
-  screen time. The wallet ships without a focus award producer.
+- Windows awards 5 coins per 30 minutes of verified deep focus, up to 60
+  coins per completed local day. It unions laptop and paired phone activity,
+  excluding drift, breaks and non-focus screen time. It checks recent days
+  again when evidence can arrive late. Stable milestone keys such as
+  `focus:YYYY-MM-DD:1` keep retries and any active streak trial from paying
+  twice.
 
 Keys, kinds and references use ASCII letters, digits and `-_.:`. The
 limits are 80, 32 and 120 characters respectively. A reference may be empty.
@@ -41,24 +42,18 @@ range from 1 to 10,000 coins per operation.
 
 ## Activation and time off
 
-The foundation ships dormant. When the store is ready to launch, the app
-schedules activation for the following local calendar day through
-`Ledger::start_wallet(today)` or `Wallet.start(today)`. The earliest scheduled
-start converges across wallet-capable peers. Roll out the store to paired
-devices and sync the scheduled start before that midnight. Existing
-check-offs still give legacy time off through the setup day. Only check-offs
-recorded with the wallet active earn coins, so records from older devices,
-including late arrivals, never turn past free time into coins. A device
-learning of an elapsed start switches immediately. Recorded pause use
-and already-running pauses stay in effect. Older devices still enforce the
-legacy allowance until updated and synced. The desktop wallet view reports
-paired snapshots missing the supported version as `needs_upgrade`.
+Windows, Android phone and Android TV open the wallet by default on the local
+day they first run this version, preserving any existing wallet start. This
+works without Clean Streak enrollment. The earliest start converges across
+wallet-capable peers. Legacy habit minutes still count through the cutover
+day. Check-offs recorded with the wallet active earn coins. Recorded pause
+use and already-running pauses stay in effect. The desktop wallet view reports
+paired snapshots missing the supported sync version as `needs_upgrade`.
 
-The existing base pause allowance and pause rules apply. Purchased time adds
-to today's allowance and expires at local midnight. The existing daily habit
-credit cap becomes the purchase cap. The staged time-off rate is one coin per
-minute. Entries store the original cost and minute count separately so a
-future price change can preserve earlier purchases.
+Free Time costs 3 coins per minute and starts immediately on the chosen
+device. The default daily purchase limit is 15 minutes, with existing
+configured caps preserved. Entries store the original cost and minute count
+separately so a future price change can preserve earlier purchases.
 
 ## Sync and offline purchases
 

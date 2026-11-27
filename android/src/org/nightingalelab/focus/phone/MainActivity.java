@@ -840,7 +840,7 @@ public final class MainActivity extends Activity {
     ringRow.addView(ringCol, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
     pzCard.addView(ringRow);
     if (allowance > cfg.dailyLimitMinutes) {
-      TextView credit = Theme.text(this, cfg.dailyLimitMinutes + "m base + " + extra + (ledger.wallet.active(day) ? "m bought" : "m earned"), 12, Theme.MUTED, false);
+      TextView credit = Theme.text(this, cfg.dailyLimitMinutes + "m base + " + extra + (ledger.wallet.active(day) ? "m extra" : "m earned"), 12, Theme.MUTED, false);
       credit.setPadding(Theme.dp(this, 13), 0, 0, Theme.dp(this, 9));
       pzCard.addView(credit);
     }

@@ -4,8 +4,9 @@
 //! single-app deep-focus runs (25m+ coding/writing/business/design, 15m+ reading/learning),
 //! excluding DNS-off pauses and wasting/Drift activity.
 //!
-//! Only the single profile finalization authority invokes `award_finalized_day` inside its
-//! `Store::update` transaction. No scheduling or raw minting happens here or in the UI.
+//! The Windows reward producer invokes `award_finalized_day` inside a
+//! `Store::update` transaction. Stable milestone keys also cover retries by
+//! Clean Streak finalization.
 
 use super::Ledger;
 use chrono::{Datelike, NaiveDate};
@@ -57,7 +58,7 @@ pub struct FocusDeviceStream {
     pub pauses: Vec<(u64, u64)>,
 }
 
-/// Configurable reward rate (trial defaults: 5 coins per completed 30m, max 4/day = 20 coins).
+/// Configurable reward rate (5 coins per completed 30m by default, up to 60 per day).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusRewardRate {
     pub coins_per_milestone: i32,
