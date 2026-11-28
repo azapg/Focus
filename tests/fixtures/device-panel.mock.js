@@ -9,6 +9,11 @@
   window.__calls.push({c,args});
   if(c==='get_state')return {paused_at:0,paused_until:0,now,dry_run:true};
   if(c==='startup_panel')return 'today';if(c==='history')return window.__history;
+  if(c==='pause_judge_settings')return {model:'',default_model:'Default',luna_model:'Fast',has_gateway_key:false,has_nextdns_key:false,enabled:false};
+  if(c==='browser_setup_chrome'){
+   if(window.__failBrowserSetup)throw 'Could not prepare the Chrome extension.';
+   return String.raw`C:\Users\Spruce\AppData\Local\FocusDNS\browser-bridge\extension`;
+  }
   if(c==='activity_rules_load')return {version:1,rules:[]};
   if(c==='activity_rules_save'||c==='activity_uncategorized_save')return null;
   if(c==='device_list')return structuredClone(window.__devices);
