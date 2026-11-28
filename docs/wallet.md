@@ -11,6 +11,17 @@ quoted `expectedDay` so a new purchase cannot go through after its day ends.
 Use the latest view after `wallet-updated`. Native callers use the existing
 habit-store listener.
 
+## Verify Store startup
+
+The desktop preview supplies an active fictional wallet. The Windows regression test
+opens a new on-disk profile through `Core::open_profile`, reads the Store view,
+then reopens the profile to check that the wallet stayed active at zero coins
+without Clean Streak enrollment. [Wallet tests](../app/src/wallet.rs)
+
+On Windows, run `cargo test --manifest-path app/Cargo.toml --bin focus-dns wallet::tests::fresh_profile_open_activates_empty_store_and_persists_it -- --exact`.
+Removing the startup activation made this test fail with `active: false` in the
+[Windows verification run](https://github.com/azapg/Focus/actions/runs/46084219204/job/140789933348).
+
 ## Backend callers
 
 Write under the existing store lock with Rust `Store::update(|ledger| ...)`
