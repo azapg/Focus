@@ -64,18 +64,21 @@ globalThis.URL = function URL(raw) {
 
 const CLASSIFY_FINE: &str = r#"
 (span, kind, rules, cache) => {
-  const c = ActivityClassifier.classifySpan(span, kind, rules);
-  const f = ActivityClassifier.fineCategory(span, c, kind, cache || null);
-  const explicit = cache?.items?.[`app:${c.app}`];
-  const noise = Boolean(c.noise && !explicit);
-  return { app: f.app || c.app || span.app || 'Unknown', fine: f.id || 'other', noise };
+  const eligibility = ActivityClassifier.focusEligibility(span, kind, rules, cache || null);
+  return {
+    eligible_app: eligibility.appKey || span.app || 'Unknown',
+    eligible_fine: eligibility.category,
+    is_waste: eligibility.isWaste,
+    noise: eligibility.noise && !eligibility.isWaste,
+  };
 }
 "#;
 
 #[derive(Clone, Debug, serde::Deserialize)]
 struct FineResult {
-    app: String,
-    fine: String,
+    eligible_app: String,
+    eligible_fine: String,
+    is_waste: bool,
     noise: bool,
 }
 
@@ -335,8 +338,8 @@ impl FocusExtractor {
                     continue;
                 }
                 let habit_feed = ext_browser.is_some_and(|b| b.habit_feed);
-                let mut cat = map_fine_category(&classified.fine);
-                if habit_feed {
+                let mut cat = map_fine_category(&classified.eligible_fine);
+                if habit_feed || classified.is_waste {
                     cat = FocusCategory::Waste;
                 }
                 if cat.is_waste() {
@@ -346,7 +349,7 @@ impl FocusExtractor {
                 focus_spans.push(FocusSpan {
                     start_ms: a,
                     end_ms: b,
-                    app: classified.app,
+                    app: classified.eligible_app,
                     category: cat,
                 });
             }
@@ -482,7 +485,10 @@ impl FocusExtractor {
                     if classified.noise {
                         continue;
                     }
-                    let cat = map_fine_category(&classified.fine);
+                    let mut cat = map_fine_category(&classified.eligible_fine);
+                    if classified.is_waste {
+                        cat = FocusCategory::Waste;
+                    }
                     if cat.is_waste() {
                         confirmed_drift = true;
                     }
@@ -490,7 +496,7 @@ impl FocusExtractor {
                     focus_spans.push(FocusSpan {
                         start_ms: a,
                         end_ms: b,
-                        app: classified.app,
+                        app: classified.eligible_app,
                         category: cat,
                     });
                 }
@@ -708,5 +714,163 @@ mod tests {
             res.verified_focus_intervals,
             vec![(10 * MIN, 28 * MIN), (90 * MIN, 110 * MIN)]
         );
+    }
+
+    #[test]
+    fn shared_reward_fixture_keeps_youtube_watch_ineligible_across_desktop_and_phone() {
+        let fixture: Value = serde_json::from_str(include_str!("../../shared/focus-eligibility-fixtures.json")).unwrap();
+        let duration = fixture["durationMs"].as_u64().unwrap();
+        let display_rule = fixture["youtubeWatch"]["displayRule"].clone();
+        let desktop_rules = json!({"rules": [{
+            "match": "host", "value": "youtube.com",
+            "app": display_rule["app"], "category": display_rule["category"]
+        }]});
+        let mut desktop = FocusExtractor::new(&desktop_rules, None).unwrap();
+        let url = fixture["youtubeWatch"]["desktopUrl"].as_str().unwrap();
+        let desktop_result = desktop.extract_desktop_spans(
+            "laptop-fixture",
+            &[Span {
+                s: 0,
+                e: duration,
+                app: "Chrome".into(),
+                label: "youtube.com".into(),
+                source: "chromium_extension".into(),
+                browser: Some(ext_browser(Some(url), Some("Fictional lesson"), false)),
+            }],
+            &[],
+            0,
+            duration,
+        ).unwrap();
+        assert!(desktop_result.verified_focus_intervals.is_empty());
+        assert!(desktop_result.stream.spans.iter().all(|s| s.category != FocusCategory::Learning));
+
+        let package = fixture["youtubeWatch"]["phonePackage"].as_str().unwrap();
+        let phone_rules = json!({"rules": [{
+            "match": "package", "value": package,
+            "app": display_rule["app"], "category": display_rule["category"]
+        }]});
+        let mut phone = FocusExtractor::new(&phone_rules, None).unwrap();
+        let phone_result = phone.extract_peer_snapshot(
+            "phone-fixture",
+            "phone",
+            &json!({
+                "kind": "phone", "now": duration,
+                "spans": [{"s": 0, "e": duration, "app": package, "label": "YouTube"}],
+                "pauses": []
+            }),
+            0,
+            duration,
+        ).unwrap();
+        assert!(phone_result.verified_focus_intervals.is_empty());
+        assert!(phone_result.stream.spans.iter().all(|s| s.category != FocusCategory::Learning));
+
+        // Saved custom non-waste categories still qualify, even when the underlying app is unknown.
+        let custom = &fixture["customWritingApp"];
+        let custom_duration = custom["durationMs"].as_u64().unwrap();
+        let custom_app = custom["app"].as_str().unwrap();
+        let custom_rules = json!({"rules": [custom["rule"].clone()]});
+        let mut custom_ex = FocusExtractor::new(&custom_rules, None).unwrap();
+        let custom_result = custom_ex.extract_desktop_spans(
+            "laptop-custom-fixture",
+            &[Span {
+                s: 0,
+                e: custom_duration,
+                app: custom_app.into(),
+                label: custom_app.into(),
+                source: "window_title".into(),
+                browser: None,
+            }],
+            &[],
+            0,
+            custom_duration,
+        ).unwrap();
+        assert_eq!(custom_result.verified_focus_intervals, vec![(0, custom_duration)]);
+
+        // Even when the YouTube home feed is user-labeled Writing, observed feed evidence is a hard break.
+        let mut feed_ex = FocusExtractor::new(&json!({"rules": [
+            custom["rule"].clone(),
+            {"match": "host", "value": "youtube.com", "app": "Lessons", "category": "writing"}
+        ]}), None).unwrap();
+        let home_url = fixture["youtubeWatch"]["homeUrl"].as_str().unwrap();
+        let feed_result = feed_ex.extract_desktop_spans(
+            "laptop-feed-fixture",
+            &[
+                Span {
+                    s: 0, e: 15 * MIN, app: custom_app.into(), label: custom_app.into(),
+                    source: "window_title".into(), browser: None,
+                },
+                Span {
+                    s: 15 * MIN, e: 15 * MIN + 10 * SEC, app: "Chrome".into(), label: "youtube.com".into(),
+                    source: "chromium_extension".into(),
+                    browser: Some(ext_browser(Some(home_url), Some("Home"), false)),
+                },
+                Span {
+                    s: 15 * MIN + 10 * SEC, e: 30 * MIN + 10 * SEC, app: custom_app.into(), label: custom_app.into(),
+                    source: "window_title".into(), browser: None,
+                },
+            ],
+            &[],
+            0,
+            31 * MIN,
+        ).unwrap();
+        assert!(feed_result.verified_focus_intervals.is_empty());
+        assert!(feed_result.confirmed_drift);
+        assert!(feed_result.stream.spans.iter().any(|s| s.category == FocusCategory::Waste));
+
+        // The same shared fixture carries positive controls for supported reading and learning evidence.
+        let control_duration = fixture["learningControls"]["durationMs"].as_u64().unwrap();
+        let mut learning = FocusExtractor::new(&activity_rules::default_rules(), None).unwrap();
+        let app = fixture["learningControls"]["phonePackage"].as_str().unwrap();
+        let learning_result = learning.extract_peer_snapshot(
+            "phone-learning-fixture",
+            "phone",
+            &json!({
+                "kind": "phone", "now": control_duration,
+                "spans": [{"s": 0, "e": control_duration, "app": app, "label": "Duolingo"}],
+                "pauses": []
+            }),
+            0,
+            control_duration,
+        ).unwrap();
+        assert_eq!(learning_result.verified_focus_intervals, vec![(0, control_duration)]);
+
+        let reading_duration = fixture["readingControl"]["durationMs"].as_u64().unwrap();
+        let mut reading = FocusExtractor::new(&activity_rules::default_rules(), None).unwrap();
+        let reading_result = reading.extract_desktop_spans(
+            "laptop-reading-fixture",
+            &[Span {
+                s: 0,
+                e: reading_duration,
+                app: "Chrome".into(),
+                label: "read.amazon.com".into(),
+                source: "chromium_extension".into(),
+                browser: Some(ext_browser(
+                    fixture["readingControl"]["desktopUrl"].as_str(), Some("Fictional book"), false,
+                )),
+            }],
+            &[],
+            0,
+            reading_duration,
+        ).unwrap();
+        assert_eq!(reading_result.verified_focus_intervals, vec![(0, reading_duration)]);
+
+        let business = &fixture["businessApp"];
+        let business_app = business["app"].as_str().unwrap();
+        let business_duration = business["durationMs"].as_u64().unwrap();
+        let mut items = serde_json::Map::new();
+        items.insert(format!("app:{business_app}"), json!("business"));
+        let business_categories = json!({"items": items});
+        let mut business_ex = FocusExtractor::new(&activity_rules::default_rules(), Some(&business_categories)).unwrap();
+        let business_result = business_ex.extract_desktop_spans(
+            "laptop-business-fixture",
+            &[Span {
+                s: 0, e: business_duration, app: business_app.into(), label: business_app.into(),
+                source: "window_title".into(), browser: None,
+            }],
+            &[],
+            0,
+            business_duration,
+        ).unwrap();
+        assert_eq!(business_result.verified_focus_intervals, vec![(0, business_duration)]);
     }
 }
