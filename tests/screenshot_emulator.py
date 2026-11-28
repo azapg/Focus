@@ -161,11 +161,16 @@ def capture_views(scenario, adb, apks, output):
 
     def wait_for_view(label, selected=False):
         visible = []
+        current = []
         for _ in range(6):
             try:
                 nodes = list(dump())
             except (subprocess.CalledProcessError, ET.ParseError):
                 continue
+            current = [
+                f"{node.get('package', '')}: {node.get('text', '')} [{node.get('content-desc', '')}]"
+                for node in nodes if node.get("text") or node.get("content-desc")
+            ]
             visible = [
                 f"{node.get('text', '')} [{node.get('content-desc', '')}]"
                 for node in nodes if node.get("package") == package
@@ -177,7 +182,17 @@ def capture_views(scenario, adb, apks, output):
                 and (not selected or node.get("selected") == "true") for node in nodes
             ):
                 return
-        raise RuntimeError(f"Focus view did not appear: {label}; visible Focus nodes: {visible[:60]}")
+        if os.environ.get("FOCUS_SCREENSHOT_KEEP_FAILED") == "1":
+            try:
+                image_bytes = adb("exec-out", "screencap", "-p", binary=True)
+                if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+                    (output / "debug-unverified.png").write_bytes(image_bytes)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                pass
+        raise RuntimeError(
+            f"Focus view did not appear: {label}; visible Focus nodes: {visible[:60]}; "
+            f"all visible UI nodes: {current[:80]}"
+        )
 
     def tap(label):
         node = next((node for node in dump() if node.get("package") == package

@@ -64,7 +64,12 @@ def main():
         shots.mkdir()
         if native:
             from screenshot_emulator import capture
-            capture(args.scenario, args.sdk.resolve(), args.image, Path(staging), shots)
+            try:
+                capture(args.scenario, args.sdk.resolve(), args.image, Path(staging), shots)
+            except Exception:
+                if os.environ.get("FOCUS_SCREENSHOT_KEEP_FAILED") == "1" and list(shots.glob("*.png")):
+                    shutil.copytree(shots, output)
+                raise
         else:
             if not (ROOT / "ui-dist/index.html").is_file():
                 parser.error("run npm ci and npm run build first")

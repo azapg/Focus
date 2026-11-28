@@ -62,6 +62,8 @@ jobs:
             'system-images;android-35;default;x86_64'
 
       - name: Capture fictional phone and TV Store flows offline
+        env:
+          FOCUS_SCREENSHOT_KEEP_FAILED: '1'
         run: |
           set -euo pipefail
           parent_net="$(readlink /proc/self/ns/net)"
@@ -79,8 +81,9 @@ jobs:
             --out build/native-captures/tv
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: native-store-captures-${{ github.sha }}
           path: build/native-captures/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 1
