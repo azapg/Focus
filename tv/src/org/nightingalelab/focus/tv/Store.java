@@ -462,15 +462,44 @@ public final class Store extends SQLiteOpenHelper {
     }
   }
 
-  public synchronized void ensureDefaultYouTubeBlock() {
-    if (hasAnyRules()) return;
-    for (String yt : new String[] {"com.google.android.youtube.tv", "com.google.android.youtube.tvmusic"}) {
-      if (AppCatalog.allowed(context, yt)) {
-        Rules rule = rule(yt);
-        rule.blocked = true;
-        saveRule(yt, rule);
-      }
+  public synchronized boolean hasRuleRow(String pkg) {
+    try (Cursor r = getReadableDatabase().rawQuery("SELECT 1 FROM rules WHERE pkg=? LIMIT 1", new String[] {pkg})) {
+      return r.moveToFirst();
     }
+  }
+
+  public synchronized void ensureDefaultBlocks() {
+    SharedPreferences prefs = context.getSharedPreferences("tv_policy", Context.MODE_PRIVATE);
+    Set<String> seeded = new HashSet<>(prefs.getStringSet("seeded_default_blocks", Collections.emptySet()));
+    boolean changed = false;
+    for (String pkg : Rules.DEFAULT_BLOCKED_PACKAGES) {
+      if (seeded.contains(pkg)) continue;
+      if (!AppCatalog.allowed(context, pkg)) continue;
+      // Only apply default block when no explicit rule row exists for this package yet.
+      if (!hasRuleRow(pkg)) {
+        Rules rule = rule(pkg);
+        rule.blocked = true;
+        saveRule(pkg, rule);
+      }
+      seeded.add(pkg);
+      changed = true;
+    }
+    if (changed) {
+      prefs.edit().putStringSet("seeded_default_blocks", seeded).apply();
+      diagnostic("default_blocks_seeded");
+    }
+  }
+
+  public synchronized void ensureDefaultYouTubeBlock() {
+    ensureDefaultBlocks();
+  }
+
+  public synchronized List<AppCatalog.App> blockedApps() {
+    List<AppCatalog.App> out = new ArrayList<>();
+    for (AppCatalog.App app : AppCatalog.apps(context)) {
+      if (rule(app.pkg).configured()) out.add(app);
+    }
+    return out;
   }
 
   public synchronized JSONObject exportHistory() throws JSONException {

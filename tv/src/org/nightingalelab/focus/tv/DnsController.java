@@ -19,7 +19,7 @@ import org.nightingalelab.focus.telemetry.LocalTelemetry.Metric;
 /** Native Private DNS only: never opens a VPN or changes another network setting. */
 public final class DnsController {
   public static final String KEY = "focus:dns";
-  private static final String MODE = "private_dns_mode", HOST = "private_dns_specifier";
+  public static final String MODE = "private_dns_mode", HOST = "private_dns_specifier";
   private static DnsController instance;
   private final Context context;
   private final SharedPreferences prefs;
@@ -190,6 +190,14 @@ public final class DnsController {
         .start();
   }
 
+  /** Local TV setup entry point: refuses overwriting an already locked profile atomically. */
+  public synchronized void connectFromTv(String id) {
+    if (enabled() && !profile().isEmpty()) {
+      throw new IllegalStateException("NextDNS is already locked on this TV");
+    }
+    connect(id);
+  }
+
   /** Save exact pre-Focus values once. Reconnecting never overwrites that snapshot. */
   public synchronized void connect(String id) {
     requirePermission();
@@ -325,6 +333,28 @@ public final class DnsController {
     checkAsync(null);
   }
 
+  /**
+   * Instant snap-back: if Private DNS was changed outside Focus while protection is active
+   * and not in a timed pause, revert it immediately.
+   */
+  public synchronized boolean snapBackIfTampered() {
+    try {
+      if (!enabled() || !permitted() || profile().isEmpty()) return false;
+      if (deadline() > 0 || prefs.getBoolean("restore_pending", false)) return false;
+      if (configured()) return false;
+      write(HOST, requireHostname());
+      write(MODE, "hostname");
+      verifiedAt = 0;
+      Store.get(context).diagnostic("dns_tamper_reverted");
+      return true;
+    } catch (RuntimeException e) {
+      try {
+        Store.get(context).diagnostic("dns_tamper_revert_failed_" + e.getClass().getSimpleName());
+      } catch (RuntimeException ignored) {}
+      return false;
+    }
+  }
+
   public synchronized void tick() {
     if (enabled() && prefs.getBoolean("restore_pending", false) && deadline() == 0) {
       try {
@@ -333,6 +363,8 @@ public final class DnsController {
         // Keep pending set and retry from the monitor; never report protected on write failure.
         Store.get(context).diagnostic("nextdns_restore_failed_" + e.getClass().getSimpleName());
       }
+    } else {
+      snapBackIfTampered();
     }
     if (enabled() && deadline() == 0 && SystemClock.elapsedRealtime() - lastCheck > 60000)
       checkAsync(null);
@@ -356,7 +388,7 @@ public final class DnsController {
     if (!permitted()) return "Settings access missing";
     if (deadline() > 0) return "Paused · " + Ui.countdown(deadline());
     if (prefs.getBoolean("restore_pending", false)) return "Restoring";
-    if (!configured()) return "Changed outside Focus";
+    if (!configured()) return "Snapping back";
     if (!active()) return "Unavailable";
     if (checking) return "Checking";
     ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);

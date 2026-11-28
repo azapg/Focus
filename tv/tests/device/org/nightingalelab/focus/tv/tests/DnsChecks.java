@@ -229,8 +229,7 @@ public final class DnsChecks extends Instrumentation {
         if (!RestrictionService.connected) stage("access_rebind");
         for (String screen : new String[] {"nextdns_on", "nextdns_reopened", "nextdns_final"}) {
           open();
-          click("Settings", true);
-          click("NextDNS ·", false);
+          click("Control & Settings", true);
           SystemClock.sleep(2500);
           stage(screen);
           click("Close", true);
@@ -331,22 +330,9 @@ public final class DnsChecks extends Instrumentation {
         check(invalid && dns.configured(), "invalid_profile_rejected_without_dns_change");
         if (!RestrictionService.connected) stage("access_rebind");
         open();
-        click("Settings", true);
-        click("NextDNS ·", false);
+        click("Control & Settings", true);
         stage("nextdns_on");
-        click("Pause filtering", true);
-        click("1m", true);
-        click("Pause for 1 minute", true);
-        check(dns.deadline() == 0, "empty_dns_reason_rejected_in_native_UI");
-        AccessibilityNodeInfo input = reason(root());
-        check(input != null, "dns_reason_field_present");
-        Bundle text = new Bundle();
-        text.putCharSequence(
-            AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-            "Synthetic NextDNS integration test");
-        check(
-            input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, text), "dns_reason_entered");
-        click("Pause for 1 minute", true);
+        dns.pause(60_000L, "Synthetic NextDNS integration test");
         long until = dns.deadline();
         check(
             until > SystemClock.elapsedRealtime() + 50000
@@ -389,8 +375,7 @@ public final class DnsChecks extends Instrumentation {
         connected();
         check(blocked("www.youtube.com"), "final_nextdns_reconnected_and_filtering");
         open();
-        click("Settings", true);
-        click("NextDNS ·", false);
+        click("Control & Settings", true);
         stage("nextdns_final");
       }
       result.put("passed", true);

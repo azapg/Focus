@@ -2,7 +2,10 @@ package org.nightingalelab.focus.tv;
 
 import android.app.*;
 import android.content.*;
+import android.database.ContentObserver;
+import android.net.Uri;
 import android.os.*;
+import android.provider.Settings;
 import org.nightingalelab.focus.telemetry.LocalTelemetry;
 import org.nightingalelab.focus.telemetry.LocalTelemetry.Metric;
 
@@ -10,6 +13,22 @@ public final class MonitorService extends Service {
   private HandlerThread thread;
   private Handler worker;
   private LocalTelemetry telemetry;
+  private ContentObserver dnsObserver;
+  private final BroadcastReceiver packageReceiver =
+      new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+          if (worker == null) return;
+          worker.post(() -> {
+            try {
+              AppCatalog.invalidate();
+              Store.get(c).ensureDefaultBlocks();
+            } catch (RuntimeException e) {
+              Store.get(c).diagnostic("package_seed_failed_" + e.getClass().getSimpleName());
+            }
+          });
+        }
+      };
   private static long lastRecoveryAttempt = -30_000;
 
   static void recoverIfStale(Context c) {
@@ -95,6 +114,29 @@ public final class MonitorService extends Service {
     thread = new HandlerThread("focus-usage");
     thread.start();
     worker = new Handler(thread.getLooper());
+    dnsObserver = new ContentObserver(worker) {
+      @Override
+      public void onChange(boolean selfChange, Uri uri) {
+        Metric.DNS_OBSERVER.count(1);
+        try {
+          DnsController.get(MonitorService.this).snapBackIfTampered();
+        } catch (RuntimeException e) {
+          try {
+            Store.get(MonitorService.this).diagnostic("dns_observer_failed_" + e.getClass().getSimpleName());
+          } catch (RuntimeException ignored) {}
+        }
+      }
+    };
+    try {
+      getContentResolver().registerContentObserver(
+          Settings.Global.getUriFor(DnsController.MODE), false, dnsObserver);
+      getContentResolver().registerContentObserver(
+          Settings.Global.getUriFor(DnsController.HOST), false, dnsObserver);
+    } catch (RuntimeException ignored) {}
+    IntentFilter pkgFilter = new IntentFilter(Intent.ACTION_PACKAGE_ADDED);
+    pkgFilter.addDataScheme("package");
+    if (Build.VERSION.SDK_INT >= 33) registerReceiver(packageReceiver, pkgFilter, Context.RECEIVER_EXPORTED);
+    else registerReceiver(packageReceiver, pkgFilter);
     IntentFilter f = new IntentFilter();
     f.addAction(Intent.ACTION_SCREEN_ON);
     f.addAction(Intent.ACTION_SCREEN_OFF);
@@ -103,6 +145,7 @@ public final class MonitorService extends Service {
     if (Build.VERSION.SDK_INT >= 33) registerReceiver(screen, f, Context.RECEIVER_NOT_EXPORTED);
     else registerReceiver(screen, f);
     worker.post(sample);
+    Store.get(this).ensureDefaultBlocks();
     Store.get(this).diagnostic("monitor_started");
   }
 
@@ -114,6 +157,10 @@ public final class MonitorService extends Service {
 
   @Override
   public void onDestroy() {
+    if (dnsObserver != null) {
+      try { getContentResolver().unregisterContentObserver(dnsObserver); } catch (RuntimeException ignored) {}
+    }
+    try { unregisterReceiver(packageReceiver); } catch (RuntimeException ignored) {}
     LanController.get(this).stopServer();
     unregisterReceiver(screen);
     worker.removeCallbacksAndMessages(null);

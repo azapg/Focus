@@ -105,7 +105,6 @@ public final class LocalTelemetry {
   private boolean applies(Metric metric) {
     if ("android-tv".equals(component)) {
       switch (metric) {
-        case DNS_OBSERVER:
         case SUMMARY_ALARM_SCHEDULED:
         case SUMMARY_ALARM_FIRED:
         case WIDGET_REFRESH:

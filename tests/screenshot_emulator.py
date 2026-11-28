@@ -257,13 +257,16 @@ def capture_views(scenario, adb, apks, output):
             shell("am", "start", "-W", "-n", f"{package}.fixture/.FixtureActivity")
             # AOSP surfaces a one-time immersive-mode confirmation on first full-screen launch.
             tap_system("Got it")
-            shot("tv-blocked-app.png", "Store free time")
-            tap("Store free time")
-            shot("tv-free-time-store.png", "5 min free · 15 coins")
+            shot("tv-blocked-app.png", "Done with TV")
+            shell("am", "start", "-W", "-n", activity)
+            shot("tv-home.png", "Control & Settings")
+            tap("Control & Settings")
+            shot("tv-control.png", "Focus Control")
         else:
             shell("am", "start", "-W", "-n", activity)
+            tap("Activity")
             shot("tv-today.png", "Today", selected=True)
-            # Today receives initial D-pad focus in the production TV activity.
+            # Today receives initial D-pad focus in Activity view.
             shell("input", "keyevent", "KEYCODE_DPAD_RIGHT")
             shell("input", "keyevent", "KEYCODE_DPAD_CENTER")
             shot("tv-week.png", "Week", selected=True)

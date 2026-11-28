@@ -67,5 +67,5 @@ installation with an empty profile preference, Focus can recover a standard
 settings or from the retained hostname during a recorded Focus pause. If it
 cannot recover the hostname, **NextDNS profile needed** appears and Focus
 leaves Private DNS alone. Enter the original ID to restore management. An
-unexpired pause keeps its deadline. Focus retains the pre-Focus settings used
-by **Restore previous DNS**.
+unexpired pause keeps its deadline. Focus retains the pre-Focus settings internally
+for recovery tests; disconnecting NextDNS is not exposed in the TV or desktop UI.
