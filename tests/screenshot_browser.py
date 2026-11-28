@@ -10,6 +10,7 @@ from playwright.async_api import async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "ui-dist"
+PRODUCT_ENTRY = ROOT / "docs/product/index.html"
 CLOCK = datetime.datetime(2026, 2, 12, 14, tzinfo=datetime.timezone.utc)
 
 
@@ -32,7 +33,8 @@ async def fixture_browser():
                 await context.route_web_socket("**/*", lambda socket: socket.close())
 
                 async def local_build_only(route):
-                    if route.request.url.startswith(BUILD.as_uri() + "/"):
+                    request_url = route.request.url.split("?", 1)[0]
+                    if request_url.startswith(BUILD.as_uri() + "/") or request_url == PRODUCT_ENTRY.as_uri():
                         await route.continue_()
                     else:
                         await route.abort()

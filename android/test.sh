@@ -17,11 +17,12 @@ javac -d "$unit_build" \
   src/org/nightingalelab/focus/phone/ApprovalPairing.java \
   src/org/nightingalelab/focus/phone/UpdateManifest.java \
   src/org/nightingalelab/focus/phone/GatewayRetry.java \
+  src/org/nightingalelab/focus/phone/Intention.java \
   "$unit_build/generated/org/nightingalelab/focus/phone/AskPolicy.java" \
   ../shared/android/org/nightingalelab/focus/habits/Habits.java \
   ../shared/android/org/nightingalelab/focus/habits/Wallet.java \
   ../shared/android/org/nightingalelab/focus/habits/FocusRewards.java \
-  tests/PhoneCoreTest.java tests/FocusStateDetectorTest.java tests/HabitsCoreTest.java tests/WalletCoreTest.java tests/FocusRewardsTest.java tests/HabitNudgePolicyTest.java tests/GatewayRetryTest.java
+  tests/PhoneCoreTest.java tests/FocusStateDetectorTest.java tests/HabitsCoreTest.java tests/WalletCoreTest.java tests/FocusRewardsTest.java tests/HabitNudgePolicyTest.java tests/GatewayRetryTest.java tests/IntentionTest.java
 java -cp "$unit_build" PhoneCoreTest
 java -cp "$unit_build" FocusStateDetectorTest
 
@@ -30,3 +31,4 @@ java -cp "$unit_build" org.nightingalelab.focus.habits.WalletCoreTest
 java -cp "$unit_build" org.nightingalelab.focus.habits.FocusRewardsTest
 java -cp "$unit_build" org.nightingalelab.focus.phone.HabitNudgePolicyTest
 java -cp "$unit_build" org.nightingalelab.focus.phone.GatewayRetryTest
+java -cp "$unit_build" org.nightingalelab.focus.phone.IntentionTest

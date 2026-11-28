@@ -1003,7 +1003,7 @@ final class JudgeSheetDialog {
   }
 
   /** Monochrome wrapping flow layout for 2–3 service chips. */
-  private static final class ChipFlowLayout extends ViewGroup {
+  static final class ChipFlowLayout extends ViewGroup {
     private final int hGap;
     private final int vGap;
 

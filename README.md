@@ -12,6 +12,8 @@ See [device setup and controls](docs/device-management.md).
 
 A tiny bar at the top of the screen keeps Windows on your chosen NextDNS profile using encrypted DNS-over-HTTPS.
 
+**Open Focus:** [offline desktop product entry](docs/product/index.html) — starts with a clean fictional wallet, with an optional funded Store sample.
+
 - **Hover the bar** to see the pause controls. After saving a Gateway key, choose **Ask**. The duration buttons are available on Windows before setup.
 - **Describe what you need** in Ask. The duration buttons still ask for a reason and check-in.
 - **It turns back on by itself** when the time is up. "Turn on" ends a pause early.
@@ -32,6 +34,7 @@ Hover the bar and click **What are you on?**. Type one sentence about what you a
 - **It checks in at the end.** When time runs out, a card asks if you finished. Pick **Done**, **Partly**, **10 more min**, or **No**.
 - **Ask sees your plan.** When you ask for a pause, the judge sees your active intention. Requests that clearly fit the plan get a fairer look; requests that pull away from it get turned down faster.
 - **Today shows the full story.** The stats panel lists each intention above Screen time, next to what was actually on screen during it. Any 15-minute stretch with no intention shows up as its own orange row.
+- **Same intention on your phone.** The paired phone shows it at the top of Today and in the always-on Focus notification. Set it, mark it done or add 10 minutes on either device. See [Focus for Android](android/README.md).
 
 ## Screen time and stats
 

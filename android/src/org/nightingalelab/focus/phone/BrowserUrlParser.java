@@ -39,7 +39,8 @@ public final class BrowserUrlParser {
         "com.brave.browser_nightly", "com.microsoft.emmx", "com.microsoft.emmx.beta",
         "com.microsoft.emmx.dev", "com.microsoft.emmx.canary",
         "com.vivaldi.browser", "com.vivaldi.browser.snapshot"
-    }, new String[] {"url_bar"}, "new_tab_page", "incognito_new_tab_page", "tab_list_recycler_view");
+    }, new String[] {"url_bar"}, "new_tab_page", "incognito_new_tab_page",
+        "tab_list_recycler_view", "tab_list_view");
     register(new String[] {"com.sec.android.app.sbrowser", "com.sec.android.app.sbrowser.beta"},
         new String[] {"location_bar_edit_text", "compact_url_text", "url_bar"},
         "quickaccess_main_layout", "quickaccess_dummy_url_bar_text", "tab_manager_bottom_secret_button");
@@ -72,6 +73,13 @@ public final class BrowserUrlParser {
   public static boolean isNonPageView(String pkg, String viewId) {
     Toolbar toolbar = BROWSERS.get(pkg);
     return toolbar != null && toolbar.nonPageViews.contains(viewName(viewId));
+  }
+
+  public static String tabStripItemViewId(String tabListId) {
+    String name = viewName(tabListId);
+    if (!name.equals("tab_list_recycler_view") && !name.equals("tab_list_view")) return null;
+    // The group strip shares the grid's list ID but has its own tab button.
+    return tabListId.substring(0, tabListId.lastIndexOf('/') + 1) + "tab_strip_item_button";
   }
 
   // A browser variant can use its base app's resource namespace.

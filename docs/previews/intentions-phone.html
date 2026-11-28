@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Phone Intentions</title>
+<style>
+:root{--fg:#fafafa;--mut:#8a8a8a;--sub:#a1a1aa;--dim:#5c5c5c;--line:#1f1f23;--div:#141417;--card:#060607;--sec:#161619;--active:#222225;
+  --askS:#131317;--askB:#2d2d34;--pf:#27272e;--pb:#3d3d47;--sf:#1d1d22;--sb:#303038;
+  --orange:#f59e0b;--red:#ef4444;--redt:#f87171;--ice:#cbe2ff;
+  --ui:Roboto,"Segoe UI",system-ui,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;color:var(--fg);font:400 13px/1.45 var(--ui)}
+.top{padding:4px 0 6px}
+h1{font-size:17px;font-weight:600;margin:0 0 2px}
+.note{color:var(--mut);font-size:12px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.tab{border:1px solid #2a2a2d;background:#111113;color:var(--sub);border-radius:999px;padding:7px 13px;font:inherit;cursor:pointer}
+.tab.on{background:#fafafa;color:#000;border-color:#fafafa}
+.tab b{font-weight:600;margin-right:6px}
+.steps{display:flex;gap:2px;margin-top:8px;flex-wrap:wrap}
+.step{border:0;background:transparent;color:var(--mut);font:inherit;font-size:12px;padding:6px 9px;border-radius:8px;cursor:pointer}
+.step.on{background:#1c1c1e;color:var(--fg)}
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:16px;padding:8px 0}
+@media(max-width:900px){.wrap{grid-template-columns:1fr}}
+.phones{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;padding:14px 0;border-radius:14px;
+  background:radial-gradient(900px 400px at 50% 120%,#23262e,#121317 70%)}
+.cap{color:var(--mut);font-size:11px;text-align:center;margin-top:6px}
+.side{display:flex;flex-direction:column;gap:10px}
+.card{border:1px solid #222225;background:#0f0f11;border-radius:12px;padding:11px 13px}
+.card h3{margin:0 0 5px;font-size:12px;font-weight:600;color:var(--sub)}
+.card p{margin:0 0 6px}.card p:last-child{margin:0}
+.card ul{margin:0;padding-left:16px}.card li{margin:3px 0}
+.sub-toggle{display:flex;gap:4px;flex-wrap:wrap}
+.sub-toggle button{border:1px solid #2a2a2d;background:#141416;color:var(--sub);font:inherit;font-size:12px;border-radius:8px;padding:5px 9px;cursor:pointer}
+.sub-toggle button.on{border-color:#d4d4d4;color:var(--fg)}
+.sample{font-size:11px;color:var(--dim)}
+.o{color:var(--orange)}.m{color:var(--mut)}.ice{color:var(--ice)}.dimc{color:var(--dim)}
+
+/* ---- phone ---- */
+.phone{width:300px;height:640px;border-radius:38px;background:#000;border:6px solid #1a1a1c;box-shadow:0 0 0 1px #2c2c2f,0 30px 60px rgba(0,0,0,.6);position:relative;overflow:hidden;font-size:13px}
+.sb{height:30px;background:#000;display:flex;align-items:center;justify-content:space-between;padding:0 18px 0 20px;font-size:12px;color:#e5e5e5;position:relative;z-index:5}
+.sb .l{display:flex;align-items:center;gap:6px}
+.sb .r{display:flex;gap:5px;align-items:center}
+.sb .r i{display:inline-block;width:13px;height:9px;border-radius:2px;background:#d4d4d4;opacity:.85}
+.chip{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 7px;border-radius:999px;background:#2a2a2e;color:#fafafa;font-size:11px;font-weight:500}
+.chip.o{background:var(--orange);color:#000}
+.scr{position:absolute;left:0;right:0;top:30px;bottom:0;overflow:hidden;padding:6px 14px 0}
+/* Focus app bits (from MainActivity / Theme.java) */
+.hdr{display:flex;align-items:center;gap:6px}
+.pill{height:28px;display:inline-flex;align-items:center;gap:5px;padding:0 11px;border-radius:999px;border:1px solid var(--line);color:var(--sub);font-size:12px}
+.coins{font-size:12px;color:var(--sub);margin-left:auto}
+.gear{width:28px;height:28px;display:grid;place-items:center;color:var(--mut)}
+.hero{font-size:31px;font-weight:700;letter-spacing:-.025em;line-height:1.1;margin-top:12px}
+.sent{color:var(--mut);font-size:13px;margin-top:3px}.sent b{color:var(--fg);font-weight:500}
+.cbar{display:flex;gap:2px;height:9px;margin-top:11px}.cbar i{border-radius:2px;background:#d4d4d4}
+.cbar i.g{background:#52525b}.cbar i.o{background:var(--orange)}.cbar i.ice{background:var(--ice)}
+.leg{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--mut);margin-top:7px}
+.leg span:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:4px;vertical-align:1px}
+.fcard{border:1px solid var(--line);background:var(--card);border-radius:14px;padding:11px 12px;margin-top:12px}
+.fcard .h{display:flex;justify-content:space-between;color:var(--mut);font-size:12px;margin-bottom:6px}
+.now{border-color:#2d2d34;background:#0b0b0e}
+.now .t{font-size:15px;font-weight:600}
+.now .d{color:var(--mut);font-size:12px;margin-top:2px}
+.now .row{display:flex;align-items:center;gap:8px;margin-top:10px}
+.prog{flex:1;height:4px;border-radius:2px;background:#1a1a1e;overflow:hidden}.prog i{display:block;height:100%;background:#d4d4d4}
+.prog.o i{background:var(--orange)}
+.btn{height:30px;display:inline-flex;align-items:center;justify-content:center;padding:0 13px;border-radius:999px;border:1px solid var(--sb);background:var(--sf);color:#e4e4e7;font:inherit;font-size:12.5px;white-space:nowrap}
+.btn.p{background:var(--pf);border-color:var(--pb);color:var(--fg)}
+.btn.g{background:transparent;border-color:transparent;color:#b4b4b4}
+.btn.w{border-color:rgba(245,158,11,.45);color:var(--orange);background:transparent}
+.ir{display:grid;grid-template-columns:38px 1fr auto;gap:8px;padding:8px 0;border-top:1px solid var(--div);font-size:12.5px}
+.ir:first-of-type{border-top:0}
+.ir .tm{color:var(--mut)}.ir .w{font-weight:500}.ir .x{color:var(--mut);font-size:11px;margin-top:2px}
+.ir .n{text-align:right}.ir .n small{display:block;color:var(--mut);font-size:10.5px}
+.mini{display:flex;height:4px;gap:2px;margin-top:5px}.mini i{border-radius:2px;background:#d4d4d4}
+.mini i.o{background:var(--orange)}.mini i.h{background:repeating-linear-gradient(135deg,#777 0 1.5px,#000 1.5px 4.5px)}.mini i.ice{background:var(--ice)}.mini i.g{background:#3a3a3a}
+.dev{display:inline-block;font-size:10px;color:var(--mut);border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:4px;vertical-align:1px}
+.dock{position:absolute;left:0;right:0;bottom:14px;display:flex;justify-content:center;gap:8px;z-index:4}
+.glass{height:42px;border-radius:999px;background:rgba(14,14,17,.94);border:1px solid #26262b;box-shadow:0 10px 24px rgba(0,0,0,.6);display:flex;align-items:center;padding:3px}
+.glass span{padding:0 14px;height:34px;display:flex;align-items:center;border-radius:999px;color:var(--mut);font-size:13px}
+.glass span.on{background:var(--active);color:var(--fg)}
+.glass.ask span{color:var(--fg)}
+.scrim{position:absolute;left:0;right:0;bottom:0;height:90px;background:linear-gradient(transparent,#000);z-index:3}
+/* Ask sheet */
+.dimmer{position:absolute;inset:0;background:rgba(0,0,0,.55);z-index:6}
+.sheet{position:absolute;left:8px;right:8px;z-index:7;border-radius:22px;background:var(--askS);border:1px solid var(--askB);padding:10px}
+.field{display:flex;align-items:center;min-height:36px;border-radius:18px;background:#0a0a0c;border:1px solid #26262b;padding:6px 12px;font-size:13px;line-height:1.35}
+.field.ph{color:var(--mut)}
+.caret{display:inline-block;width:1px;height:14px;background:#fafafa;margin-left:1px;vertical-align:-2px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.kb{position:absolute;left:0;right:0;bottom:0;height:200px;background:#1b1b1e;z-index:7;padding:8px 4px;display:grid;grid-template-rows:repeat(4,1fr);gap:6px}
+.kb div{display:flex;gap:4px;justify-content:center}.kb div i{flex:1;max-width:24px;border-radius:5px;background:#3a3a3e}
+.kb div i.w{max-width:150px}
+.chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.ch{display:inline-flex;align-items:center;height:24px;padding:0 9px;border-radius:999px;border:1px solid #2e2e33;color:var(--sub);font-size:11.5px;gap:4px}.ch b{color:var(--fg);font-weight:400}
+/* Android system surfaces */
+.shade{position:absolute;inset:0;background:rgba(10,10,12,.97);z-index:6;padding:36px 10px 0}
+.qs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}.qs i{height:46px;border-radius:16px;background:#232327}
+.qs i.on{background:#d4d4d8}
+.notif{background:#1c1c20;border-radius:18px;padding:11px 13px;margin-bottom:6px}
+.notif .ap{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--sub)}
+.notif .ap .ic{width:16px;height:16px;border-radius:50%;background:#fafafa;display:grid;place-items:center}
+.notif .ap .ic:after{content:"";width:6px;height:6px;border-radius:50%;background:#000}
+.notif .tt{font-size:13.5px;font-weight:500;margin-top:5px}
+.notif .tx{font-size:12.5px;color:var(--sub);margin-top:1px}
+.notif .acts{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+.notif .acts span{font-size:12px;padding:6px 12px;border-radius:999px;background:#2a2a2f;color:#e4e4e7}
+.notif .bar{height:5px;border-radius:3px;background:#2a2a2f;margin-top:9px;overflow:hidden}.notif .bar i{display:block;height:100%;background:#d4d4d8}
+.notif .bar.o i{background:var(--orange)}
+.notif.dim{opacity:.55}
+.heads{position:absolute;left:8px;right:8px;top:34px;z-index:6;box-shadow:0 12px 30px rgba(0,0,0,.7)}
+/* other apps */
+.app{position:absolute;left:0;right:0;top:30px;bottom:0;background:#0d0d0f}
+.apbar{height:46px;display:flex;align-items:center;padding:0 14px;font-weight:600;font-size:15px;border-bottom:1px solid #1d1d20}
+.tiles{display:grid;grid-template-columns:repeat(8,1fr);gap:3px;padding:20px 16px}
+.tiles i{aspect-ratio:1;border-radius:4px;background:#2b2b31}.tiles i.a{background:#4b4b55}.tiles i.b{background:#6b6b78}
+.gate{position:absolute;left:0;right:0;top:30px;bottom:0;background:#000;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;gap:10px}
+.gate .big{font-size:22px;font-weight:700}
+.gate .btn{width:220px;height:40px;font-size:13.5px}
+/* home screen */
+.home{position:absolute;left:0;right:0;top:30px;bottom:0;background:linear-gradient(160deg,#2a2a33,#121216 60%,#0b0b0e);padding:18px 14px}
+.wid{background:#0a0a0c;border-radius:22px;padding:14px;border:1px solid #1f1f23}
+.wid .k{color:var(--mut);font-size:11.5px}
+.wid .t{font-size:17px;font-weight:600;margin-top:3px}
+.icons{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:22px;padding:0 6px}
+.icons i{aspect-ratio:1;border-radius:16px;background:#2e2e35}
+.lock{position:absolute;left:0;right:0;top:30px;bottom:0;background:linear-gradient(170deg,#1e2028,#0b0b0d);padding:60px 10px 0;text-align:center}
+.lock .clock{font-size:64px;font-weight:300;letter-spacing:-.02em;line-height:1}
+.lock .date{color:var(--sub);margin:6px 0 30px}
+/* status bar icon for the always-on Focus notification */
+.sbi{display:inline-block;width:9px;height:9px;border-radius:50%;border:1.6px solid #e5e5e5;margin-left:2px}
+/* screen time rows */
+.ar{display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:9px;padding:7px 0;font-size:12.5px}
+.ar+.ar{border-top:1px solid var(--div)}.ar i{width:22px;height:22px;border-radius:6px;background:#1d1d22}.ar span:last-child{color:var(--sub)}
+.scrim.tall{height:150px}
+.prg{height:2px;border-radius:1px;background:#1c1c20;overflow:hidden}.prg i{display:block;height:100%;background:#d4d4d4}
+.drift .prg i{background:var(--orange)}
+/* A: header line */
+.sa{height:44px;margin-top:8px;display:flex;flex-direction:column;justify-content:center;gap:9px}
+.sa .r{display:flex;justify-content:space-between;align-items:baseline}
+.sa .t{font-size:14px;font-weight:500}.sa .m{font-size:12px;color:var(--mut)}
+.sa.none .t{color:var(--mut);font-weight:400}.sa.none .m{color:var(--fg)}
+.drift .m{color:var(--orange)!important}
+/* B: capsule above the dock (same surface as the Ask capsule / scoped-pause dock) */
+.sbx{position:absolute;left:16px;right:16px;bottom:66px;height:46px;border-radius:999px;background:var(--askS);border:1px solid var(--askB);box-shadow:0 10px 24px rgba(0,0,0,.6);display:flex;align-items:center;gap:9px;padding:0 5px 0 15px;z-index:4}
+.sbx.drift{border-color:rgba(245,158,11,.38)}
+.sbx .h{flex:1;color:var(--mut);font-size:13.5px}
+.sbx .tm{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.25}
+.sbx .t{font-size:13.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sbx .m{font-size:11.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sbx .btn{height:36px}
+.ring{width:16px;height:16px;border-radius:50%;flex:none;background:conic-gradient(#d4d4d4 calc(var(--p)*1%),#2c2c31 0);-webkit-mask:radial-gradient(circle,transparent 5px,#000 5.5px);mask:radial-gradient(circle,transparent 5px,#000 5.5px)}
+.drift .ring{background:conic-gradient(var(--orange) calc(var(--p)*1%),#2c2c31 0)}
+.sm{height:66px;margin-top:10px;display:flex;flex-direction:column}
+.sm .r{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.sm .t{font-size:18px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sm .m{font-size:12px;color:var(--mut);white-space:nowrap}
+.sm .d{font-size:12px;color:var(--mut);margin-top:2px}
+.sm .prg{margin-top:auto}
+.sm.none .t{color:#52525b;font-weight:500}.sm.none .m{color:var(--fg)}
+/* C: headline */
+.sc{height:104px;margin-top:12px;display:flex;flex-direction:column}
+.sc .k{font-size:11.5px;color:var(--mut)}
+.sc .t{font-size:25px;font-weight:700;letter-spacing:-.02em;line-height:1.15;margin-top:3px}
+.sc .m{font-size:12.5px;color:var(--mut);margin-top:3px}
+.sc .prg{margin-top:auto}
+.sc.none .t{color:#52525b}.sc.none .prg{visibility:hidden}
+.hero.small{font-size:22px;margin-top:14px}
+/* Ask-style composer */
+.cap2{position:absolute;left:12px;right:12px;z-index:7;min-height:48px;border-radius:999px;background:var(--askS);border:1px solid var(--askB);display:flex;align-items:center;gap:6px;padding:4px 5px 4px 14px;box-shadow:0 12px 28px rgba(0,0,0,.6)}
+.cap2 .in{flex:1;font-size:13.5px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
+.cap2 .in span{direction:ltr;unicode-bidi:plaintext}
+.cap2 .btn{height:38px;font-size:13px;padding:0 15px}
+.acard{position:absolute;left:12px;right:12px;z-index:7;border-radius:20px;background:var(--askS);border:1px solid var(--askB);padding:13px 14px;box-shadow:0 14px 30px rgba(0,0,0,.6)}
+.acard .hd{display:flex;justify-content:space-between;align-items:baseline}
+.acard .hd b{font-size:14px;font-weight:600}.acard .hd span{color:var(--mut);font-size:12px}
+.acard .ch{border-radius:8px;background:#1b1b20;border-color:#2b2b32}
+</style></head>
+<body>
+<div class="top">
+  <h1>Intentions on the phone</h1>
+  <div class="note">One intention, shared by the laptop and the phone. It is always on screen and never moves the layout. The options differ in where it lives. Built from the phone app's real Today screen, dock, Ask capsule and notifications. All data is invented.</div>
+  <div class="tabs" id="opts"></div>
+  <div class="steps" id="steps"></div>
+</div>
+<div class="wrap"><div><div class="phones" id="phones"></div></div><div class="side" id="side"></div></div>
+<script>
+const OPTS={
+ A:{name:'Header line',tag:'A thin line under the header on Today and Week. The smallest change.'},
+ B:{name:'Title',tag:'A title-sized block under the header, with the goal on a second line. Bigger than A, quieter than C. The screen time number keeps its size.'},
+ C:{name:'Headline',tag:'Your intention is the first big thing on Today, above the screen time number.'},
+ D:{name:'Above the dock',tag:'A capsule floating above Today | Week and Ask, on every screen of the app. When nothing is set, it looks exactly like the Ask input.'}
+};
+const STEPS=['1 Always there','2 Set it','3 You drift','4 Time is up','5 Widget'];
+let opt='C',step=0,sub=0;
+
+const sb=(icon=true,time='11:14')=>`<div class="sb"><span class="l">${time}${icon?'<span class="sbi"></span>':''}</span><span class="r"><i></i><i></i><i style="width:20px"></i></span></div>`;
+const dock=`<div class="dock"><div class="glass"><span class="on">Today</span><span>Week</span></div><div class="glass ask"><span>Ask</span></div></div>`;
+const kb=`<div class="kb"><div>${'<i></i>'.repeat(10)}</div><div>${'<i></i>'.repeat(9)}</div><div>${'<i></i>'.repeat(9)}</div><div><i></i><i></i><i class="w"></i><i></i><i></i></div></div>`;
+const hdr=`<div class="hdr"><span class="pill">All devices ▾</span><span class="coins">30 coins</span><span class="gear">⚙</span></div>`;
+const focusNotif=(tt,tx,{acts=[]}={})=>`<div class="notif"><div class="ap"><span class="ic"></span>Focus</div><div class="tt">${tt}</div><div class="tx">${tx}</div>${acts.length?`<div class="acts">${acts.map(a=>`<span>${a}</span>`).join('')}</div>`:''}</div>`;
+const shade=(inner)=>`<div class="shade"><div class="qs"><i class="on"></i><i></i><i class="on"></i><i></i></div>${inner}<div class="notif dim"><div class="ap"><span class="ic"></span>Messages</div><div class="tt">Ana</div><div class="tx">see you at 6</div></div></div>`;
+const phone=(inner,cap)=>`<div><div class="phone">${inner}</div>${cap?`<div class="cap">${cap}</div>`:''}</div>`;
+const card=(h,body)=>`<div class="card">${h?`<h3>${h}</h3>`:''}${body}</div>`;
+function subs(list){return `<div class="card"><h3>Try</h3><div class="sub-toggle">${list.map((t,i)=>`<button data-sub="${i}" class="${i===sub?'on':''}">${t}</button>`).join('')}</div></div>`}
+
+/* the intention slot, in three states: none | run | drift */
+const meta=s=>s==='none'?'':s==='drift'?'Block Puzzle 6m':'31m left';
+const prg=s=>`<div class="prg"><i style="width:${s==='none'?0:31}%"></i></div>`;
+const slotA=s=>`<div class="sa ${s}"><div class="r"><span class="t">${s==='none'?'What are you on?':'Cleaning house'}</span><span class="m">${s==='none'?'Set':meta(s)}</span></div>${prg(s)}</div>`;
+const slotM=s=>`<div class="sm ${s}"><div class="r"><span class="t">${s==='none'?'What are you on?':'Cleaning house'}</span><span class="m">${s==='none'?'Set':meta(s)}</span></div><div class="d">${s==='none'?'Nothing set':'Until 11:45 · done when the trash is out'}</div>${prg(s)}</div>`;
+const slotC=s=>`<div class="sc ${s}">${s==='none'?'':'<div class="k">Now · until 11:45</div>'}<div class="t">${s==='none'?'What are you on?':'Cleaning house'}</div><div class="m">${s==='none'?'Register your focus: what you\'re doing, for how long, and when it\'s done.':s==='drift'?'<span class="o">Block Puzzle 6m</span> · 25m left':'31m left · done when the trash is out'}</div>${prg(s)}</div>`;
+const slotD=s=>`<div class="sbx ${s}">${s==='none'?`<span class="h">What are you on?</span><span class="btn p">Set</span>`:`<span class="ring" style="--p:31"></span><span class="tm"><span class="t">Cleaning house</span><span class="m">${s==='drift'?'Block Puzzle 6m off-plan':'31m left · until 11:45'}</span></span><span class="btn">Done</span>`}</div>`;
+
+const apps=[['VS Code','1h 10m'],['Chrome','41m'],['Docs','35m'],['Block Puzzle','6m'],['YouTube','4m']];
+const body=`<div class="hero ${opt==='C'?'small':''}">2h 34m</div><div class="sent">on screens, <b>1h 45m building</b>, <span class="o">37m drifting</span>.</div><div class="cbar"><i class="ice" style="flex:70"></i><i style="flex:35"></i><i class="o" style="flex:37"></i><i class="g" style="flex:22"></i></div><div class="leg"><span class="ice">Deep focus 1h 10m</span><span>Coding 35m</span><span class="o">Social 37m</span></div><div class="fcard"><div class="h"><span>Screen time</span><span>See all</span></div>${apps.map(([n,t])=>`<div class="ar"><i></i><span>${n}</span><span>${t}</span></div>`).join('')}</div>`;
+const today=s=>{
+ const top=opt==='A'?slotA(s):opt==='B'?slotM(s):opt==='C'?slotC(s):'';
+ return `<div class="scr">${hdr}${top}${body.replace('hero ','hero '+(opt==='C'?'small':''))}</div>${opt==='D'?'<div class="scrim tall"></div>'+slotD(s):'<div class="scrim"></div>'}${dock}`;
+};
+
+const S=[
+/* 1 always there */ ()=>{
+ const where={A:'<p>It sits in a fixed 44px row under the header. Nothing set, running or drifting: same row, same height, so the numbers below never jump.</p><p>Shows on Today and Week.</p>',
+  B:'<p>A fixed 66px block under the header: the intention as a title, time left on the right, the goal underneath. Same height in every state.</p><p>Shows on Today and Week. The screen time number stays as big as today.</p>',
+  D:'<p>It floats above the dock, so it never pushes content at all. Same size in every state.</p><p>Shows on every screen of the app, right next to Ask. Empty, it is the input: tap and type.</p>',
+  C:'<p>The top of Today becomes a fixed block for the intention. "What are you on?" holds the spot when nothing is set, so nothing below moves.</p><p>The screen time number gets a bit smaller. Today only.</p>'}[opt];
+ const samsung=card('Outside the app','<p>The "Focus · Tracking activity" notification is always on already. It becomes your intention: <b>Cleaning house · 31m left</b>, with Done and +10 min.</p><p>That\'s a normal notification, not the Now Bar or a Live Update, so Samsung has no say over it and no dev setting is needed. The status bar shows the Focus icon, like it does today.</p>');
+ if(sub===2) return {phones:phone(sb()+shade(focusNotif('Cleaning house · 31m left','Done when the trash is out',{acts:['Done','+10 min']})),'Pull down: running')+phone(sb()+shade(focusNotif('Cleaning house · 25m left','<span class="o">Block Puzzle 6m off-plan</span>',{acts:['Done','+10 min']})),'Pull down: drifting'),
+   side:subs(['Nothing set → running','Running → drifting','Outside the app'])+samsung};
+ const [l,r]=sub===0?['none','run']:['run','drift'];
+ const cap={none:'Nothing set',run:'Running',drift:'Drifting'};
+ return {phones:phone(sb(l!=='none')+today(l),cap[l])+phone(sb()+today(r),cap[r]),
+   side:subs(['Nothing set → running','Running → drifting','Outside the app'])+card('Where it lives',where)+samsung};
+},
+/* 2 set it */ ()=>{
+ const a=phone(sb(false)+today('none')+`<div class="dimmer"></div><div class="cap2" style="bottom:208px"><div class="in"><span>cleaning the house, 45 min, done when the trash is out</span></div><span class="caret"></span><span class="btn p">Set</span></div>`+kb,'Tap it, type one line');
+ const b=phone(sb(false)+today('none')+`<div class="dimmer"></div><div class="acard" style="bottom:14px"><div class="hd"><b>Cleaning house</b><span>45 min</span></div><div class="chips"><span class="ch">Until <b>11:45</b></span><span class="ch">Done when <b>the trash is out</b></span></div><div style="display:flex;justify-content:flex-end;gap:6px;margin-top:12px"><span class="btn g">Edit</span><span class="btn p">Start</span></div></div>`,'Read it back, then Start');
+ return {phones:a+b,side:card('Same in every option','<p>Tapping the slot opens the same capsule as Ask: one line, a Set pill on the right, keyboard up. No form, no fields.</p><p>Then a short read-back in the same card style Ask uses for answers. Start, or Edit to fix what it got wrong.</p><p>Set it on the phone and the laptop bar shows it too, and the other way round.</p>')};
+},
+/* 3 drift */ ()=>{
+ const game=extra=>sb()+`<div class="app"><div class="apbar">Block Puzzle</div><div class="tiles">${Array.from({length:64},(_,i)=>`<i class="${[3,4,11,12,19,27,36,37,44,45,52,9,10].includes(i)?'a':[20,21,28,29].includes(i)?'b':''}"></i>`).join('')}</div></div>${extra}`;
+ return {phones:phone(game(`<div class="heads">${focusNotif('You said Cleaning house','3 minutes in Block Puzzle. 25m left.',{acts:['Back to it','Ask','Not drifting']})}</div>`),'After 3 minutes: one nudge')+phone(sb()+today('drift'),'Open Focus: the slot is orange'),
+   side:card('Same in every option','<p>After 3 minutes in something that doesn\'t fit, one heads-up notification. No repeats. Then the slot and the notification stay orange until you leave.</p><p><b>Not drifting</b> tells Focus this app fits the plan. It\'s logged, like an override.</p><p>Free Time from the Store and apps Ask approved never count as drift.</p><p>The nudge is a normal notification too, so it works on Samsung as is.</p>')};
+},
+/* 4 time up */ ()=>{
+ return {phones:phone(sb()+`<div class="lock"><div class="clock">11:45</div><div class="date">Friday, November 27</div>${focusNotif('Cleaning house · time\'s up','Is the trash out?',{acts:['Done','Partly','10 more min','No']})}</div>`,'Lock screen, no need to open the app'),
+   side:card('Same in every option','<p>When time runs out, the notification asks the done question with four buttons. Answer on the phone or the laptop and it clears on both.</p><p>It only shows on the device you\'re using. If you\'re away from both, it waits on the phone.</p>')};
+},
+/* 5 widget */ ()=>{
+ const w=(o)=>`<div class="wid"><div class="k">Now</div><div class="t">Cleaning house</div><div class="prog ${o?'o':''}" style="margin-top:10px"><i style="width:${o?45:31}%"></i></div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px"><span class="${o?'o':'m'}" style="font-size:12px">${o?'Block Puzzle 6m':'31m left'}</span><span class="btn p" style="height:28px">Done</span></div></div>`;
+ const empty=`<div class="wid"><div class="k">Now</div><div class="t" style="color:var(--mut)">Nothing set</div><div style="margin-top:12px"><span class="btn p" style="height:28px">What are you on?</span></div></div>`;
+ return {phones:phone(sb(sub!==2)+`<div class="home">${sub===0?w(false):sub===1?w(true):empty}<div class="icons">${'<i></i>'.repeat(12)}</div></div>`,['Running','Drifting','Nothing set'][sub]),
+   side:subs(['Running','Drifting','Nothing set'])+card('Same in every option','<p>A fifth home-screen widget next to the existing four. Tap it to set an intention or mark it done without opening the app.</p><p>It goes orange when you drift. It stays white when nothing is set, so it never nags from the home screen.</p>')};
+}
+];
+
+function render(){
+ document.getElementById('opts').innerHTML=Object.entries(OPTS).map(([k,v])=>`<button class="tab ${k===opt?'on':''}" data-opt="${k}"><b>${k}</b>${v.name}</button>`).join('');
+ document.getElementById('steps').innerHTML=STEPS.map((s,i)=>`<button class="step ${i===step?'on':''}" data-step="${i}">${s}</button>`).join('');
+ const r=S[step]();
+ document.getElementById('phones').innerHTML=r.phones;
+ document.getElementById('side').innerHTML=card(`${opt} · ${OPTS[opt].name}${opt==='C'?' (picked, built)':''}`,`<p>${OPTS[opt].tag}</p>`)+r.side+'<div class="sample">Sample data. Nothing here is from a real device.</div>';
+}
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+ if(b.dataset.opt){opt=b.dataset.opt;}else if(b.dataset.step){step=+b.dataset.step;sub=0;}else if(b.dataset.sub){sub=+b.dataset.sub;}else return;render();});
+const p=new URLSearchParams(location.hash.slice(1));if(p.get('o'))opt=p.get('o');if(p.get('s'))step=+p.get('s');if(p.get('u'))sub=+p.get('u');
+render();
+</script>
+</body></html>

@@ -29,7 +29,9 @@ blocked sites when DNS protection resumes and shows static snapshots with Peek.
    choose **Load unpacked**, and select
    `%LOCALAPPDATA%\FocusDNS\browser-bridge\extension`.
    The extension ID must be `mfafgohdpfnknfgedjiicnmgomjpdock` (its committed public
-   key makes the unpacked ID stable). Reload it after copying an updated build.
+   key makes the unpacked ID stable). Focus updates managed extension files at
+   app startup. Reload the extension on the browser's extensions page after
+   installing or updating Focus.
 5. Keep the updated Focus app running. Open a normal HTTP(S) page and use it.
    `history` returns enriched spans as soon as the next one-second sample sees
    the browser in front. Existing stats totals use the same spans and do not

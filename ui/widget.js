@@ -1,3 +1,4 @@
+import { createIntentionsDock } from "./features/intentions/dock.js";
 import { mountHabits } from "./habits.js";
 
 const T = window.__TAURI__;
@@ -12,11 +13,6 @@ const intentOffPlan = document.getElementById('intentOffPlan');
 const intentInput = document.getElementById('intentInput');
 const intentGo = document.getElementById('intentGo');
 const intentCard = document.getElementById('intentCard');
-const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmtClock = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-let intentionView = null, lastHistorySpans = [], lastHistoryGrants = [], offPlan = null;
-let intentCardMode = null, intentDraft = null, intentEditing = false;
-let intentParsing = false, intentParseSeq = 0, intentCardBusy = false, intentCardError = '', lastIntentCardKey = '';
 let checkIn = null, keyboardPauseForm = false;
 const checkInButtons = Object.entries(Stats.checkIns).map(([value, label]) => {
   const button = document.createElement('button');
@@ -85,6 +81,7 @@ function hoverWidth() {
   const kids = [...pick.children].filter((k) => getComputedStyle(k).display !== 'none');
   return kids.reduce((n, k) => n + (k === chipsEl && chipsW ? chipsW : k.offsetWidth), 0) + 6 * (kids.length - 1) + 6 + 4 + 2;
 }
+let intentions = null;
 function setState(s) {
   if (view.scoped_until != null && !paused()) s = "hover";
   w.dataset.state = s;
@@ -95,7 +92,7 @@ function setState(s) {
       : SIZE[s][0];
   w.style.width = s === 'hover' || s === 'form' || s === 'intent' ? bw + 'px' : '';
   syncRatingPrompt();
-  syncIntentionCard();
+  intentions?.syncCard();
   reportHit();
 }
 // Tell Rust which part of the window is "solid"; clicks anywhere else pass through.
@@ -227,7 +224,7 @@ function render() {
   }
   syncPillTone();
   syncRatingPrompt();
-  syncIntentionUI(false);
+  intentions?.syncUI(false);
 }
 function apply(v) {
   if (ratingKey(v.rating_prompt) !== ratingKey(view.rating_prompt)) {
@@ -274,10 +271,9 @@ async function refreshToday() {
     activeDeepFocus = Boolean(ActivityClassifier.detectFocusSessions(focusSources, from, from + Stats.DAY, { userRules: widgetRules }).activeRun);
   } catch { activeDeepFocus = false; }
   today = { offMs, pauses };
-  lastHistorySpans = h.spans || [];
-  lastHistoryGrants = h.grants || [];
+  intentions.setHistory(h.spans || [], h.grants || []);
   aOn.textContent = Stats.fmt(s.active);
-  syncIntentionUI(false);
+  intentions?.syncUI(false);
   updateAllowance();
 }
 function publishPauseLimit() {
@@ -299,8 +295,8 @@ function limitState() {
 
 function syncPillTone() {
   const { frac, reached } = limitState();
-  const noIntentionNag = Boolean(!intentionView?.active && intentionView?.nag_active);
-  const isOffPlan = Boolean(intentionView?.active && offPlan);
+  const noIntentionNag = Boolean(!intentions?.view?.active && intentions?.view?.nag_active);
+  const isOffPlan = Boolean(intentions?.view?.active && intentions?.offPlan);
   const tone = reached || habitOverdue > 0 || liveFocusState === 'unfocused' || view.dns_configured === false
     ? 'bad'
     : frac >= 0.75 || paused() || view.scoped_until != null || habitDue > 0 || liveFocusState === 'drifting' || noIntentionNag || isOffPlan
@@ -317,333 +313,7 @@ function syncPillTone() {
   }
 }
 
-function activeIntentionTimeUp() {
-  const active = intentionView?.active;
-  return Boolean(active && (intentionView?.time_up || Date.now() >= active.planned_until));
-}
 
-function fmtLeft(ms) {
-  const mins = Math.max(1, Math.ceil(ms / Stats.MIN));
-  return Stats.fmt(mins * Stats.MIN);
-}
-
-function syncIntentionCard() {
-  const active = intentionView?.active || null;
-  const timeUp = activeIntentionTimeUp();
-  const blocked = panelOpen || !judgeSheet.hidden || w.dataset.state === 'form' || w.dataset.state === 'intent' || paused() || view.scoped_until != null;
-  let kind = null;
-  if (!blocked) {
-    if (intentCardMode === 'readback' && intentDraft) kind = 'readback';
-    else if (intentCardMode === 'manage' && active) kind = 'manage';
-    else if (timeUp && active) kind = 'timeup';
-  }
-  if (!kind) {
-    if (!intentCard.hidden) {
-      intentCard.hidden = true;
-      intentCard.innerHTML = '';
-      lastIntentCardKey = '';
-    }
-    return;
-  }
-  let html = '', key = '';
-  if (kind === 'readback') {
-    const d = intentDraft;
-    const until = fmtClock(d.until || (Date.now() + (d.planned_minutes || 60) * Stats.MIN));
-    key = `rb:${d.label}:${until}:${d.done_when || ''}:${intentEditing}:${intentCardBusy}:${intentCardError}`;
-    html = `<div class="intent-lbl">${intentEditing ? 'Update intention' : 'Got it'}</div>
-      <div class="intent-chips">
-        <span class="intent-chip">What <b>${escHtml(d.label)}</b></span>
-        <span class="intent-chip">Until <b>${escHtml(until)}</b></span>
-        ${d.done_when ? `<span class="intent-chip">Done when <b>${escHtml(d.done_when)}</b></span>` : ''}
-      </div>
-      ${intentCardError ? `<div class="intent-err" role="status">${escHtml(intentCardError)}</div>` : ''}
-      <div class="intent-acts">
-        <button type="button" class="btn ghost" data-intent-edit ${intentCardBusy ? 'disabled' : ''}>Edit</button>
-        <button type="button" class="btn primary" data-intent-start ${intentCardBusy ? 'disabled' : ''}>${intentEditing ? 'Save' : 'Start'}</button>
-      </div>`;
-    intentCard.classList.remove('compact');
-  } else if (kind === 'manage') {
-    const leftText = timeUp ? "time's up" : `${fmtLeft(active.planned_until - Date.now())} left`;
-    key = `mg:${active.id}:${active.label}:${leftText}:${active.done_when || ''}:${intentCardBusy}:${intentCardError}`;
-    html = `<div class="intent-lbl">${escHtml(active.label)} · ${escHtml(leftText)}</div>
-      ${active.done_when ? `<p class="intent-sub">Done when: ${escHtml(active.done_when)}</p>` : ''}
-      ${intentCardError ? `<div class="intent-err" role="status">${escHtml(intentCardError)}</div>` : ''}
-      <div class="intent-acts left">
-        <button type="button" class="btn primary" data-intent-outcome="done" ${intentCardBusy ? 'disabled' : ''}>Done</button>
-        <button type="button" class="btn" data-intent-edit ${intentCardBusy ? 'disabled' : ''}>Edit</button>
-        <button type="button" class="btn ghost" data-intent-outcome="cleared" ${intentCardBusy ? 'disabled' : ''}>Clear</button>
-      </div>`;
-    intentCard.classList.add('compact');
-  } else {
-    const totalPlan = ((active.planned_minutes || 60) + (active.extensions || 0) * 10) * Stats.MIN;
-    const question = Stats.doneWhenQuestion(active.done_when);
-    key = `up:${active.id}:${active.extensions || 0}:${active.label}:${question}:${intentCardBusy}:${intentCardError}`;
-    html = `<div class="intent-lbl">${escHtml(active.label)} · ${escHtml(Stats.fmt(totalPlan))}</div>
-      <p class="intent-q">${escHtml(question)}</p>
-      ${intentCardError ? `<div class="intent-err" role="status">${escHtml(intentCardError)}</div>` : ''}
-      <div class="intent-acts left">
-        <button type="button" class="btn primary" data-intent-outcome="done" ${intentCardBusy ? 'disabled' : ''}>Done</button>
-        <button type="button" class="btn" data-intent-outcome="partly" ${intentCardBusy ? 'disabled' : ''}>Partly</button>
-        <button type="button" class="btn" data-intent-extend ${intentCardBusy ? 'disabled' : ''}>10 more min</button>
-        <button type="button" class="btn ghost" data-intent-outcome="no" ${intentCardBusy ? 'disabled' : ''}>No</button>
-      </div>`;
-    intentCard.classList.add('compact');
-  }
-  const wasHidden = intentCard.hidden;
-  if (wasHidden || key !== lastIntentCardKey) {
-    intentCard.innerHTML = html;
-    intentCard.hidden = false;
-    lastIntentCardKey = key;
-  }
-}
-
-function syncIntentionUI(resize = true) {
-  const active = intentionView?.active || null;
-  const timeUp = activeIntentionTimeUp();
-  const nagActive = Boolean(!active && intentionView?.nag_active);
-  offPlan = active
-    ? Stats.detectOffPlan(active, lastHistorySpans, Date.now(), {
-        classifier: window.ActivityClassifier,
-        userRules: widgetRules,
-        liveFocusState,
-        grants: lastHistoryGrants,
-      })
-    : null;
-
-  let widthChanged = false;
-  if (active) {
-    if (!intentBtn.hidden) { intentBtn.hidden = true; widthChanged = true; }
-    if (intentPill.hidden) { intentPill.hidden = false; widthChanged = true; }
-    const labelEl = intentPill.querySelector('.intent-t');
-    const leftEl = intentPill.querySelector('.intent-left');
-    const nextLeft = timeUp ? "time's up" : fmtLeft(active.planned_until - Date.now());
-    if (labelEl.textContent !== active.label) { labelEl.textContent = active.label; widthChanged = true; }
-    if (leftEl.textContent !== nextLeft) { leftEl.textContent = nextLeft; widthChanged = true; }
-    const nextOff = offPlan?.text || '';
-    if (intentOffPlan.hidden !== !nextOff || intentOffPlan.textContent !== nextOff) {
-      intentOffPlan.textContent = nextOff;
-      intentOffPlan.hidden = !nextOff;
-      widthChanged = true;
-    }
-  } else {
-    if (!intentPill.hidden) { intentPill.hidden = true; widthChanged = true; }
-    if (!intentOffPlan.hidden) { intentOffPlan.hidden = true; intentOffPlan.textContent = ''; widthChanged = true; }
-    if (intentBtn.hidden) { intentBtn.hidden = false; widthChanged = true; }
-    if (nagActive) {
-      const mins = Math.max(15, Math.floor((intentionView.no_intention_active_ms || 0) / Stats.MIN));
-      const html = `<span class="intent-dot" aria-hidden="true"></span>No intention · ${mins}m`;
-      if (!intentBtn.classList.contains('warn') || intentBtn.innerHTML !== html) {
-        intentBtn.classList.add('warn');
-        intentBtn.innerHTML = html;
-        widthChanged = true;
-      }
-    } else if (intentBtn.classList.contains('warn') || intentBtn.textContent !== 'What are you on?') {
-      intentBtn.classList.remove('warn');
-      intentBtn.textContent = 'What are you on?';
-      widthChanged = true;
-    }
-  }
-  syncIntentionCard();
-  syncPillTone();
-  if ((resize || widthChanged) && w.dataset.state === 'hover') setState('hover');
-  else reportHit();
-}
-
-function applyIntention(next) {
-  if (!next || typeof next !== 'object') return;
-  intentionView = next;
-  if (!next.active && intentCardMode === 'manage') intentCardMode = null;
-  syncIntentionUI(true);
-}
-
-function openIntentionInput(prefill = '', editing = false) {
-  habits.setQuick(false);
-  habits.setEditor(undefined);
-  DevicePanel.closePauseJudge(false);
-  closePanel();
-  intentEditing = editing;
-  intentCardMode = null;
-  intentDraft = null;
-  intentCardError = '';
-  intentParsing = false;
-  intentInput.value = prefill;
-  intentInput.disabled = false;
-  intentGo.disabled = false;
-  setState('intent');
-  invoke('grab_focus').finally(() => setTimeout(() => {
-    if (w.dataset.state === 'intent') {
-      intentInput.focus();
-      if (prefill) intentInput.select();
-    }
-  }, 60));
-}
-
-function cancelIntentionInput(restoreFocus = true) {
-  ++intentParseSeq;
-  intentParsing = false;
-  intentEditing = false;
-  intentInput.value = '';
-  intentInput.disabled = false;
-  intentGo.disabled = false;
-  if (w.dataset.state === 'intent') setState(inside ? 'hover' : 'idle');
-  if (restoreFocus) invoke('return_focus');
-}
-
-function fallbackLocalParse(raw) {
-  const cleaned = String(raw || '').trim();
-  const now = Date.now();
-  return { label: cleaned.slice(0, 80), planned_minutes: 60, until: now + 60 * Stats.MIN, done_when: null, raw: cleaned, parse_source: 'local' };
-}
-
-async function submitIntentionInput() {
-  if (intentParsing) return;
-  const text = intentInput.value.trim();
-  if (!text) {
-    intentInput.classList.remove('err'); void intentInput.offsetWidth; intentInput.classList.add('err');
-    return;
-  }
-  const seq = ++intentParseSeq;
-  intentParsing = true;
-  intentGo.disabled = true;
-  try {
-    let parsed = await invoke('intention_parse', { text });
-    if (!parsed || typeof parsed !== 'object' || !parsed.label) {
-      parsed = (await invoke('intention_parse_local', { text }).catch(() => null)) || fallbackLocalParse(text);
-    }
-    if (seq !== intentParseSeq) return;
-    intentDraft = parsed;
-    intentCardMode = 'readback';
-    intentCardError = '';
-    intentParsing = false;
-    intentGo.disabled = false;
-    setState('hover');
-    requestAnimationFrame(() => intentCard.querySelector('[data-intent-start]')?.focus());
-  } catch {
-    if (seq !== intentParseSeq) return;
-    const parsed = (await invoke('intention_parse_local', { text }).catch(() => null)) || fallbackLocalParse(text);
-    intentDraft = parsed;
-    intentCardMode = 'readback';
-    intentCardError = '';
-    intentParsing = false;
-    intentGo.disabled = false;
-    setState('hover');
-    requestAnimationFrame(() => intentCard.querySelector('[data-intent-start]')?.focus());
-  }
-}
-
-intentBtn.onclick = () => openIntentionInput('', false);
-intentPill.onclick = () => {
-  if (!intentionView?.active) return;
-  if (activeIntentionTimeUp()) {
-    intentCardMode = null;
-    syncIntentionUI(false);
-    return;
-  }
-  intentCardMode = intentCardMode === 'manage' ? null : 'manage';
-  intentCardError = '';
-  syncIntentionUI(false);
-  if (intentCardMode === 'manage') invoke('grab_focus');
-};
-intentGo.onclick = submitIntentionInput;
-intentInput.onkeydown = (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); submitIntentionInput(); }
-  else if (e.key === 'Escape') { e.preventDefault(); cancelIntentionInput(true); }
-};
-intentCard.addEventListener('click', async (e) => {
-  const btn = e.target.closest('button');
-  if (!btn || intentCardBusy) return;
-  if ('intentEdit' in btn.dataset) {
-    const raw = intentDraft?.raw || intentionView?.active?.raw || intentionView?.active?.label || '';
-    const editing = intentEditing || (intentCardMode === 'manage' && Boolean(intentionView?.active));
-    openIntentionInput(raw, editing);
-    return;
-  }
-  if ('intentStart' in btn.dataset && intentDraft) {
-    intentCardBusy = true;
-    intentCardError = '';
-    syncIntentionCard();
-    try {
-      const cmd = intentEditing ? 'intention_edit' : 'intention_start';
-      const next = await invoke(cmd, {
-        label: intentDraft.label,
-        plannedMinutes: intentDraft.planned_minutes,
-        doneWhen: intentDraft.done_when ?? null,
-        raw: intentDraft.raw,
-        parseSource: intentDraft.parse_source ?? 'local',
-      });
-      intentCardMode = null;
-      intentDraft = null;
-      intentEditing = false;
-      intentCardBusy = false;
-      if (next) applyIntention(next);
-      else syncIntentionUI(true);
-      refreshToday().catch(() => {});
-      if (panelOpen) refreshPanel();
-      invoke('return_focus');
-    } catch (err) {
-      intentCardBusy = false;
-      intentCardError = String(err);
-      syncIntentionCard();
-      reportHit();
-    }
-    return;
-  }
-  if ('intentExtend' in btn.dataset) {
-    intentCardBusy = true;
-    intentCardError = '';
-    syncIntentionCard();
-    try {
-      const next = await invoke('intention_extend', { minutes: 10 });
-      intentCardMode = null;
-      intentCardBusy = false;
-      if (next) applyIntention(next);
-      else syncIntentionUI(true);
-      if (panelOpen) refreshPanel();
-      invoke('return_focus');
-    } catch (err) {
-      intentCardBusy = false;
-      intentCardError = String(err);
-      syncIntentionCard();
-      reportHit();
-    }
-    return;
-  }
-  if (btn.dataset.intentOutcome) {
-    const outcome = btn.dataset.intentOutcome;
-    intentCardBusy = true;
-    intentCardError = '';
-    syncIntentionCard();
-    try {
-      const next = await invoke('intention_end', { outcome });
-      intentCardMode = null;
-      intentDraft = null;
-      intentEditing = false;
-      intentCardBusy = false;
-      if (next) applyIntention(next);
-      else syncIntentionUI(true);
-      refreshToday().catch(() => {});
-      if (panelOpen) refreshPanel();
-      invoke('return_focus');
-    } catch (err) {
-      intentCardBusy = false;
-      intentCardError = String(err);
-      syncIntentionCard();
-      reportHit();
-    }
-  }
-});
-intentCard.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && (intentCardMode === 'readback' || intentCardMode === 'manage')) {
-    e.preventDefault();
-    intentCardMode = null;
-    intentDraft = null;
-    intentEditing = false;
-    syncIntentionUI(false);
-    setState(inside ? 'hover' : 'idle');
-    invoke('return_focus');
-  }
-});
-window.addEventListener('focus-open-intention', () => openIntentionInput('', false));
 
 function updateAllowance() {
   const { offMs } = today;
@@ -720,13 +390,13 @@ judgeBtn.onclick = () => DevicePanel.openPauseJudge();
 window.addEventListener("dock-pause-open", () => {
   habits.setQuick(false);
   habits.setEditor(undefined);
-  if (w.dataset.state === 'intent') cancelIntentionInput(false);
-  intentCardMode = null;
-  intentDraft = null;
+  if (w.dataset.state === 'intent') intentions.cancelInput(false);
+  intentions.cardMode = null;
+  intentions.clearDraft();
   closePanel();
   setState("hover");
   syncRatingPrompt();
-  syncIntentionCard();
+  intentions?.syncCard();
 });
 window.addEventListener("dock-pause-closed", ({ detail }) => {
   syncRatingPrompt();
@@ -759,13 +429,13 @@ window.addEventListener('blur', () => {
   habits.setEditor(undefined);
   closePanel();
   DevicePanel.closePauseJudge();
-  if (intentCardMode === 'manage') {
-    intentCardMode = null;
-    syncIntentionCard();
+  if (intentions.cardMode === 'manage') {
+    intentions.cardMode = null;
+    intentions?.syncCard();
     reportHit();
   }
-  if (w.dataset.state === 'intent' && !intentParsing && !intentInput.value.trim()) {
-    cancelIntentionInput(false);
+  if (w.dataset.state === 'intent' && !intentions.parsing && !intentInput.value.trim()) {
+    intentions.cancelInput(false);
   }
   if (keyboardPauseForm && w.dataset.state === 'form' && !busy && !inp.value.trim() && !checkIn) {
     reset();
@@ -781,22 +451,21 @@ document.addEventListener('pointerdown', (event) => {
   if (peekOpen() && !w.contains(event.target) && !judgeSheet.contains(event.target)) {
     DevicePanel.closePauseJudge();
   }
-  if (intentCardMode === 'manage' && !w.contains(event.target) && !intentCard.contains(event.target)) {
-    intentCardMode = null;
-    syncIntentionUI(false);
+  if (intentions.cardMode === 'manage' && !w.contains(event.target) && !intentCard.contains(event.target)) {
+    intentions.cardMode = null;
+    intentions?.syncUI(false);
   }
 });
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || event.defaultPrevented) return;
   if (w.dataset.state === 'intent') {
     event.preventDefault();
-    cancelIntentionInput(true);
-  } else if (intentCardMode === 'readback' || intentCardMode === 'manage') {
+    intentions.cancelInput(true);
+  } else if (intentions.cardMode === 'readback' || intentions.cardMode === 'manage') {
     event.preventDefault();
-    intentCardMode = null;
-    intentDraft = null;
-    intentEditing = false;
-    syncIntentionUI(false);
+    intentions.cardMode = null;
+    intentions.clearDraft();
+    intentions?.syncUI(false);
     setState(inside ? 'hover' : 'idle');
     invoke('return_focus');
   } else if (peekOpen()) {
@@ -834,7 +503,7 @@ T.event.listen('peek-open-pause', () => {
 });
 T.event.listen('cursor-in', () => {
   inside = true; clearTimeout(leaveT); refreshToday();
-  invoke('intention_state').then(applyIntention).catch(() => {});
+  invoke('intention_state').then((next) => intentions.apply(next)).catch(() => {});
   if (w.dataset.state === 'idle') setState(paused() ? 'paused' : 'hover');
 });
 T.event.listen('cursor-out', () => {
@@ -933,6 +602,12 @@ const habits = mountHabits(invoke, (credit, due, overdue, walletActive) => {
   reportHit();
   if (panelOpen && changed) refreshPanel();
 });
+intentions = createIntentionsDock({
+  invoke, w, intentBtn, intentPill, intentOffPlan, intentInput, intentGo, intentCard, judgeSheet,
+  setState, reportHit, syncPillTone, refreshToday, refreshPanel, closePanel, habits, DevicePanel,
+  getPanelOpen: () => panelOpen, getView: () => view, isPaused: paused, getInside: () => inside,
+  getLiveFocusState: () => liveFocusState, getWidgetRules: () => widgetRules,
+});
 document.getElementById('habitTrigger').addEventListener('click', () => {
   DevicePanel.closePauseJudge();
 }, { capture: true });
@@ -944,11 +619,11 @@ T.event.listen('wallet-updated', () => window.dispatchEvent(new Event('focus-wal
 T.event.listen('habits-updated', () => habits.load());
 T.event.listen('focus-state-transition', e => {
   liveFocusState = e.payload?.to ?? null;
-  syncIntentionUI(true);
+  intentions?.syncUI(true);
   syncPillTone();
   if (w.dataset.state === 'hover') setState('hover');
 });
-T.event.listen('intention-state', e => applyIntention(e.payload));
+T.event.listen('intention-state', e => intentions.apply(e.payload));
 T.event.listen('habits-nudge', e => {
   nudgeText = e.payload;
   nudgeButton.textContent = nudgeText || '';
@@ -998,8 +673,8 @@ invoke('pause_judge_settings').then(detail => {
 }).catch(e => log(String(e)));
 invoke('pause_judge_limits_sync', { limits: FocusLimits.get() }).catch(e => log(String(e)));
 invoke('get_state').then(apply);
-invoke('intention_state').then(applyIntention).catch(() => {});
-setInterval(() => { if (intentionView?.active) refreshToday().catch(() => {}); }, 30_000);
+invoke('intention_state').then((next) => intentions.apply(next)).catch(() => {});
+setInterval(() => { if (intentions?.view?.active) refreshToday().catch(() => {}); }, 30_000);
 invoke('updater_status').then((u) => { if (u) { syncUpdatePill(u); DevicePanel.receiveUpdate(u); } }).catch(() => {});
 invoke('laptop_incoming_approval').then((p) => { if (p) DevicePanel.receiveIncomingPairing(p); }).catch(() => {});
 refreshToday();

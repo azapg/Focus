@@ -8,5 +8,9 @@ export default defineConfig({
   base: "./",
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": `${root}ui` } },
-  build: { outDir: `${root}ui-dist`, emptyOutDir: true },
+  build: {
+    outDir: `${root}ui-dist`,
+    emptyOutDir: true,
+    rolldownOptions: { output: { codeSplitting: false } },
+  },
 });

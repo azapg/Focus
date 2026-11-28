@@ -8,7 +8,7 @@ import android.widget.RemoteViews;
 import java.util.*;
 import org.nightingalelab.focus.telemetry.LocalTelemetry.Metric;
 
-/** Renders and refreshes all four home-screen widgets: A (score), B (sentence), C (week), E (ring). */
+/** Renders and refreshes the home-screen widgets: A (score), B (sentence), C (week), E (ring), F (now). */
 public final class WidgetUpdater {
   public static void updateAll(Context c) {
     Metric.WIDGET_REFRESH.count(1);
@@ -30,7 +30,65 @@ public final class WidgetUpdater {
       updateB(c, mgr, today);
       updateC(c, mgr, today, week);
       updateE(c, mgr, today);
+      updateIntention(c);
     } catch (RuntimeException ignored) {}
+  }
+
+  /** Widget F: the current intention, with Done, or Set when nothing is running. */
+  static void updateIntention(Context c) {
+    try {
+      AppWidgetManager mgr = AppWidgetManager.getInstance(c);
+      if (mgr == null) return;
+      int[] ids = mgr.getAppWidgetIds(new ComponentName(c, WidgetFProvider.class));
+      if (ids == null || ids.length == 0) return;
+      Intention current = IntentionStore.get(c).current();
+      long now = System.currentTimeMillis();
+      RemoteViews rv = new RemoteViews(c.getPackageName(), R.layout.widget_f);
+      Intent setIntent = new Intent(c, MainActivity.class).putExtra("page", "today").putExtra("open_intention", true)
+          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+      PendingIntent set = PendingIntent.getActivity(c, 320, setIntent,
+          PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+      if (current == null) {
+        rv.setTextViewText(R.id.wf_title, "What are you on?");
+        rv.setTextColor(R.id.wf_title, Theme.MUTED);
+        rv.setTextViewText(R.id.wf_status, "");
+        rv.setImageViewBitmap(R.id.wf_bar, renderProgressBitmap(0f, false));
+        rv.setTextViewText(R.id.wf_btn, "Set");
+        rv.setOnClickPendingIntent(R.id.wf_btn, set);
+        rv.setOnClickPendingIntent(R.id.widget_root, set);
+      } else {
+        Intention.Drift drift = IntentionMonitor.drift;
+        boolean orange = drift.showing();
+        rv.setTextViewText(R.id.wf_title, current.label);
+        rv.setTextColor(R.id.wf_title, Theme.FG);
+        rv.setTextViewText(R.id.wf_status, orange ? drift.text()
+            : current.timeUp(now) ? "Time's up" : Intention.left(current.remainingMs(now)));
+        rv.setTextColor(R.id.wf_status, orange ? Theme.WARN : Theme.MUTED);
+        rv.setImageViewBitmap(R.id.wf_bar, renderProgressBitmap(current.progress(now), orange));
+        rv.setTextViewText(R.id.wf_btn, "Done");
+        Intent done = new Intent(c, IntentionMonitor.Actions.class).setAction(IntentionMonitor.ACTION)
+            .putExtra(IntentionMonitor.EXTRA_DO, "done");
+        rv.setOnClickPendingIntent(R.id.wf_btn, PendingIntent.getBroadcast(c, 321, done,
+            PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
+        rv.setOnClickPendingIntent(R.id.widget_root, openAppIntent(c, 322, false));
+      }
+      mgr.updateAppWidget(ids, rv);
+      Metric.WIDGET_UPDATE.count(ids.length);
+    } catch (RuntimeException ignored) {}
+  }
+
+  static Bitmap renderProgressBitmap(float progress, boolean orange) {
+    int w = 480, h = 12;
+    Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+    Canvas canvas = new Canvas(bmp);
+    Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    paint.setColor(0xFF1C1C20);
+    canvas.drawRoundRect(new RectF(0, 0, w, h), h / 2f, h / 2f, paint);
+    if (progress > 0f) {
+      paint.setColor(orange ? Theme.WARN : 0xFFD4D4D8);
+      canvas.drawRoundRect(new RectF(0, 0, Math.max(h, w * Math.min(1f, progress)), h), h / 2f, h / 2f, paint);
+    }
+    return bmp;
   }
 
   private static String activeStatusShort(Context c, long now) {
