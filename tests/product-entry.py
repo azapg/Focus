@@ -1,4 +1,4 @@
-"""Smoke the checked-in offline entry using Focus's production desktop UI."""
+"""Smoke the checked-in offline shell and its production desktop frontend."""
 
 import asyncio
 
@@ -12,29 +12,36 @@ async def main(output=None):
         page.on("pageerror", lambda error: errors.append(str(error)))
 
         await page.goto(PRODUCT_ENTRY.as_uri())
-        await page.locator("#panel.open").wait_for()
-        zero_balance = page.get_by_role("button", name="Store, 0 coins")
+        entry_url = page.url
+        app = page.frame_locator("#focus-desktop-frame")
+        await app.locator("#panel.open").wait_for()
+        zero_balance = app.get_by_role("button", name="Store, 0 coins")
         await zero_balance.wait_for()
         await zero_balance.click()
-        store = page.get_by_role("dialog", name="Store", exact=True)
+        store = app.get_by_role("dialog", name="Store", exact=True)
         await store.wait_for()
         assert await store.get_by_role("button", name="15 coins").is_disabled()
-        await page.keyboard.press("Escape")
-
-        await page.goto(PRODUCT_ENTRY.as_uri() + "?wallet=funded")
-        await page.locator("#panel.open").wait_for()
-        funded_balance = page.get_by_role("button", name="Store, 65 coins")
+        await store.get_by_role("button", name="Close Store").click()
+        await store.wait_for(state="hidden")
+        await page.get_by_role("button", name="Funded sample · 65 coins").click()
+        assert page.url == entry_url, "Sample switching should stay inside the preview."
+        funded_balance = app.get_by_role("button", name="Store, 65 coins")
         await funded_balance.wait_for()
         await funded_balance.click()
-        store = page.get_by_role("dialog", name="Store", exact=True)
+        store = app.get_by_role("dialog", name="Store", exact=True)
         await store.get_by_role("button", name="15 coins").click()
-        confirm = page.get_by_role("dialog", name="Are you sure?")
+        confirm = app.get_by_role("dialog", name="Are you sure?")
         await confirm.get_by_role("button", name="Confirm · 15 coins").click()
-        await page.get_by_role("dialog", name="5 min free started").wait_for()
-        await page.get_by_role("button", name="Store, 50 coins").wait_for()
+        receipt = app.get_by_role("dialog", name="5 min free started")
+        await receipt.wait_for()
+        await receipt.get_by_role("button", name="Done").click()
+        await app.get_by_role("button", name="Store, 50 coins").wait_for()
+        await page.get_by_role("button", name="Clean wallet · 0 coins").click()
+        assert page.url == entry_url, "Returning to the clean sample should stay inside the preview."
+        await app.get_by_role("button", name="Store, 0 coins").wait_for()
 
         assert not errors, errors
-        print("PASS: generated offline entry opens Today, disables a purchase at 0 coins, and completes the production Store purchase with the fictional 65 coin sample.")
+        print("PASS: checked-in entry opens Today, switches clean/funded samples in place, disables a zero-coin purchase, and completes the fictional funded Store purchase.")
 
 
 if __name__ == "__main__":

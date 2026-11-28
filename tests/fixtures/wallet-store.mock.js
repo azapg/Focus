@@ -4,6 +4,12 @@
     active: true, day: 20496, balance: window.__FOCUS_PRODUCT_SAMPLE__ === "zero" ? 0 : 65, time_off_bought: 0,
     time_off_limit: 15, time_off_price_per_minute: 3, needs_upgrade: [],
   };
+  window.__FOCUS_SET_SAMPLE__ = (sample) => {
+    wallet.balance = sample === "funded" ? 65 : 0;
+    wallet.time_off_bought = 0;
+    window.__handlers["wallet-updated"]?.({});
+    window.__handlers["habits-updated"]?.({});
+  };
   const receipts = new Set();
   window.__streak = null;
   window.__TAURI__.core.invoke = async (command, args) => {

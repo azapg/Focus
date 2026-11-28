@@ -99,9 +99,9 @@ const builtFiles = [builtIndex, ...(await filesIn(build)).filter((file) => file 
 const sourceHash = await fingerprint(uiSourcePaths, root);
 const buildHash = await fingerprint(builtFiles, build);
 
-let html = await readFile(builtIndex, "utf8");
-const scripts = [...html.matchAll(/<script\b[^>]*type="module"[^>]*src="([^"]+)"[^>]*>\s*<\/script>/g)];
-const styles = [...html.matchAll(/<link\b[^>]*rel="stylesheet"[^>]*href="([^"]+)"[^>]*>/g)];
+let appHtml = await readFile(builtIndex, "utf8");
+const scripts = [...appHtml.matchAll(/<script\b[^>]*type="module"[^>]*src="([^"]+)"[^>]*>\s*<\/script>/g)];
+const styles = [...appHtml.matchAll(/<link\b[^>]*rel="stylesheet"[^>]*href="([^"]+)"[^>]*>/g)];
 if (scripts.length !== 1 || styles.length !== 1) {
   throw new Error(`Expected one built JS entry and one stylesheet in ${builtIndex}; found ${scripts.length} JS and ${styles.length} CSS files.`);
 }
@@ -117,29 +117,36 @@ const cssPath = resolve(build, styles[0][1]);
 const css = await inlineCssAssets(await readFile(cssPath, "utf8"), cssPath);
 
 const icon = resolve(build, "favicon.svg");
-html = html.replace(/<link\b[^>]*rel="icon"[^>]*>/, `<link rel="icon" type="image/svg+xml" href="${await dataUri(icon)}">`);
-html = html.replace(styles[0][0], `<style>${css}</style>`);
-const sampleMode = `window.__FOCUS_PRODUCT_SAMPLE__ = new URLSearchParams(location.search).get("wallet") === "funded" ? "funded" : "zero";`;
+appHtml = appHtml.replace(/<link\b[^>]*rel="icon"[^>]*>/, `<link rel="icon" type="image/svg+xml" href="${await dataUri(icon)}">`);
+appHtml = appHtml.replace(styles[0][0], `<style>${css}</style>`);
+const sampleMode = `window.__FOCUS_PRODUCT_SAMPLE__ = window.parent !== window ? window.parent.__FOCUS_PRODUCT_SAMPLE__ : (new URLSearchParams(location.search).get("wallet") === "funded" ? "funded" : "zero");`;
 const deviceFixture = await readFile(resolve(root, "tests/fixtures/device-panel.mock.js"), "utf8");
 const walletFixture = await readFile(resolve(root, "tests/fixtures/wallet-store.mock.js"), "utf8");
 // Keep the built bundle out of HTML's special raw-script parsing context. The
 // app bundle contains literal script tags in a template, so inline JS would be
 // truncated by the browser even if those tags are inside a JS string.
 const builtModule = Buffer.from(script).toString("base64");
-html = html.replace(scripts[0][0], `<script>${sampleMode}\n${deviceFixture}\n${walletFixture}</script><script type="module">import("data:text/javascript;base64,${builtModule}").catch((error) => { document.body.dataset.productError = String(error); console.error(error); });</script>`);
-html = html.replace(/<link\b[^>]*rel="modulepreload"[^>]*>/g, "");
+appHtml = appHtml.replace(scripts[0][0], `<script>${sampleMode}\n${deviceFixture}\n${walletFixture}</script><script type="module">import("data:text/javascript;base64,${builtModule}").catch((error) => { document.body.dataset.productError = String(error); console.error(error); });</script>`);
+appHtml = appHtml.replace(/<link\b[^>]*rel="modulepreload"[^>]*>/g, "");
 
 const native = await nativeWalks();
 const nativeMarkup = native.map((walk) => {
   const name = walk.platform === "phone" ? "Phone" : "TV";
   const status = walk.status === "captured" ? `captured from ${escapeHtml(walk.sourceCommit)}` : walk.status;
   const shots = walk.steps.map((step) => `<figure><img src="${step.image}" alt="${escapeHtml(step.title)}"><figcaption>${escapeHtml(step.title)}</figcaption></figure>`).join("");
-  return `<section><b>${name} evidence · ${status}</b>${shots}</section>`;
+  return `<details class="native-evidence"><summary>${name} evidence · ${status}</summary>${shots}</details>`;
 }).join("");
 
-const evidence = `<aside id="focus-product-entry" style="position:fixed;z-index:9999;right:10px;top:10px;color:#fafafa;background:#09090b;border:1px solid #ffffff24;border-radius:10px;padding:7px 10px;font:11px/1.45 'Segoe UI',system-ui,sans-serif;max-width:min(390px,calc(100vw - 20px))"><details><summary style="cursor:pointer">Preview data · clean wallet by default</summary><p>Offline fixture · Fictional activity · no real purchase</p><p><a style="color:inherit" href="./index.html">Clean wallet · 0 coins</a> · <a style="color:inherit" href="./index.html?wallet=funded">Funded sample · 65 coins</a></p><p>Built Vite assets · SHA-256 <code>${buildHash}</code></p><p>UI source snapshot · SHA-256 <code>${sourceHash}</code></p><p>Shipped desktop package: not verified by this preview.</p><p>Today is the default Stats range. Store is shown on Today while the wallet is active.</p><nav><a style="color:inherit" href="../../ui/widget.js#L45">Today rule</a> · <a style="color:inherit" href="../../ui/src/devices.tsx#L546">Store visibility</a> · <a style="color:inherit" href="../../ui/src/wallet-store.tsx#L25">Store source</a> · <a style="color:inherit" href="../../tests/product-entry.py">Entry smoke test</a> · <a style="color:inherit" href="../../tests/wallet-store.py">Store test</a></nav><p><a style="color:inherit" href="../../docs/product/native/phone/manifest.json">Phone manifest</a> · <a style="color:inherit" href="../../docs/product/native/tv/manifest.json">TV manifest</a> · <a style="color:inherit" href="../../scripts/product-evidence.mjs">Generator</a></p>${nativeMarkup}</details></aside>`;
-html = html.replace("<body>", `<body>\n${evidence}`);
-
+const shell = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Focus · Offline product preview</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:20px;color:#18181b;background:#f4f4f5;font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}main{max-width:960px;margin:0 auto}.heading{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:0 0 12px}.heading h1{margin:0;font-size:18px;font-weight:600}.heading p{margin:2px 0 0;color:#52525b;font-size:12px}.samples{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px}.samples button{min-height:34px;padding:6px 12px;border:1px solid #a1a1aa;border-radius:7px;background:#fff;color:#18181b;font:inherit;cursor:pointer}.samples button[aria-pressed="true"]{background:#18181b;color:#fff;border-color:#18181b}.samples button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #52525b;outline-offset:2px}.samples span{margin-left:auto;color:#52525b;font-size:12px}.app-frame{display:block;width:100%;height:660px;border:1px solid #a1a1aa;border-radius:14px;background:#050506}.evidence{display:grid;gap:8px;margin:12px 0 28px;padding:12px;border:1px solid #d4d4d8;border-radius:10px;background:#fff}.evidence summary,.native-evidence summary{cursor:pointer;font-weight:600}.evidence p{margin:8px 0;color:#52525b;font-size:12px}.evidence a{color:#18181b;text-underline-offset:2px}.links{display:flex;gap:8px 14px;flex-wrap:wrap;margin:8px 0}.fingerprint{overflow-wrap:anywhere}.native-evidence{padding-top:8px;border-top:1px solid #e4e4e7}.native-evidence figure{margin:10px 0;padding:10px;background:#f4f4f5;border-radius:8px;max-height:640px;overflow:auto}.native-evidence img{display:block;max-width:100%;height:auto;max-height:600px;object-fit:contain;object-position:top left}.native-evidence figcaption{margin-top:6px;color:#52525b;font-size:12px}
+</style></head><body><main><header class="heading"><div><h1>Focus · Desktop preview</h1><p>Production desktop frontend · fictional activity · offline</p></div></header>
+<div class="samples" role="group" aria-label="Wallet sample"><button type="button" data-sample="zero" aria-pressed="true">Clean wallet · 0 coins</button><button type="button" data-sample="funded" aria-pressed="false">Funded sample · 65 coins</button><span>No real purchase</span></div>
+<iframe class="app-frame" id="focus-desktop-frame" title="Focus desktop Today and Store" loading="eager"></iframe>
+<section class="evidence"><details><summary>Source, build and capture evidence</summary><p>Offline fixture. The controls above switch sample balances in this page.</p><p class="fingerprint">Built Vite assets · SHA-256 <code>${buildHash}</code></p><p class="fingerprint">UI source snapshot · SHA-256 <code>${sourceHash}</code></p><p>Checked-out frontend verified. Shipped desktop package: not verified.</p><p>Today is the default Stats range. Store appears on Today while the wallet is active.</p><nav class="links"><a href="../../ui/widget.js#L45">Today range rule</a><a href="../../ui/src/devices.tsx#L546">Store visibility</a><a href="../../ui/src/wallet-store.tsx#L25">Store source</a><a href="../../tests/product-entry.py">Entry smoke test</a><a href="../../tests/wallet-store.py">Store test</a><a href="../../scripts/product-evidence.mjs">Generator</a></nav>${nativeMarkup}</details></section></main>
+<script>window.__FOCUS_PRODUCT_SAMPLE__=new URLSearchParams(location.search).get("wallet")==="funded"?"funded":"zero";const frame=document.getElementById("focus-desktop-frame");frame.srcdoc=atob("${Buffer.from(appHtml).toString("base64")}");function chooseSample(sample){window.__FOCUS_PRODUCT_SAMPLE__=sample;document.querySelectorAll("[data-sample]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.sample===sample)));frame.contentWindow?.__FOCUS_SET_SAMPLE__?.(sample)}document.addEventListener("pointerdown",event=>{if(event.target.closest("[data-sample]"))event.preventDefault()});document.querySelectorAll("[data-sample]").forEach(button=>button.addEventListener("click",()=>chooseSample(button.dataset.sample)));frame.addEventListener("load",()=>frame.contentWindow?.__FOCUS_SET_SAMPLE__?.(window.__FOCUS_PRODUCT_SAMPLE__));chooseSample(window.__FOCUS_PRODUCT_SAMPLE__);</script></body></html>`;
+const html = shell;
 if (check) {
   const current = await readFile(output, "utf8").catch(() => "");
   if (current !== html) {
