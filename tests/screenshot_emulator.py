@@ -237,9 +237,8 @@ def capture_views(scenario, adb, apks, output):
         adb("install", str(apks / apk), timeout=180)
     shell("appops", "set", package, "GET_USAGE_STATS", "allow")
     if int(shell("getprop", "ro.build.version.sdk")) >= 33:
-        # Leave guest notifications denied and suppress the first-run permission prompt.
-        shell("pm", "set-permission-flags", package, "android.permission.POST_NOTIFICATIONS",
-              "user-set", "user-fixed")
+        # Keep the synthetic walkthrough on the app screen instead of Android's permission prompt.
+        shell("pm", "grant", package, "android.permission.POST_NOTIFICATIONS")
 
     runner = "DeviceChecks" if tv else "PhoneDeviceChecks"
     if tv:
