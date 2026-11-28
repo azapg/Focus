@@ -21,7 +21,9 @@ pub const NAG_THRESHOLD_MS: u64 = 15 * MINUTE_MS;
 pub const MAX_LABEL_CHARS: usize = 80;
 pub const MAX_DONE_WHEN_CHARS: usize = 140;
 pub const MAX_RAW_CHARS: usize = 300;
+const MAX_NOTE_CHARS: usize = 500;
 const FILENAME: &str = "intentions.jsonl";
+const NOTES_FILENAME: &str = "intention-notes.json";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -91,6 +93,22 @@ pub struct IntentionRec {
     pub extensions: u32,
     #[serde(default)]
     pub active: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntentionNote {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intention_id: Option<String>,
+    pub start: u64,
+    pub end: u64,
+    pub text: String,
+}
+
+impl IntentionNote {
+    fn same_block(&self, other: &Self) -> bool {
+        self.intention_id == other.intention_id
+            && (self.intention_id.is_some() || self.start == other.start)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -903,6 +921,62 @@ impl Store {
             .collect()
     }
 
+    fn read_notes(&self) -> Result<Vec<IntentionNote>, String> {
+        match fs::read(self.path.with_file_name(NOTES_FILENAME)) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| e.to_string()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    pub fn notes(&self, from: u64, to: u64, intentions: &[IntentionRec]) -> Vec<IntentionNote> {
+        self.read_notes()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|note| match &note.intention_id {
+                Some(id) => intentions.iter().any(|r| &r.id == id),
+                None => note.start < to && note.end > from,
+            })
+            .collect()
+    }
+
+    /// Replaces a block's note. Empty text removes it from the local history file.
+    pub fn save_note(
+        &self,
+        mut note: IntentionNote,
+        now: u64,
+    ) -> Result<Option<IntentionNote>, String> {
+        note.text = note.text.trim().to_owned();
+        if note.text.encode_utf16().count() > MAX_NOTE_CHARS {
+            return Err("Use 500 characters or fewer".into());
+        }
+        let _guard = self.inner.lock().unwrap();
+        if let Some(id) = &note.intention_id {
+            let text = fs::read_to_string(&self.path).map_err(|e| e.to_string())?;
+            let rec = read_intentions(&text)
+                .into_iter()
+                .find(|r| &r.id == id)
+                .ok_or("Intention no longer exists")?;
+            note.start = rec.start;
+            note.end = rec.end.unwrap_or(now);
+        }
+        if note.end < note.start
+            || note.end > now
+            || (note.intention_id.is_none() && note.start == note.end)
+        {
+            return Err("Invalid block time".into());
+        }
+        let mut notes = self.read_notes()?;
+        notes.retain(|saved| !saved.same_block(&note));
+        let saved = (!note.text.is_empty()).then_some(note);
+        notes.extend(saved.iter().cloned());
+        notes.sort_by_key(|note| note.start);
+        let path = self.path.with_file_name(NOTES_FILENAME);
+        let bytes = serde_json::to_vec_pretty(&notes).map_err(|e| e.to_string())?;
+        focus_browser_host::durable_atomic_write(&path, &bytes).map_err(|e| e.to_string())?;
+        Ok(saved)
+    }
+
     /// Returns the timestamp from which active screen time without an intention should be counted.
     pub fn no_intention_since(&self, day_start_ms: u64) -> Option<u64> {
         let inner = self.inner.lock().unwrap();
@@ -973,6 +1047,48 @@ mod tests {
             source: "window_title".into(),
             browser: None,
         }
+    }
+
+    #[test]
+    fn notes_persist_by_intention_id_or_unplanned_start_and_can_be_removed() {
+        let dir = scratch_dir("notes");
+        let store = Store::open(&dir);
+        let (planned, _) = store
+            .start(100, "Write the guide".into(), 20, None, String::new(), ParseSource::Local)
+            .unwrap();
+        let note = IntentionNote {
+            intention_id: Some(planned.id),
+            start: 100,
+            end: 130,
+            text: "  Draft is ready for review.  ".into(),
+        };
+        let saved = store.save_note(note, 140).unwrap().unwrap();
+        assert_eq!(saved.text, "Draft is ready for review.");
+        store.end(150, Outcome::Done).unwrap();
+
+        let mut unplanned = IntentionNote {
+            intention_id: None,
+            start: 200,
+            end: 260,
+            text: "Recorded a demo.".into(),
+        };
+        store.save_note(unplanned.clone(), 260).unwrap();
+        unplanned.end = 290;
+        unplanned.text = "Recorded a demo and credited the original post.".into();
+        store.save_note(unplanned.clone(), 290).unwrap();
+
+        let reopened = Store::open(&dir);
+        let intentions = reopened.history(145, 300, 300);
+        assert_eq!(reopened.notes(145, 300, &intentions), [saved.clone(), unplanned.clone()]);
+        assert_eq!(reopened.notes(250, 300, &[]), [unplanned.clone()]);
+        assert!(reopened.notes(290, 300, &[]).is_empty());
+        unplanned.text.clear();
+        reopened.save_note(unplanned, 300).unwrap();
+
+        let disk: Vec<IntentionNote> =
+            serde_json::from_slice(&fs::read(dir.join(NOTES_FILENAME)).unwrap()).unwrap();
+        assert_eq!(disk, [saved]);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

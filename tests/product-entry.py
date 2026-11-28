@@ -16,6 +16,12 @@ async def main(output=None):
         app = page.frame_locator("#focus-desktop-frame")
         await app.locator("#panel.open").wait_for()
         assert await app.locator(".amb > span").first.text_content() == "·", "The embedded frontend must keep UTF-8 text."
+        unplanned = app.locator('[data-intent-row="none"]')
+        await unplanned.get_by_text("Recorded and shared a quick demo.", exact=False).wait_for()
+        await unplanned.get_by_role("button", name="Edit note").click()
+        await unplanned.get_by_role("textbox").fill("Published the demo and credited the original post.")
+        await unplanned.get_by_role("button", name="Save note").click()
+        await unplanned.get_by_text("Published the demo and credited the original post.", exact=True).wait_for()
         zero_balance = app.get_by_role("button", name="Store, 0 coins")
         await zero_balance.wait_for()
         await zero_balance.click()
@@ -42,7 +48,7 @@ async def main(output=None):
         await app.get_by_role("button", name="Store, 0 coins").wait_for()
 
         assert not errors, errors
-        print("PASS: checked-in entry opens Today, switches clean/funded samples in place, disables a zero-coin purchase, and completes the fictional funded Store purchase.")
+        print("PASS: checked-in entry edits an intention note in Today, switches wallet samples, and completes a fictional Store purchase.")
 
 
 if __name__ == "__main__":
