@@ -134,7 +134,7 @@ const nativeMarkup = native.map((walk) => {
   const name = walk.platform === "phone" ? "Phone" : "TV";
   const status = walk.status === "captured" ? `captured from ${escapeHtml(walk.sourceCommit)}` : walk.status;
   const shots = walk.steps.map((step) => `<figure><img src="${step.image}" alt="${escapeHtml(step.title)}"><figcaption>${escapeHtml(step.title)}</figcaption></figure>`).join("");
-  return `<details class="native-evidence"><summary>${name} evidence · ${status}</summary>${shots}</details>`;
+  return `<details class="native-evidence"><summary>${name} evidence · ${status}</summary><p><a href="../../docs/product/native/${walk.platform}/manifest.json">Open ${name} manifest</a></p>${shots}</details>`;
 }).join("");
 
 const shell = `<!doctype html>

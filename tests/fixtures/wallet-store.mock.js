@@ -1,7 +1,7 @@
 (() => {
   const invoke = window.__TAURI__.core.invoke;
   const wallet = window.__wallet = {
-    active: true, day: 20496, balance: window.__FOCUS_PRODUCT_SAMPLE__ === "zero" ? 0 : 65, time_off_bought: 0,
+    active: true, day: 20496, balance: window.__FOCUS_PRODUCT_SAMPLE__ === "funded" ? 65 : 0, time_off_bought: 0,
     time_off_limit: 15, time_off_price_per_minute: 3, needs_upgrade: [],
   };
   window.__FOCUS_SET_SAMPLE__ = (sample) => {
