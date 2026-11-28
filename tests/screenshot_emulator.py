@@ -160,21 +160,29 @@ def capture_views(scenario, adb, apks, output):
         return ET.fromstring(shell("cat", remote)).iter("node")
 
     def wait_for_view(label, selected=False):
+        visible = []
         for _ in range(6):
             try:
-                nodes = dump()
+                nodes = list(dump())
             except (subprocess.CalledProcessError, ET.ParseError):
                 continue
+            visible = [
+                f"{node.get('text', '')} [{node.get('content-desc', '')}]"
+                for node in nodes if node.get("package") == package
+                and (node.get("text") or node.get("content-desc"))
+            ]
             if any(
-                node.get("package") == package and label in node.get("text", "")
+                node.get("package") == package
+                and label in (node.get("text", "") + " " + node.get("content-desc", ""))
                 and (not selected or node.get("selected") == "true") for node in nodes
             ):
                 return
-        raise RuntimeError(f"Focus view did not appear: {label}")
+        raise RuntimeError(f"Focus view did not appear: {label}; visible Focus nodes: {visible[:60]}")
 
     def tap(label):
         node = next((node for node in dump() if node.get("package") == package
-                     and label in node.get("text", "") and node.get("clickable") == "true"), None)
+                     and label in (node.get("text", "") + " " + node.get("content-desc", ""))
+                     and node.get("clickable") == "true"), None)
         if node is None:
             raise RuntimeError(f"Focus control did not appear: {label}")
         left, top, right, bottom = map(int, re.findall(r"\d+", node.get("bounds")))
