@@ -189,9 +189,17 @@ def capture_views(scenario, adb, apks, output):
                     (output / "debug-unverified.png").write_bytes(image_bytes)
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
                 pass
+            try:
+                activity_state = shell("dumpsys", "activity", "activities")[-5000:]
+                logcat = adb("logcat", "-d", "-t", "500")[-10000:]
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                activity_state = logcat = "Android diagnostics unavailable"
+        else:
+            activity_state = logcat = ""
         raise RuntimeError(
             f"Focus view did not appear: {label}; visible Focus nodes: {visible[:60]}; "
-            f"all visible UI nodes: {current[:80]}"
+            f"all visible UI nodes: {current[:80]}\n"
+            f"activity state: {activity_state}\nrecent logcat:\n{logcat}"
         )
 
     def tap(label):
