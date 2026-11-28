@@ -215,7 +215,10 @@ def capture_views(scenario, adb, apks, output):
                      "-e", "flow", "store" if scenario == "tv-store" else "today",
                      f"{package}.tests/.{runner}", timeout=180)
     else:
-        mode = "seed_store_showcase" if scenario == "phone-store" else "seed_showcase"
+        mode = {
+            "phone-store-zero": "seed_store_zero",
+            "phone-store": "seed_store_showcase",
+        }.get(scenario, "seed_showcase")
         result = adb("shell", "am", "instrument", "-w", "-e", "mode", mode,
                      f"{package}.tests/.{runner}", timeout=180)
     if "INSTRUMENTATION_CODE: -1" not in result:
