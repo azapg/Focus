@@ -5,6 +5,9 @@ import android.content.*;
 import android.database.Cursor;
 import android.os.*;
 import android.provider.Settings;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
 import android.view.*;
 import android.widget.*;
 import java.io.*;
@@ -30,7 +33,7 @@ public final class MainActivity extends Activity {
   private final Runnable refresh =
       new Runnable() {
         public void run() {
-          if (visible && hasWindowFocus() && !controlOpen) render();
+          if (visible && hasWindowFocus()) render();
           handler.postDelayed(this, 5000);
         }
       };
@@ -141,6 +144,8 @@ public final class MainActivity extends Activity {
     }
 
     if (controlOpen) {
+      root.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+      root.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
       View sheetFocus = renderControlSheet();
       if (sheetFocus != null) defaultFocus = sheetFocus;
     }
@@ -196,10 +201,18 @@ public final class MainActivity extends Activity {
     top.addView(Ui.text(this, "Focus", 16, Ui.SUB), new LinearLayout.LayoutParams(0, -2, 1));
 
     String clockStr = new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(now));
-    String dnsText = "NextDNS " + dns.status();
-    String pillText = clockStr + "  ·  " + dnsText + (coins ? "  ·  " + balance + " coins" : "");
-    int pillColor = missingAccess || !dns.permitted() ? Ui.RED : dns.deadline() > 0 ? Ui.ORANGE : Ui.SUB;
-    TextView statusPill = Ui.text(this, pillText, 13, pillColor);
+    String dnsText = TvRedirect.dnsStatusBadge(dns.status());
+    boolean dnsBroken = !dns.permitted() || (dns.enabled() && dns.deadline() == 0 && !dns.active());
+    boolean dnsWarn = dns.deadline() > 0 || !dns.enabled();
+    int dnsColor = dnsBroken ? Ui.RED : dnsWarn ? Ui.ORANGE : Ui.SUB;
+    SpannableStringBuilder pill = new SpannableStringBuilder();
+    pill.append(clockStr).append("  ·  ");
+    int dnsStart = pill.length();
+    pill.append(dnsText);
+    pill.setSpan(new ForegroundColorSpan(dnsColor), dnsStart, pill.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    if (coins) pill.append("  ·  ").append(String.valueOf(balance)).append(" coins");
+    TextView statusPill = Ui.text(this, "", 13, Ui.SUB);
+    statusPill.setText(pill);
     statusPill.setPadding(Ui.dp(this, 14), Ui.dp(this, 7), Ui.dp(this, 14), Ui.dp(this, 7));
     statusPill.setBackground(Ui.shape(Ui.GLASS, Ui.GLASS_BORDER, 999, this));
     top.addView(statusPill);
@@ -377,7 +390,8 @@ public final class MainActivity extends Activity {
     // 2x2 Control Center tile grid
     LinearLayout row1 = Ui.row(this);
     String dnsShort = !dns.permitted() ? "Setup needed" : dns.enabled() ? dns.status() : "Not connected";
-    int dnsColor = !dns.permitted() ? Ui.RED : dns.deadline() > 0 ? Ui.ORANGE : Ui.MUTED;
+    boolean dnsTileBroken = !dns.permitted() || (dns.enabled() && dns.deadline() == 0 && !dns.active());
+    int dnsColor = dnsTileBroken ? Ui.RED : (dns.deadline() > 0 || !dns.enabled()) ? Ui.ORANGE : Ui.MUTED;
     LinearLayout tDns = Ui.controlTile(this, "NextDNS", dnsShort, dnsColor, "dns".equals(controlTile), () -> selectTile("dns"));
     tDns.setId(controlId("tile_dns"));
     row1.addView(tDns, new LinearLayout.LayoutParams(0, -2, 1));
@@ -411,7 +425,9 @@ public final class MainActivity extends Activity {
 
     Button closeBtn = Ui.dockTab(this, "Close", false, this::closeControl);
     closeBtn.setId(controlId("control_close"));
-    sheet.addView(closeBtn, new LinearLayout.LayoutParams(-2, -2, Gravity.END));
+    LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(-2, -2);
+    closeLp.gravity = Gravity.END;
+    sheet.addView(closeBtn, closeLp);
 
     int width = Math.max(Ui.dp(this, 410), getResources().getDisplayMetrics().widthPixels * 47 / 100);
     FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, -1, Gravity.END);
@@ -429,11 +445,26 @@ public final class MainActivity extends Activity {
       LanController lan, List<AppCatalog.App> blocked) {
     if ("dns".equals(controlTile)) {
       boolean locked = dns.enabled() && !dns.profile().isEmpty();
-      detail.addView(Ui.text(this, locked ? "NextDNS is locked on" : "NextDNS setup", 15, Ui.FG));
+      String heading;
+      int headingColor = Ui.FG;
+      String desc;
+      if (!locked) {
+        heading = "NextDNS setup";
+        desc = "Connect your six-character NextDNS profile. External changes will snap back automatically.";
+      } else if (dns.deadline() > 0) {
+        heading = "NextDNS is paused · " + Ui.countdown(dns.deadline());
+        headingColor = Ui.ORANGE;
+        desc = "Profile " + dns.profile() + " will resume automatically when the timer ends.";
+      } else if (!dns.active()) {
+        heading = "NextDNS needs attention · " + dns.status();
+        headingColor = Ui.RED;
+        desc = "Profile " + dns.profile() + " is configured, but Private DNS is not validated on the active network.";
+      } else {
+        heading = "NextDNS is locked on";
+        desc = "Profile " + dns.profile() + " is active. External changes in TV Settings snap back automatically.";
+      }
+      detail.addView(Ui.text(this, heading, 15, headingColor));
       Ui.gap(detail, 4);
-      String desc = locked
-          ? "Profile " + dns.profile() + " is active. External changes in TV Settings snap back automatically."
-          : "Connect your six-character NextDNS profile. External changes will snap back automatically.";
       detail.addView(Ui.text(this, desc, 13, Ui.MUTED));
       Ui.gap(detail, 12);
       if (!dns.permitted()) {
@@ -473,13 +504,18 @@ public final class MainActivity extends Activity {
       if (blocked.isEmpty()) {
         detail.addView(Ui.text(this, "No blocked apps installed yet.", 13, Ui.MUTED));
       } else {
-        for (int i = 0; i < Math.min(6, blocked.size()); i++) {
+        int shown = Math.min(4, blocked.size());
+        for (int i = 0; i < shown; i++) {
           AppCatalog.App app = blocked.get(i);
           LinearLayout line = Ui.row(this);
           line.addView(Ui.text(this, app.label, 14, Ui.FG), new LinearLayout.LayoutParams(0, -2, 1));
           line.addView(Ui.text(this, "Locked on TV", 12, Ui.MUTED));
           detail.addView(line);
-          Ui.gap(detail, 5);
+          Ui.gap(detail, 4);
+        }
+        if (blocked.size() > shown) {
+          detail.addView(Ui.text(this, "+" + (blocked.size() - shown) + " more blocked", 12, Ui.MUTED));
+          Ui.gap(detail, 4);
         }
       }
       Ui.gap(detail, 8);
@@ -510,6 +546,28 @@ public final class MainActivity extends Activity {
         Ui.gap(detail, 8);
       }
       detail.addView(button("Pause history", "ctrl_pause_history", this::pauseHistory));
+      if (lan.pairedCount() > 0) {
+        Ui.gap(detail, 8);
+        detail.addView(button("Disconnect all managers", "ctrl_lan_disconnect", () -> {
+          LinearLayout confirm = Ui.column(this);
+          confirm.addView(Ui.text(
+              this,
+              "Laptops and phones will need to pair again. Local tracking, app rules, and NextDNS stay on.",
+              15,
+              Ui.MUTED));
+          Dialog dialog = Ui.dialog(this, "Disconnect all managers?", confirm);
+          Ui.gap(confirm, 12);
+          Button cancel = Ui.button(this, "Cancel", dialog::dismiss);
+          confirm.addView(cancel);
+          Ui.gap(confirm, 8);
+          confirm.addView(Ui.button(this, "Disconnect all", () -> {
+            lan.disconnectAll();
+            dialog.dismiss();
+            render();
+          }));
+          dialog.show();
+        }));
+      }
       if (!lan.error().isEmpty()) {
         Ui.gap(detail, 8);
         detail.addView(Ui.text(this, lan.error(), 12, Ui.ORANGE));
@@ -834,19 +892,28 @@ public final class MainActivity extends Activity {
   private void schedule(String pkg, Runnable changed) {
     Rules r = Store.get(this).rule(pkg);
     LinearLayout body = Ui.column(this);
+    final Dialog[] dialog = new Dialog[1];
     if (r.scheduled) {
       body.addView(Ui.text(this, "Schedule · " + clock(r.fromMinute) + " – " + clock(r.toMinute), 16, Ui.FG));
       Ui.gap(body, 8);
       body.addView(Ui.text(this, "Schedules stay locked on TV once enabled. Change them from Focus on your phone.", 14, Ui.MUTED));
     } else {
-      Button enable = Ui.button(this, "Enable schedule · " + clock(r.fromMinute) + " – " + clock(r.toMinute), () -> {});
+      final int[] draft = {r.fromMinute, r.toMinute};
+      Button enable = Ui.button(this, "Enable schedule · " + clock(draft[0]) + " – " + clock(draft[1]), () -> {});
       enable.setOnClickListener(
           v -> {
             Rules fresh = Store.get(this).rule(pkg);
+            if (fresh.scheduled) {
+              Toast.makeText(this, "Schedule is already locked on TV.", Toast.LENGTH_SHORT).show();
+              if (dialog[0] != null) dialog[0].dismiss();
+              return;
+            }
             Rules next = copyRule(fresh);
             next.scheduled = true;
-            if (saveTightenOnly(pkg, fresh, next)) {
-              enable.setText("Enabled · " + clock(next.fromMinute) + " – " + clock(next.toMinute));
+            next.fromMinute = draft[0];
+            next.toMinute = draft[1];
+            if (saveTightenOnly(pkg, fresh, next) && dialog[0] != null) {
+              dialog[0].dismiss();
             }
           });
       body.addView(enable);
@@ -855,18 +922,18 @@ public final class MainActivity extends Activity {
         Button time =
             Ui.button(
                 this,
-                (start ? "From · " : "Until · ") + clock(start ? r.fromMinute : r.toMinute),
+                (start ? "From · " : "Until · ") + clock(start ? draft[0] : draft[1]),
                 () -> {});
         time.setOnClickListener(
             v -> {
-              int n = start ? r.fromMinute : r.toMinute;
+              int n = start ? draft[0] : draft[1];
               new TimePickerDialog(
                       this,
                       (picker, h, m) -> {
-                        if (start) r.fromMinute = h * 60 + m;
-                        else r.toMinute = h * 60 + m;
-                        save(pkg, r);
+                        if (start) draft[0] = h * 60 + m;
+                        else draft[1] = h * 60 + m;
                         time.setText((start ? "From · " : "Until · ") + clock(h * 60 + m));
+                        enable.setText("Enable schedule · " + clock(draft[0]) + " – " + clock(draft[1]));
                       },
                       n / 60,
                       n % 60,
@@ -878,9 +945,9 @@ public final class MainActivity extends Activity {
       }
       body.addView(Ui.text(this, "Every day", 14, Ui.MUTED));
     }
-    Dialog dialog = Ui.dialog(this, "Schedule", body);
-    dialog.setOnDismissListener(x -> changed.run());
-    dialog.show();
+    dialog[0] = Ui.dialog(this, "Schedule", body);
+    dialog[0].setOnDismissListener(x -> changed.run());
+    dialog[0].show();
   }
 
   private void openSetting(String action) {
@@ -944,7 +1011,7 @@ public final class MainActivity extends Activity {
               dns.enabled() ? "Save profile" : "Connect",
               () -> {
                 try {
-                  dns.connect(profile.getText().toString().trim());
+                  dns.connectFromTv(profile.getText().toString().trim());
                   dns.checkAsync(() -> status.setText(dns.status()));
                   dialog.dismiss();
                   render();

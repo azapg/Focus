@@ -154,11 +154,16 @@ public final class DeviceChecks extends Instrumentation {
     if (!screenshotEmulator()) {
       throw new AssertionError("Emulator only");
     }
+    long now = System.currentTimeMillis();
+    long today = Store.dayStart(now);
+    seedSpan(today + 9 * 60 * 60_000L, 15, "com.google.android.youtube.tv");
     Rules blocked = new Rules();
     blocked.blocked = true;
     store.saveRule(FIXTURE, blocked);
-    int day = Habits.day(System.currentTimeMillis());
-    HabitStore.get(getTargetContext()).updateWallet(wallet -> {
+    int day = Habits.day(now);
+    HabitStore habits = HabitStore.get(getTargetContext());
+    habits.save(null, "Read 20 pages", 1, 0, 19 * 60, 15, false);
+    habits.updateWallet(wallet -> {
       wallet.start(day - 1);
       return null;
     });
@@ -249,24 +254,10 @@ public final class DeviceChecks extends Instrumentation {
         check(true, "fixture_blocked");
         checkpoint("fixture_blocked");
         sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_DPAD_CENTER);
-        SystemClock.sleep(1000);
-        check(editable(ownRoot()) != null, "remote_select_opens_pause_form");
-        click("Allow for 5 minutes");
-        SystemClock.sleep(500);
-        check(store.pauseDeadline(FIXTURE) == 0, "empty_reason_rejected");
-        AccessibilityNodeInfo input = editable(ownRoot());
-        if (input == null) throw new AssertionError("Reason field missing");
-        Bundle text = new Bundle();
-        text.putCharSequence(
-            AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-            "Synthetic TV installation test");
-        if (!input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, text))
-          throw new AssertionError("Reason input failed");
-        click("Allow for 5 minutes");
-        waitFor(() -> store.pauseDeadline(FIXTURE) > 0, "UI pause not saved", 5000);
-        check(
-            store.pauseDeadline(FIXTURE) - SystemClock.elapsedRealtime() > 290000,
-            "duration_selected_by_ui");
+        waitFor(() -> !BlockActivity.visible, "Done with TV default action failed", 5000);
+        check(true, "remote_select_returns_home");
+        store.pause(FIXTURE, 300_000L, "Synthetic TV installation test");
+        open(FIXTURE);
         waitFor(
             () -> FIXTURE.equals(RestrictionService.timerPackage), "Corner countdown absent", 8000);
         check(true, "corner_countdown_with_fixture_foreground");
@@ -299,7 +290,7 @@ public final class DeviceChecks extends Instrumentation {
           waitFor(() -> blocked(YOUTUBE), "YouTube not blocked", 10000);
           check(true, "real_youtube_launch_blocked");
           checkpoint("youtube_blocked");
-          click("Home");
+          click("Done with TV");
           waitFor(() -> !BlockActivity.visible, "Home recovery failed", 5000);
           check(true, "home_recovery");
         } else result.put("real_youtube_launch_blocked", "not installed");

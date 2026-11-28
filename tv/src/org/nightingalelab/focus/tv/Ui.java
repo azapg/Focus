@@ -31,14 +31,17 @@ public final class Ui {
   }
 
   public static void applyFocusLift(View v, float scale) {
+    final View.OnFocusChangeListener previous = v.getOnFocusChangeListener();
     v.setOnFocusChangeListener(
-        (view, focused) ->
-            view.animate()
-                .scaleX(focused ? scale : 1f)
-                .scaleY(focused ? scale : 1f)
-                .translationZ(focused ? dp(view.getContext(), 8) : 0f)
-                .setDuration(140)
-                .start());
+        (view, focused) -> {
+          if (previous != null) previous.onFocusChange(view, focused);
+          view.animate()
+              .scaleX(focused ? scale : 1f)
+              .scaleY(focused ? scale : 1f)
+              .translationZ(focused ? dp(view.getContext(), 8) : 0f)
+              .setDuration(140)
+              .start();
+        });
   }
 
   public static Button glassButton(Context c, String label, Runnable action) {
@@ -121,10 +124,12 @@ public final class Ui {
     bg.addState(new int[] {android.R.attr.state_pressed}, shape(FG, FG, 14, c));
     bg.addState(new int[] {}, shape(active ? GLASS_HI : GLASS, active ? 0x44ffffff : GLASS_BORDER, 14, c));
     tile.setBackground(bg);
+    final int focusedValueColor =
+        valueColor == RED ? 0xffb91c1c : valueColor == ORANGE ? 0xffb45309 : 0xff444444;
     tile.setOnFocusChangeListener(
         (view, focused) -> {
           t.setTextColor(focused ? BG : FG);
-          v.setTextColor(focused ? 0xff444444 : valueColor);
+          v.setTextColor(focused ? focusedValueColor : valueColor);
           view.animate()
               .scaleX(focused ? 1.03f : 1f)
               .scaleY(focused ? 1.03f : 1f)

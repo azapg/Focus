@@ -173,10 +173,12 @@ public final class CoreTest {
     ok(!Rules.isLoosening(unlocked, schedOn), "Enabling schedule is tightening");
     ok("Overdue · 19:00".equals(TvRedirect.homeKicker(false, "Read 20 pages", true, "19:00")), "Overdue kicker");
     ok("Setup needed".equals(TvRedirect.homeKicker(true, "Read 20 pages", true, "19:00")), "Missing access kicker");
-    ok("Go read 20 pages.".equals(TvRedirect.homeHeadline(false, "Read 20 pages", 0)), "Verb habit headline");
-    ok("Finish Evening stretch.".equals(TvRedirect.homeHeadline(false, "Evening stretch", 0)), "Noun habit headline");
+    ok("Read 20 pages.".equals(TvRedirect.homeHeadline(false, "Read 20 pages", 0)), "Habit headline");
+    ok("Send one intentional message.".equals(TvRedirect.homeHeadline(false, "Send one intentional message.", 0)), "Trailing dot normalized");
     ok("Nothing to watch here. Go read or focus.".equals(TvRedirect.homeHeadline(false, "", 0)), "Idle redirect headline");
-    ok("Go do Read 20 pages first, or pick up your book.".equals(TvRedirect.blockSubhead("Read 20 pages", true)), "Block subhead with habit");
+    ok("Read 20 pages first, or pick up your book.".equals(TvRedirect.blockSubhead("Read 20 pages", true)), "Block subhead with habit");
+    ok("NextDNS On".equals(TvRedirect.dnsStatusBadge("On")), "Badge prepends NextDNS");
+    ok("NextDNS profile needed".equals(TvRedirect.dnsStatusBadge("NextDNS profile needed")), "Badge avoids duplicate NextDNS");
     System.out.println("PASS " + count + " policy and timeline assertions");
   }
 }

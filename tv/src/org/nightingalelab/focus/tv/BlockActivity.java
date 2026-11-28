@@ -82,7 +82,7 @@ public final class BlockActivity extends Activity {
     mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
     badge.addView(mark, new LinearLayout.LayoutParams(Ui.dp(this, 20), Ui.dp(this, 20)));
     Ui.gap(badge, 8);
-    badge.addView(Ui.text(this, "Focus  ·  NextDNS " + DnsController.get(this).status(), 14, Ui.MUTED));
+    badge.addView(Ui.text(this, "Focus  ·  " + TvRedirect.dnsStatusBadge(DnsController.get(this).status()), 14, Ui.MUTED));
     root.addView(badge);
     Ui.gap(root, 14);
 

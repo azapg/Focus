@@ -462,6 +462,12 @@ public final class Store extends SQLiteOpenHelper {
     }
   }
 
+  public synchronized boolean hasRuleRow(String pkg) {
+    try (Cursor r = getReadableDatabase().rawQuery("SELECT 1 FROM rules WHERE pkg=? LIMIT 1", new String[] {pkg})) {
+      return r.moveToFirst();
+    }
+  }
+
   public synchronized void ensureDefaultBlocks() {
     SharedPreferences prefs = context.getSharedPreferences("tv_policy", Context.MODE_PRIVATE);
     Set<String> seeded = new HashSet<>(prefs.getStringSet("seeded_default_blocks", Collections.emptySet()));
@@ -469,8 +475,9 @@ public final class Store extends SQLiteOpenHelper {
     for (String pkg : Rules.DEFAULT_BLOCKED_PACKAGES) {
       if (seeded.contains(pkg)) continue;
       if (!AppCatalog.allowed(context, pkg)) continue;
-      Rules rule = rule(pkg);
-      if (!rule.blocked) {
+      // Only apply default block when no explicit rule row exists for this package yet.
+      if (!hasRuleRow(pkg)) {
+        Rules rule = rule(pkg);
         rule.blocked = true;
         saveRule(pkg, rule);
       }

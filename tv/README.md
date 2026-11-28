@@ -195,12 +195,13 @@ DNS pause audit rows use the reserved key `focus:dns`.
 
 ## Remove
 
-Disable Focus under Accessibility, uninstall **Focus** in TV Settings, and reset
-Private DNS over ADB (`adb shell settings delete global private_dns_mode` and
-`adb shell settings delete global private_dns_specifier`) if you want the
-pre-Focus resolver. Uninstalling alone does not reset system DNS. Usage access
-and private data are removed by Android. Keep an export first if you want the
-history.
+Disable Focus under Accessibility and uninstall **Focus** in TV Settings.
+Uninstalling alone leaves Private DNS set to NextDNS. To reset Private DNS to
+Android's system default over ADB, run `adb shell settings delete global
+private_dns_mode` and `adb shell settings delete global private_dns_specifier`.
+If you used a custom Private DNS hostname before Focus, re-enter it in TV
+Settings after uninstalling. Usage access and private data are removed by
+Android. Keep an export first if you want the history.
 
 ## Platform references
 

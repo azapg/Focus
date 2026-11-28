@@ -190,6 +190,14 @@ public final class DnsController {
         .start();
   }
 
+  /** Local TV setup entry point: refuses overwriting an already locked profile atomically. */
+  public synchronized void connectFromTv(String id) {
+    if (enabled() && !profile().isEmpty()) {
+      throw new IllegalStateException("NextDNS is already locked on this TV");
+    }
+    connect(id);
+  }
+
   /** Save exact pre-Focus values once. Reconnecting never overwrites that snapshot. */
   public synchronized void connect(String id) {
     requirePermission();
@@ -330,17 +338,19 @@ public final class DnsController {
    * and not in a timed pause, revert it immediately.
    */
   public synchronized boolean snapBackIfTampered() {
-    if (!enabled() || !permitted() || profile().isEmpty()) return false;
-    if (deadline() > 0 || prefs.getBoolean("restore_pending", false)) return false;
-    if (configured()) return false;
     try {
+      if (!enabled() || !permitted() || profile().isEmpty()) return false;
+      if (deadline() > 0 || prefs.getBoolean("restore_pending", false)) return false;
+      if (configured()) return false;
       write(HOST, requireHostname());
       write(MODE, "hostname");
       verifiedAt = 0;
       Store.get(context).diagnostic("dns_tamper_reverted");
       return true;
     } catch (RuntimeException e) {
-      Store.get(context).diagnostic("dns_tamper_revert_failed_" + e.getClass().getSimpleName());
+      try {
+        Store.get(context).diagnostic("dns_tamper_revert_failed_" + e.getClass().getSimpleName());
+      } catch (RuntimeException ignored) {}
       return false;
     }
   }

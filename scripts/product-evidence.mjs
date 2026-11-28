@@ -159,10 +159,10 @@ const nativeGuide = {
     ],
   },
   tv: {
-    route: "Open the blocked fictional app, then choose Store free time. Captured with the TV app on a landscape AOSP emulator.",
+    route: "Open a blocked fictional app for the quiet redirect, then open Focus Home and its floating Control & Settings sheet. Captured on a landscape AOSP emulator.",
     links: [
-      ["Blocked-app screen", "tv/src/org/nightingalelab/focus/tv/BlockActivity.java"],
-      ["Free time purchase options", "tv/src/org/nightingalelab/focus/tv/PauseForm.java"],
+      ["Home and Control Center", "tv/src/org/nightingalelab/focus/tv/MainActivity.java"],
+      ["Blocked-app quiet redirect", "tv/src/org/nightingalelab/focus/tv/BlockActivity.java"],
     ],
   },
 };
