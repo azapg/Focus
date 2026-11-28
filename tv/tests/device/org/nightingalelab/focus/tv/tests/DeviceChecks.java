@@ -148,6 +148,15 @@ public final class DeviceChecks extends Instrumentation {
     seedSpan(today - 5 * day + 10 * 60 * minute, 18, "com.google.android.youtube.tv");
   }
 
+  private void seedStoreScreenshot() {
+    if (!Build.FINGERPRINT.contains("generic") && !Build.MODEL.contains("sdk")) {
+      throw new AssertionError("Emulator only");
+    }
+    Rules blocked = new Rules();
+    blocked.blocked = true;
+    store.saveRule(FIXTURE, blocked);
+  }
+
   private void seedSpan(long start, int minutes, String pkg) {
     ContentValues span = new ContentValues();
     span.put("s", start);
@@ -164,7 +173,12 @@ public final class DeviceChecks extends Instrumentation {
     try {
       store = Store.get(getTargetContext());
       if (screenshot) {
-        seedScreenshot();
+        if ("store".equals(args.getString("flow"))) {
+          AppCatalog.invalidate();
+          seedStoreScreenshot();
+        } else {
+          seedScreenshot();
+        }
         result.put("passed", true);
         return;
       }

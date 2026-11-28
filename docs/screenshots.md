@@ -61,7 +61,19 @@ screenshot build omits the Peek renderer and does not produce a release manifest
 The phone flow shows Today, Week and the update sheet. The TV flow shows Today
 and Week, selected through the production remote-control navigation.
 Use `phone-store` with the same SDK and image arguments to capture a time-off
-purchase in the native Store with a fictional balance.
+purchase in the native Store with a fictional balance. `phone-store-zero`
+captures Today with a zero coin balance, then opens Store. `tv-store` seeds a
+fictional installed TV app as blocked, captures the production blocked-app
+screen, then opens its Free Time store. The TV flow uses an AOSP landscape
+image; it exercises the TV app layout and controls, but does not verify a
+certified Android TV build.
+
+For the Open Focus pilot, copy the selected PNGs into
+`docs/product/native/{phone,tv}/` and add a sibling `manifest.json` with
+`schema: 1`, the platform name, the source commit used for capture, and ordered
+`steps` containing each visible title and relative PNG filename. Keep the
+captured output directory disposable; the repo-local PNGs and manifest are the
+reviewable refresh.
 
 Choose a new output directory for each run. Successful runs publish a directory
 of PNGs. The built APKs, emulator data and profiles are discarded. Fonts,

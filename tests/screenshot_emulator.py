@@ -75,7 +75,7 @@ def create_avd(home, sdk, image, tv):
 
 
 def capture(scenario, sdk, image, work, output):
-    tv = scenario == "tv"
+    tv = scenario in {"tv", "tv-store"}
     target = "tv" if tv else "android"
     adb_path = sdk / "platform-tools" / "adb"
     emulator_path = sdk / "emulator" / "emulator"
@@ -147,7 +147,7 @@ def capture(scenario, sdk, image, work, output):
 
 
 def capture_views(scenario, adb, apks, output):
-    tv = scenario == "tv"
+    tv = scenario in {"tv", "tv-store"}
     package = "org.nightingalelab.focus.tv" if tv else "org.nightingalelab.focus.phone"
 
     def shell(*args):
@@ -198,7 +198,10 @@ def capture_views(scenario, adb, apks, output):
         raise RuntimeError("Failed to set the fictional fixture date")
     shell("wm", "dismiss-keyguard")
     app, test = ("focus-tv.apk", "test-device.apk") if tv else ("focus-phone.apk", "test-phone.apk")
-    for apk in (app, test):
+    install = [app, test]
+    if scenario == "tv-store":
+        install.append("test-fixture.apk")
+    for apk in install:
         adb("install", str(apks / apk), timeout=180)
     shell("appops", "set", package, "GET_USAGE_STATS", "allow")
     if int(shell("getprop", "ro.build.version.sdk")) >= 33:
@@ -206,21 +209,34 @@ def capture_views(scenario, adb, apks, output):
         shell("pm", "set-permission-flags", package, "android.permission.POST_NOTIFICATIONS",
               "user-set", "user-fixed")
 
-    mode = "seed_store_showcase" if scenario == "phone-store" else "seed_showcase"
-    selector = ("phase", "seed-screenshot", "DeviceChecks") if tv else ("mode", mode, "PhoneDeviceChecks")
-    key, mode, runner = selector
-    result = adb("shell", "am", "instrument", "-w", "-e", key, mode,
-                 f"{package}.tests/.{runner}", timeout=180)
+    runner = "DeviceChecks" if tv else "PhoneDeviceChecks"
+    if tv:
+        result = adb("shell", "am", "instrument", "-w", "-e", "phase", "seed-screenshot",
+                     "-e", "flow", "store" if scenario == "tv-store" else "today",
+                     f"{package}.tests/.{runner}", timeout=180)
+    else:
+        mode = "seed_store_showcase" if scenario == "phone-store" else "seed_showcase"
+        result = adb("shell", "am", "instrument", "-w", "-e", "mode", mode,
+                     f"{package}.tests/.{runner}", timeout=180)
     if "INSTRUMENTATION_CODE: -1" not in result:
         raise RuntimeError(f"Fictional seed failed\n{result}")
     activity = f"{package}/.MainActivity"
     if tv:
-        shell("am", "start", "-W", "-n", activity)
-        shot("tv-today.png", "Today", selected=True)
-        # Today receives initial D-pad focus in the production TV activity.
-        shell("input", "keyevent", "KEYCODE_DPAD_RIGHT")
-        shell("input", "keyevent", "KEYCODE_DPAD_CENTER")
-        shot("tv-week.png", "Week", selected=True)
+        if scenario == "tv-store":
+            shell("settings", "put", "secure", "enabled_accessibility_services",
+                  f"{package}/.RestrictionService")
+            shell("settings", "put", "secure", "accessibility_enabled", "1")
+            shell("am", "start", "-W", "-n", f"{package}.fixture/.FixtureActivity")
+            shot("tv-blocked-app.png", "Store free time")
+            shell("input", "keyevent", "KEYCODE_DPAD_CENTER")
+            shot("tv-free-time-store.png", "5 min free · 15 coins")
+        else:
+            shell("am", "start", "-W", "-n", activity)
+            shot("tv-today.png", "Today", selected=True)
+            # Today receives initial D-pad focus in the production TV activity.
+            shell("input", "keyevent", "KEYCODE_DPAD_RIGHT")
+            shell("input", "keyevent", "KEYCODE_DPAD_CENTER")
+            shot("tv-week.png", "Week", selected=True)
     elif scenario == "phone-store":
         shell("am", "start", "-W", "-n", activity, "--es", "page", "today")
         shot("phone-store-today.png", "65 coins")
@@ -232,6 +248,11 @@ def capture_views(scenario, adb, apks, output):
         shot("phone-store-receipt.png", "15 minutes added")
         tap("Done")
         shot("phone-store-bought.png", "50 coins")
+    elif scenario == "phone-store-zero":
+        shell("am", "start", "-W", "-n", activity, "--es", "page", "today")
+        shot("phone-today-zero-coins.png", "0 coins")
+        tap("0 coins")
+        shot("phone-store-zero-coins.png", "Store")
     else:
         shell("am", "start", "-W", "-n", activity, "--es", "page", "today")
         shot("phone-today.png", "Today")
