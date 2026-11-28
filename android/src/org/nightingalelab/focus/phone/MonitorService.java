@@ -16,6 +16,7 @@ import org.nightingalelab.focus.habits.HabitStore;
  * - UsageStats collection (merged with Accessibility browser domain tracking)
  * - Periodic LAN sync with paired TV/Laptop and local TLS listener for Windows
  * - Widget updates & evening summary alarm scheduling
+ * - The current intention in the always-on notification, drift nudges and time's up
  */
 public final class MonitorService extends Service {
   private HandlerThread thread;
@@ -62,6 +63,7 @@ public final class MonitorService extends Service {
           devices.refreshScopedNotification(true);
         }
         devices.syncIfDue();
+        IntentionMonitor.tick(MonitorService.this);
         PhoneUpdater.get(MonitorService.this).checkIfDue();
         if (now - lastWidgetUpdate >= 60_000) {
           lastWidgetUpdate = now;
@@ -101,16 +103,8 @@ public final class MonitorService extends Service {
       nm.createNotificationChannel(
           new NotificationChannel("focus_monitor", "Focus protection", NotificationManager.IMPORTANCE_LOW));
     }
-    PendingIntent open = PendingIntent.getActivity(
-        this, 0, new Intent(this, MainActivity.class),
-        PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-    Notification n = new Notification.Builder(this, "focus_monitor")
-        .setSmallIcon(R.drawable.ic_stat_focus)
-        .setContentTitle("Focus")
-        .setContentText("Tracking activity")
-        .setOngoing(true)
-        .setContentIntent(open)
-        .build();
+    // Shows the current intention when one is running (see IntentionMonitor).
+    Notification n = IntentionMonitor.monitorNotification(this);
     if (Build.VERSION.SDK_INT >= 34) {
       startForeground(1, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
     } else {

@@ -1,4 +1,5 @@
 import "../styles.css";
+import "../features/intentions/calculations.js";
 import "../stats.js";
 import "../device-stats.js";
 import "../activity-classifier.js";

@@ -42,14 +42,16 @@ public final class PhoneDeviceChecks extends Instrumentation {
     boolean ok = false;
     try {
       Context target = getTargetContext();
-      if ("seed_showcase".equals(mode) || "seed_store_showcase".equals(mode)) {
+      if ("seed_showcase".equals(mode) || "seed_store_showcase".equals(mode)
+          || "seed_store_zero".equals(mode)) {
         seedShowcase(target, report);
-        if ("seed_store_showcase".equals(mode)) {
+        if ("seed_store_showcase".equals(mode) || "seed_store_zero".equals(mode)) {
           long now = System.currentTimeMillis();
           int day = org.nightingalelab.focus.habits.Habits.day(now);
           org.nightingalelab.focus.habits.HabitStore.get(target).updateWallet(wallet -> {
             wallet.start(day - 1);
-            return wallet.earn("fixture:store", "fixture", 65, "", now, day);
+            return "seed_store_showcase".equals(mode)
+                ? wallet.earn("fixture:store", "fixture", 65, "", now, day) : wallet;
           });
         }
         ok = true;
@@ -508,7 +510,7 @@ public final class PhoneDeviceChecks extends Instrumentation {
   }
 
   private void seedShowcase(Context c, JSONObject report) throws Exception {
-    if (!Build.FINGERPRINT.contains("generic") && !Build.MODEL.contains("sdk")) {
+    if (!screenshotEmulator()) {
       throw new AssertionError("Emulator only");
     }
     Store store = Store.get(c);
@@ -548,6 +550,13 @@ public final class PhoneDeviceChecks extends Instrumentation {
         Collections.singletonList(new String[] {"Activity tabs", "Return to the selected activity tab."}),
         ""));
     report.put("seeded", true);
+  }
+
+  private static boolean screenshotEmulator() {
+    String model = Build.MODEL.toLowerCase(Locale.ROOT);
+    String hardware = Build.HARDWARE.toLowerCase(Locale.ROOT);
+    return Build.FINGERPRINT.contains("generic") || model.contains("sdk")
+        || hardware.equals("ranchu") || hardware.equals("goldfish");
   }
 
   private void insertPause(SQLiteDatabase db, Store store, String id, long started, long durMs, int minutes, String reason) {
