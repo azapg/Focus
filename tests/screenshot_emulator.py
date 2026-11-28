@@ -182,25 +182,9 @@ def capture_views(scenario, adb, apks, output):
                 and (not selected or node.get("selected") == "true") for node in nodes
             ):
                 return
-        if os.environ.get("FOCUS_SCREENSHOT_KEEP_FAILED") == "1":
-            try:
-                image_bytes = adb("exec-out", "screencap", "-p", binary=True)
-                if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-                    (output / "debug-unverified.png").write_bytes(image_bytes)
-                screenshot_status = f"screencap returned {len(image_bytes)} bytes"
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-                screenshot_status = "screencap failed"
-            try:
-                activity_state = shell("dumpsys", "activity", "activities")[-5000:]
-                logcat = adb("logcat", "-d", "-b", "all", "-t", "1000")[-10000:]
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-                activity_state = logcat = "Android diagnostics unavailable"
-        else:
-            activity_state = logcat = screenshot_status = ""
         raise RuntimeError(
             f"Focus view did not appear: {label}; visible Focus nodes: {visible[:60]}; "
-            f"all visible UI nodes: {current[:80]}\n"
-            f"activity state: {activity_state}\n{screenshot_status}\nrecent logcat:\n{logcat}"
+            f"all visible UI nodes: {current[:80]}"
         )
 
     def tap(label):
@@ -295,8 +279,7 @@ def capture_views(scenario, adb, apks, output):
         tap("Done")
         shot("phone-store-bought.png", "50 coins")
     elif scenario == "phone-store-zero":
-        launch_result = shell("am", "start", "-W", "-n", activity, "--es", "page", "today")
-        print(f"Phone activity launch result:\n{launch_result}")
+        shell("am", "start", "-W", "-n", activity, "--es", "page", "today")
         shot("phone-today-zero-coins.png", "0 coins")
         tap("0 coins")
         shot("phone-store-zero-coins.png", "Store")

@@ -1,6 +1,15 @@
 {
   "schema": 1,
   "platform": "tv",
-  "source_commit": null,
-  "steps": []
+  "source_commit": "09deda290c9505254857d73480da831b7ed66ced",
+  "steps": [
+    {
+      "title": "Blocked app · 0 coins",
+      "image": "tv-blocked-app.png"
+    },
+    {
+      "title": "Free time store · 0 coins",
+      "image": "tv-free-time-store.png"
+    }
+  ]
 }

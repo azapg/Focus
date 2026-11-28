@@ -1,6 +1,15 @@
 {
   "schema": 1,
   "platform": "phone",
-  "source_commit": null,
-  "steps": []
+  "source_commit": "09deda290c9505254857d73480da831b7ed66ced",
+  "steps": [
+    {
+      "title": "Today · 0 coins",
+      "image": "phone-today-zero-coins.png"
+    },
+    {
+      "title": "Store · 0 coins",
+      "image": "phone-store-zero-coins.png"
+    }
+  ]
 }
