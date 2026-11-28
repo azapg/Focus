@@ -15,6 +15,7 @@ async def main(output=None):
         entry_url = page.url
         app = page.frame_locator("#focus-desktop-frame")
         await app.locator("#panel.open").wait_for()
+        assert await app.locator(".amb > span").first.text_content() == "·", "The embedded frontend must keep UTF-8 text."
         zero_balance = app.get_by_role("button", name="Store, 0 coins")
         await zero_balance.wait_for()
         await zero_balance.click()
