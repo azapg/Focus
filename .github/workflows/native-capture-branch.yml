@@ -64,11 +64,16 @@ jobs:
       - name: Capture fictional phone and TV Store flows offline
         run: |
           set -euo pipefail
-          python3 scripts/screenshot.py phone-store-zero \
+          parent_net="$(readlink /proc/self/ns/net)"
+          sudo unshare --net --pid --fork --kill-child --mount-proc -- \
+            env FOCUS_SCREENSHOT_PARENT_NET="$parent_net" \
+            python3 scripts/screenshot.py phone-store-zero \
             --sdk "$ANDROID_HOME" \
             --image system-images/android-35/default/x86_64 \
             --out build/native-captures/phone
-          python3 scripts/screenshot.py tv-store \
+          sudo unshare --net --pid --fork --kill-child --mount-proc -- \
+            env FOCUS_SCREENSHOT_PARENT_NET="$parent_net" \
+            python3 scripts/screenshot.py tv-store \
             --sdk "$ANDROID_HOME" \
             --image system-images/android-35/default/x86_64 \
             --out build/native-captures/tv
