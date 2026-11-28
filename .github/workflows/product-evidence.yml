@@ -1,0 +1,70 @@
+name: Product entry freshness
+
+on:
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'README.md'
+      - 'docs/product/**'
+      - 'docs/wallet.md'
+      - 'ui/**'
+      - 'android/**'
+      - 'tv/**'
+      - 'shared/android/**'
+      - 'tests/fixtures/*.mock.js'
+      - 'tests/product-entry.py'
+      - 'tests/screenshot_browser.py'
+      - 'tests/wallet-store.py'
+      - 'tests/device-panel.py'
+      - 'scripts/product-evidence.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig.json'
+      - '.github/workflows/product-evidence.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'AGENTS.md'
+      - 'README.md'
+      - 'docs/product/**'
+      - 'docs/wallet.md'
+      - 'ui/**'
+      - 'android/**'
+      - 'tv/**'
+      - 'shared/android/**'
+      - 'tests/fixtures/*.mock.js'
+      - 'tests/product-entry.py'
+      - 'tests/screenshot_browser.py'
+      - 'tests/wallet-store.py'
+      - 'tests/device-panel.py'
+      - 'scripts/product-evidence.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig.json'
+      - '.github/workflows/product-evidence.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check-entry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run product:entry -- --check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install playwright==1.65.2
+      - run: python -m playwright install chromium
+      - run: python tests/product-entry.py
