@@ -7,6 +7,8 @@ import android.os.*;
 import android.view.accessibility.*;
 import java.util.*;
 import org.json.*;
+import org.nightingalelab.focus.habits.HabitStore;
+import org.nightingalelab.focus.habits.Habits;
 import org.nightingalelab.focus.tv.*;
 
 /** Installed temporarily; signed instrumentation has no exported production command channel. */
@@ -155,6 +157,13 @@ public final class DeviceChecks extends Instrumentation {
     Rules blocked = new Rules();
     blocked.blocked = true;
     store.saveRule(FIXTURE, blocked);
+    long now = System.currentTimeMillis();
+    int day = Habits.day(now);
+    HabitStore.get(getTargetContext()).updateWallet(wallet -> {
+      wallet.start(day - 1);
+      wallet.earn("fixture:tv-store", "fixture", 15, "", now, day);
+      return null;
+    });
   }
 
   private static boolean screenshotEmulator() {
