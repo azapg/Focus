@@ -1,6 +1,7 @@
 use crate::{now_ms, Core};
 #[path = "peek_process.rs"]
 mod process;
+use focus_dns::browser_extension::BUNDLED_HOST as WORKER;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -33,7 +34,6 @@ use windows_sys::Win32::{
     UI::Shell::{FOLDERID_ProgramFiles, SHGetKnownFolderPath},
 };
 
-const WORKER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/peek-worker.exe"));
 const MAX_REPLY: usize = 1024 * 1024;
 static FETCH: Mutex<()> = Mutex::new(());
 

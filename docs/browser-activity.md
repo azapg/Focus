@@ -7,6 +7,14 @@ blocked sites when DNS protection resumes and shows static snapshots with Peek.
 
 ## Build and install on Windows
 
+In the desktop app, open **Settings → Laptop → Tracking → Set up Chrome**.
+Focus prepares the extension folder and registers its local helper. Copy the
+folder path, open `chrome://extensions`, enable **Developer mode**, and choose
+**Load unpacked**. Paste the path in the folder picker. If **Focus Browser
+Activity** is already listed, click its reload button.
+
+For Edge or a manual installation:
+
 1. From WSL, run `./scripts/build.sh`. It builds **both** executables using the
    existing Windows Rust toolchain and copies the unpacked extension and scripts
    to `%USERPROFILE%\.focusdns-build`. `FOCUS_BUILD_DIR` can isolate another build.

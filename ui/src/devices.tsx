@@ -951,19 +951,75 @@ function LaptopTab() {
       <PauseJudgeSettings invoke={call} />
       <div>
         <div className="t3-h">Tracking</div>
-        <div className="t3-card">
-          <div className="t3-row">
-            <div className="t3-row-text">
-              <div className="t3-row-title">Browser URL tracking</div>
-              <div className="t3-row-desc">
-                Chrome and Edge extension reports active tab domains and page titles locally.
-              </div>
-            </div>
-            <span className="t3-val">Active</span>
-          </div>
-        </div>
+        <BrowserTrackingCard />
       </div>
     </>
+  );
+}
+
+function BrowserTrackingCard() {
+  const [folder, setFolder] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [copyStatus, setCopyStatus] = useState("");
+  const folderInput = useRef<HTMLInputElement>(null);
+  const folderId = useId();
+
+  async function setup() {
+    setBusy(true);
+    setError("");
+    setFolder("");
+    setCopyStatus("");
+    try {
+      setFolder(await call("browser_setup_chrome"));
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyFolder() {
+    try {
+      await navigator.clipboard.writeText(folder);
+      setCopyStatus("Copied");
+    } catch {
+      folderInput.current?.focus();
+      folderInput.current?.select();
+      setCopyStatus("Press Ctrl+C to copy");
+    }
+  }
+
+  return (
+    <div className="t3-card">
+      <div className="t3-row">
+        <div className="t3-row-text">
+          <div className="t3-row-title">Browser URL tracking</div>
+          <div className="t3-row-desc">Track active tabs in Chrome and Edge.</div>
+        </div>
+        <button type="button" className="t3-btn" disabled={busy} onClick={setup}>
+          {busy ? "Preparing…" : "Set up Chrome"}
+        </button>
+      </div>
+      {error && <div className="t3-row" role="alert">{error}</div>}
+      {folder && (
+        <div className="t3-row-expand flex flex-col gap-2">
+          <p className="t3-row-desc">
+            In Chrome, open <code>chrome://extensions</code>, turn on <strong>Developer mode</strong>,
+            then choose <strong>Load unpacked</strong> and paste this folder path.
+            If Focus Browser Activity is already listed, use its reload button.
+          </p>
+          <Field>
+            <FieldLabel htmlFor={folderId}>Extension folder</FieldLabel>
+            <div className="flex items-center gap-2">
+              <Input id={folderId} className="min-w-0" ref={folderInput} readOnly value={folder} />
+              <button type="button" className="t3-btn" onClick={copyFolder}>Copy path</button>
+            </div>
+          </Field>
+          {copyStatus && <span className="t3-row-desc" role="status">{copyStatus}</span>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1898,7 +1954,7 @@ function SettingsPage() {
     { tab: "protection", sec: "Protection", title: "Phone & laptop max pause", desc: "Longest pause chip on laptop and phone.", kw: "max pause duration phone laptop" },
     { tab: "habits", sec: "Habits", title: "Daily credit cap", desc: "", kw: "routine streak reward" },
     { tab: "categories", sec: "Categories", title: "Sorted automatically", desc: "Apps and sites are sorted automatically.", kw: "categories sort automatic not sure" },
-    { tab: "laptop", sec: "Laptop", title: "This PC DNS & browser tracking", desc: "Windows DNS status, pause controls, Chrome & Edge extension.", kw: "laptop windows dns chrome edge extension" },
+    { tab: "laptop", sec: "Laptop", title: "This PC DNS & browser tracking", desc: "Windows DNS status, pause controls, Chrome & Edge extension.", kw: "laptop windows dns chrome edge extension setup install reinstall" },
     ...s.devices.map((d) => ({
       tab: `device:${d.id}`,
       sec: d.name,

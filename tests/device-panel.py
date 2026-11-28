@@ -32,6 +32,24 @@ async def main(output=None):
   await page.keyboard.press('Escape')
   await page.locator('#deviceSettings').click()
   assert not await page.locator('#statsPage').is_visible()
+  await page.locator('[data-stab="laptop"]').click()
+  setup_chrome = page.get_by_role('button', name='Set up Chrome')
+  await setup_chrome.scroll_into_view_if_needed()
+  await capture_panel(page, output, 'chrome-setup-entry.png')
+  await page.evaluate('window.__failBrowserSetup=true')
+  await setup_chrome.click()
+  await page.get_by_role('alert').get_by_text('Could not prepare the Chrome extension.').wait_for()
+  await page.evaluate('window.__failBrowserSetup=false')
+  await setup_chrome.click()
+  folder = page.get_by_role('textbox', name='Extension folder')
+  await folder.wait_for()
+  assert await folder.input_value() == r'C:\Users\Spruce\AppData\Local\FocusDNS\browser-bridge\extension'
+  await page.get_by_text('Load unpacked', exact=True).wait_for()
+  await page.evaluate("Object.defineProperty(navigator, 'clipboard', {value: {writeText: async text => {window.__copied = text;}}})")
+  await page.get_by_role('button', name='Copy path').click()
+  await page.get_by_role('status').get_by_text('Copied', exact=True).wait_for()
+  assert await page.evaluate('window.__copied') == await folder.input_value()
+  await capture_panel(page, output, 'chrome-setup-ready.png')
   await page.locator('[data-stab="device:tv-one"]').click()
   assert await page.locator('#dnsProfile').input_value()=='f0c057'
   assert await page.get_by_role('button',name='Restore previous DNS').count()==0
@@ -130,7 +148,7 @@ async def main(output=None):
   await page.keyboard.press('Escape');assert 'open' not in await page.locator('#panel').get_attribute('class')
   assert not errors,errors
   assert not any(c['c'] in ['pause','resume','lock'] for c in await page.evaluate('window.__calls'))
-  print('PASS: real UI filter, independent totals, two-pane settings, TV blocks/limits/schedules, DNS and app pauses, required reasons, failed-save drafts, offline controls, nearby discovery, TV-only approval, cancellation and decline, forget, escaped names, Today/Week and Escape.')
+  print('PASS: Chrome setup and retry, real UI filter, independent totals, two-pane settings, TV blocks/limits/schedules, DNS and app pauses, required reasons, failed-save drafts, offline controls, nearby discovery, TV-only approval, cancellation and decline, forget, escaped names, Today/Week and Escape.')
 
 if __name__ == "__main__":
  asyncio.run(main())
