@@ -12,6 +12,10 @@ Before changing a flow, open it on the intended device or inspect a current capt
 
 For cross-device work, one agent owns the whole user task. Record the expected result on each intended device and try it from the user's normal starting state. In the PR, give the entry point, the result you observed and any coverage gaps. Identify the build you checked when reporting that a change reached an installed app.
 
+## Screen entry
+
+Start desktop screen work in the [offline Focus product entry](docs/product/index.html). It embeds the checked-out Vite frontend, starts with a fictional zero-coin wallet, and links to a funded 65-coin sample. Refresh it with `npm ci && npm run build && npm run product:entry`; `npm run product:entry -- --check` detects stale output. The PR/main workflow builds and checks the entry, then smoke-tests Today → Store and the sample purchase. The preview reports its source and asset fingerprints; shipped app status is separate.
+
 ## Color means bad
 
 Focus is monochrome by default. Normal, completed, and within-limit states stay black, white, and gray. Do not use decorative colors, category rainbows, badges, or green accents for good states.
