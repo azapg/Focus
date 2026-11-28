@@ -22,7 +22,8 @@ public final class FocusEvents {
   private static final int MAX_ROWS = 1024;
   private static final int PAGE_ROWS = 32;
   private static final Set<String> NUMBERS = Set.of("expected_bytes", "actual_bytes", "limit_bytes",
-      "http_status", "status_class", "attempt", "install_status", "port", "service_count");
+      "http_status", "status_class", "attempt", "install_status", "port", "service_count",
+      "planned_minutes", "active_minutes", "extensions");
   private static final Set<String> FLAGS = Set.of("vpn_default", "strict_mode", "private_dns_active",
       "scope_available", "dns_enabled", "dns_paused", "authenticated", "manual_override");
   private static Log log;
@@ -118,6 +119,8 @@ public final class FocusEvents {
       case "decision_action": return Set.of("allow_services", "full_pause", "counter_offer", "deny", "fallback", "peek").contains(text);
       case "firewall_profiles": return text.equals("domain_private");
       case "network_category": return Set.of("public", "private", "domain", "mixed", "unknown").contains(text);
+      case "intention_outcome": return Set.of("done", "partly", "no", "cleared", "replaced").contains(text);
+      case "parse_source": return text.equals("gateway") || text.equals("local");
       default: return false;
     }
   }

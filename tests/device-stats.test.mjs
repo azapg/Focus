@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import fs from 'node:fs';
 const context = vm.createContext({ Date, Set });
+vm.runInContext(fs.readFileSync(new URL('../ui/features/intentions/calculations.js', import.meta.url), 'utf8'), context);
 vm.runInContext(fs.readFileSync(new URL('../ui/stats.js', import.meta.url), 'utf8') + '\n' + fs.readFileSync(new URL('../ui/device-stats.js', import.meta.url), 'utf8'), context);
 const { Stats, DeviceStats } = vm.runInContext('({Stats,DeviceStats})', context);
 const MIN = 60000, start = new Date(2025, 0, 10).getTime(), end = start + 60 * MIN;

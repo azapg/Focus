@@ -219,6 +219,26 @@ fn handle_remote_laptop_command(
     let action = input["action"].as_str().unwrap_or("");
     match action {
         "streak_view" | "streak_buy_freeze" => crate::streak_runtime::remote(app, core, &input).map(Some),
+        "intention_start" | "intention_extend" | "intention_end" => {
+            let reply = crate::intention_commands::remote(core, &input)?;
+            let now = crate::now_ms();
+            let _ = app.emit("intention-state", crate::intention_commands::current_view(core, tracker, now));
+            Ok(Some(reply))
+        }
+        "intention_parse" => {
+            let text = input["text"].as_str().unwrap_or("").trim().to_owned();
+            if text.is_empty() {
+                return Err("Enter what you are working on".into());
+            }
+            let budget = crate::judge::ask_budget(None, true);
+            let core = core.clone();
+            let (done, reply) = std::sync::mpsc::sync_channel(1);
+            tauri::async_runtime::spawn_blocking(move || {
+                let _ = done.send(crate::intention_commands::remote_parse(&core, &text));
+            });
+            let parsed = reply.recv_timeout(budget).map_err(|_| "Reading that took too long. Try again.".to_owned())??;
+            Ok(Some(json!(parsed)))
+        }
         "start_free_time" => {
             let minutes = input["minutes"]
                 .as_u64()
@@ -470,6 +490,7 @@ pub fn build_laptop_snapshot(
         "spans": spans,
         "pauses": pauses,
         "apps": [],
+        "intention": core.intentions.active(),
     }))
 }
 
