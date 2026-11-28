@@ -1,0 +1,29 @@
+{
+  "durationMs": 1800000,
+  "youtubeWatch": {
+    "desktopUrl": "https://www.youtube.com/watch?v=fictional-lesson",
+    "homeUrl": "https://www.youtube.com/",
+    "phonePackage": "com.google.android.youtube",
+    "displayRule": { "category": "learning", "app": "Lessons" }
+  },
+  "youtubeOtherPage": {
+    "desktopUrl": "https://www.youtube.com/policies/fictional-guide"
+  },
+  "customWritingApp": {
+    "app": "ExampleDesk",
+    "durationMs": 1800000,
+    "rule": { "match": "app", "value": "ExampleDesk", "app": "ExampleDesk", "category": "writing" }
+  },
+  "businessApp": {
+    "app": "ExampleBusinessDesk",
+    "durationMs": 1500000
+  },
+  "learningControls": {
+    "phonePackage": "com.duolingo",
+    "durationMs": 900000
+  },
+  "readingControl": {
+    "desktopUrl": "https://read.amazon.com/kindle/fictional-book",
+    "durationMs": 900000
+  }
+}
