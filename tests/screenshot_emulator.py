@@ -274,7 +274,7 @@ def capture_views(scenario, adb, apks, output):
             # AOSP surfaces a one-time immersive-mode confirmation on first full-screen launch.
             tap_system("Got it")
             shot("tv-blocked-app.png", "Store free time")
-            shell("input", "keyevent", "KEYCODE_DPAD_CENTER")
+            tap("Store free time")
             shot("tv-free-time-store.png", "5 min free · 15 coins")
         else:
             shell("am", "start", "-W", "-n", activity)

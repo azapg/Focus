@@ -157,11 +157,9 @@ public final class DeviceChecks extends Instrumentation {
     Rules blocked = new Rules();
     blocked.blocked = true;
     store.saveRule(FIXTURE, blocked);
-    long now = System.currentTimeMillis();
-    int day = Habits.day(now);
+    int day = Habits.day(System.currentTimeMillis());
     HabitStore.get(getTargetContext()).updateWallet(wallet -> {
       wallet.start(day - 1);
-      wallet.earn("fixture:tv-store", "fixture", 15, "", now, day);
       return null;
     });
   }
