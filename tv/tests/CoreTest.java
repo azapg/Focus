@@ -148,6 +148,37 @@ public final class CoreTest {
     ok(TvPauseJudge.isBareBypass("full pause. 5m"), "TV judge rejects bare bypass");
     ok(!TvPauseJudge.evaluate("watch youtube for a bit", 30).allowed, "TV judge denies recreational ask");
     ok(!TvPauseJudge.evaluate("full pause 5m", 0).allowed, "TV judge denies bare pause");
+    ok(Rules.isDefaultBlocked("com.google.android.youtube.tv"), "YouTube blocked by default");
+    ok(Rules.isDefaultBlocked("tv.twitch.android.app"), "Twitch blocked by default");
+    ok(Rules.isDefaultBlocked("com.netflix.ninja"), "Netflix blocked by default");
+    ok(Rules.isDefaultBlocked("com.disney.disneyplus"), "Disney+ blocked by default");
+    ok(!Rules.isDefaultBlocked("com.spotify.tv.android"), "Music app not blocked by default");
+    Rules locked = new Rules();
+    locked.blocked = true;
+    Rules unlocked = new Rules();
+    ok(Rules.isLoosening(locked, unlocked), "Unblocking is loosening");
+    ok(!Rules.isLoosening(unlocked, locked), "Blocking is tightening");
+    Rules limit30 = new Rules();
+    limit30.dailyLimitMs = 30 * 60_000L;
+    Rules limit60 = new Rules();
+    limit60.dailyLimitMs = 60 * 60_000L;
+    Rules limit15 = new Rules();
+    limit15.dailyLimitMs = 15 * 60_000L;
+    ok(Rules.isLoosening(limit30, limit60), "Raising daily limit is loosening");
+    ok(Rules.isLoosening(limit30, unlocked), "Clearing daily limit is loosening");
+    ok(!Rules.isLoosening(limit30, limit15), "Lowering daily limit is tightening");
+    Rules schedOn = new Rules();
+    schedOn.scheduled = true;
+    ok(Rules.isLoosening(schedOn, unlocked), "Disabling schedule is loosening");
+    ok(!Rules.isLoosening(unlocked, schedOn), "Enabling schedule is tightening");
+    ok("Overdue · 19:00".equals(TvRedirect.homeKicker(false, "Read 20 pages", true, "19:00")), "Overdue kicker");
+    ok("Setup needed".equals(TvRedirect.homeKicker(true, "Read 20 pages", true, "19:00")), "Missing access kicker");
+    ok("Read 20 pages.".equals(TvRedirect.homeHeadline(false, "Read 20 pages", 0)), "Habit headline");
+    ok("Send one intentional message.".equals(TvRedirect.homeHeadline(false, "Send one intentional message.", 0)), "Trailing dot normalized");
+    ok("Nothing to watch here. Go read or focus.".equals(TvRedirect.homeHeadline(false, "", 0)), "Idle redirect headline");
+    ok("Read 20 pages first, or pick up your book.".equals(TvRedirect.blockSubhead("Read 20 pages", true)), "Block subhead with habit");
+    ok("NextDNS On".equals(TvRedirect.dnsStatusBadge("On")), "Badge prepends NextDNS");
+    ok("NextDNS profile needed".equals(TvRedirect.dnsStatusBadge("NextDNS profile needed")), "Badge avoids duplicate NextDNS");
     System.out.println("PASS " + count + " policy and timeline assertions");
   }
 }

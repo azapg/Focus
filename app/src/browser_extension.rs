@@ -2,6 +2,10 @@ use std::{fs, io, path::Path};
 
 // The app binary is already checked by the nightly updater. Ship the extension changes inside it.
 const MANIFEST: &[u8] = include_bytes!("../../extension/manifest.json");
+#[cfg(windows)]
+pub const BUNDLED_HOST: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/peek-worker.exe"));
+#[cfg(any(windows, test))]
+const HOST_NAME: &str = "org.nightingalelab.focusdns";
 // Install dependencies before the scripts that load them, and the manifest last.
 const FILES: &[(&str, &[u8])] = &[
     ("capture.js", include_bytes!("../../extension/capture.js")),
@@ -34,6 +38,10 @@ pub fn update_installed(dir: &Path) -> io::Result<()> {
     if installed["key"] != bundle["key"] {
         return Ok(());
     }
+    write_extension(&extension)
+}
+
+fn write_extension(extension: &Path) -> io::Result<()> {
     for (name, bytes) in FILES {
         let path = extension.join(name);
         if !fs::read(&path).is_ok_and(|current| current == *bytes) {
@@ -42,6 +50,55 @@ pub fn update_installed(dir: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(any(windows, test))]
+fn prepare_chrome_files(dir: &Path, bundled_host: &[u8]) -> io::Result<(std::path::PathBuf, std::path::PathBuf)> {
+    let bridge = dir.join("browser-bridge");
+    let host = bridge.join("focus-browser-host.exe");
+    if !host.is_file() && bundled_host.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "This Focus build has no browser helper."));
+    }
+
+    fs::create_dir_all(&bridge)?;
+    // Preserve a helper already installed by the updater, which Chrome may be running.
+    if !host.is_file() {
+        focus_browser_host::atomic_write(&host, bundled_host)?;
+    }
+    let extension = bridge.join("extension");
+    write_extension(&extension)?;
+    let manifest = bridge.join(format!("{HOST_NAME}.json"));
+    let config = serde_json::json!({
+        "name": HOST_NAME,
+        "description": "Focus local browser activity bridge",
+        "path": host,
+        "type": "stdio",
+        "allowed_origins": ["chrome-extension://mfafgohdpfnknfgedjiicnmgomjpdock/"]
+    });
+    focus_browser_host::atomic_write(&manifest, &serde_json::to_vec(&config)?)?;
+    Ok((extension, manifest))
+}
+
+#[cfg(windows)]
+pub fn prepare_chrome(dir: &Path) -> io::Result<std::path::PathBuf> {
+    use std::{os::windows::process::CommandExt, process::Command};
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+
+    let (extension, manifest) = prepare_chrome_files(dir, BUNDLED_HOST)?;
+    let system_root = std::env::var_os("SystemRoot")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Windows system folder unavailable."))?;
+    let output = Command::new(Path::new(&system_root).join("System32/reg.exe"))
+        .creation_flags(CREATE_NO_WINDOW)
+        .arg("add")
+        .arg(format!(r"HKCU\Software\Google\Chrome\NativeMessagingHosts\{HOST_NAME}"))
+        .args(["/ve", "/t", "REG_SZ", "/d"])
+        .arg(&manifest)
+        .arg("/f")
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other("Could not register the Focus helper with Chrome."));
+    }
+    Ok(extension)
 }
 
 #[derive(Clone, Copy)]
@@ -162,6 +219,29 @@ mod tests {
         update_installed(&dir).unwrap();
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../extension");
         assert_runtime_files_match(&source, &installed);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn chrome_setup_prepares_a_fresh_install_and_repairs_missing_files() {
+        let dir = std::env::temp_dir().join(format!("focus-chrome-setup-{}-{}", std::process::id(), focus_browser_host::now_ms()));
+        assert!(prepare_chrome_files(&dir, b"").is_err());
+        assert!(!dir.exists());
+
+        let (extension, manifest) = prepare_chrome_files(&dir, b"bundled helper").unwrap();
+        let bridge = dir.join("browser-bridge");
+        let host = bridge.join("focus-browser-host.exe");
+        assert_eq!(fs::read(&host).unwrap(), b"bundled helper");
+        let config: serde_json::Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        assert_eq!(config["path"], host.to_str().unwrap());
+        assert_eq!(config["allowed_origins"][0], "chrome-extension://mfafgohdpfnknfgedjiicnmgomjpdock/");
+
+        fs::remove_file(extension.join("background.js")).unwrap();
+        fs::remove_file(manifest).unwrap();
+        let (extension, manifest) = prepare_chrome_files(&dir, b"").unwrap();
+        assert!(manifest.is_file());
+        assert_eq!(fs::read(&host).unwrap(), b"bundled helper");
+        assert_runtime_files_match(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../extension"), &extension);
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -10,21 +10,21 @@ the remote's arrows, OK and Back.
 
 Open **Focus** in the TV's apps.
 
-- **Today / Week:** Screen time, the category breakdown, a viewing timeline, app
-  usage, and pauses. Select a bar to inspect that time or day. Select an app to
-  block or unblock it, or use **All apps** to manage apps outside the top three.
-- **Restrictions:** choose an app, toggle blocking, set a daily allowance, or
-  configure a daily schedule. Overnight schedules are supported. Equal start/end
-  times mean all day. New installs have no rules.
-- **Allow temporarily:** choose 1, 5, 10 or 30 minutes and enter a reason using
-  the TV keyboard. The app reopens and a small bottom-right countdown appears.
-  At expiry, its configured restriction applies again. An app without a blocking
-  rule stays allowed. **End pause** in the app's controls ends the exception early.
-- **Settings:** permissions, pause history, manual export and diagnostics.
-- **NextDNS:** open Settings for profile setup, connection verification,
-  reason-required 1/5/10/30-minute DNS pauses and early resume. The same corner
-  countdown appears while a DNS pause is active. **Restore previous DNS** restores
-  the exact settings saved on first connection, including absent values.
+- **Home:** Opens to a quiet status screen showing your next due or overdue
+  habit (hold OK to complete) or a prompt to go read or focus, plus a floating
+  status pill for time, NextDNS, and coins.
+- **Habits / Activity:** Open from the bottom dock to view all habits or Today
+  and Week viewing charts.
+- **Control & Settings:** Opens as a floating right-side glass sheet with a 2x2
+  tile grid (NextDNS, Blocked apps, Devices, Health). Once connected, NextDNS is
+  locked on the TV and external changes to Private DNS snap back automatically.
+  Permission shortcuts stay hidden while Usage Access and Accessibility are on.
+- **Default blocks and tighten-only rules:** YouTube, Twitch, Netflix, and
+  Disney+ are blocked by default when installed. You can add blocks or stricter
+  limits on the TV; unblocking apps, loosening limits, and starting Free Time
+  happen from Focus on your phone or laptop.
+- **Blocked apps:** Opening a blocked app shows a quiet redirect with your next
+  due habit and defaults focus to **Done with TV**.
 
 The Windows dock can now manage this TV over the same local network. Open
 **Settings → Connect TV** in Windows, choose its nearby name, then approve the matching number on the TV. See [connection setup and desktop controls](../docs/device-management.md).
@@ -195,10 +195,13 @@ DNS pause audit rows use the reserved key `focus:dns`.
 
 ## Remove
 
-First use **NextDNS → Restore previous DNS** if you want the pre-Focus resolver.
-Then disable Focus under Accessibility and uninstall **Focus** in TV Settings.
-Uninstalling alone does not reset system DNS. Usage access and private data are
-removed by Android. Keep an export first if you want the history.
+Disable Focus under Accessibility and uninstall **Focus** in TV Settings.
+Uninstalling alone leaves Private DNS set to NextDNS. To reset Private DNS to
+Android's system default over ADB, run `adb shell settings delete global
+private_dns_mode` and `adb shell settings delete global private_dns_specifier`.
+If you used a custom Private DNS hostname before Focus, re-enter it in TV
+Settings after uninstalling. Usage access and private data are removed by
+Android. Keep an export first if you want the history.
 
 ## Platform references
 

@@ -2,6 +2,32 @@ package org.nightingalelab.focus.tv;
 
 /** Pure policy; elapsed time controls exceptions, local minutes control schedules. */
 public final class Rules {
+  public static final String[] DEFAULT_BLOCKED_PACKAGES = {
+    "com.google.android.youtube.tv",
+    "com.google.android.youtube.tvunplugged",
+    "tv.twitch.android.app",
+    "com.netflix.ninja",
+    "com.disney.disneyplus",
+    "com.disney.starplus"
+  };
+
+  public static boolean isDefaultBlocked(String pkg) {
+    if (pkg == null) return false;
+    for (String candidate : DEFAULT_BLOCKED_PACKAGES) {
+      if (candidate.equals(pkg)) return true;
+    }
+    return false;
+  }
+
+  /** TV local UI is tighten-only: unblocking, raising/clearing limits, or disabling schedules must happen on phone/desktop. */
+  public static boolean isLoosening(Rules current, Rules next) {
+    if (current == null || next == null) return false;
+    if (current.blocked && !next.blocked) return true;
+    if (current.dailyLimitMs > 0 && (next.dailyLimitMs == 0 || next.dailyLimitMs > current.dailyLimitMs))
+      return true;
+    return current.scheduled && !next.scheduled;
+  }
+
   enum CheckIn {
     TIRED("tired", "Tired"), BORED("bored", "Bored"), STUCK("stuck", "Stuck"),
     ANXIOUS("anxious", "Anxious"), SPECIFIC("specific", "Need something specific");

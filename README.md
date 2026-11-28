@@ -12,6 +12,8 @@ See [device setup and controls](docs/device-management.md).
 
 A tiny bar at the top of the screen keeps Windows on your chosen NextDNS profile using encrypted DNS-over-HTTPS.
 
+**Open Focus:** [offline desktop product entry](docs/product/index.html) — starts with a clean fictional wallet, with an optional funded Store sample.
+
 - **Hover the bar** to see the pause controls. After saving a Gateway key, choose **Ask**. The duration buttons are available on Windows before setup.
 - **Describe what you need** in Ask. The duration buttons still ask for a reason and check-in.
 - **It turns back on by itself** when the time is up. "Turn on" ends a pause early.

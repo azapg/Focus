@@ -12,6 +12,12 @@ Before changing a flow, open it on the intended device or inspect a current capt
 
 For cross-device work, one agent owns the whole user task. Record the expected result on each intended device and try it from the user's normal starting state. In the PR, give the entry point, the result you observed and any coverage gaps. Identify the build you checked when reporting that a change reached an installed app.
 
+## Screen entry
+
+Open the [Focus product preview](docs/product/index.html) in T3. Try Today → Store in the desktop frontend, or open the phone and TV captures under **Source, build and capture evidence**. Each route links to its screen code. The desktop samples start with active fictional wallets. To verify activation from a new profile, use the [Windows startup test and proof](docs/wallet.md#verify-store-startup).
+
+After changing a covered screen, rebuild with `npm ci && npm run build && npm run product:entry`. CI checks the generated page for stale output and tries a sample purchase.
+
 ## Color means bad
 
 Focus is monochrome by default. Normal, completed, and within-limit states stay black, white, and gray. Do not use decorative colors, category rainbows, badges, or green accents for good states.

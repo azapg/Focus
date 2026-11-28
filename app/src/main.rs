@@ -751,6 +751,19 @@ fn ui_log(msg: String, core: State<Arc<Core>>) {
 
 /// Reads user/agent activity rules from %LOCALAPPDATA%\FocusDNS\rules.json.
 #[tauri::command(async)]
+fn browser_setup_chrome(core: State<Arc<Core>>) -> Result<PathBuf, String> {
+    static SETUP: Mutex<()> = Mutex::new(());
+    if core.dry {
+        return Err("Chrome setup is unavailable in dry run.".into());
+    }
+    let _setup = SETUP.lock().unwrap();
+    focus_dns::browser_extension::prepare_chrome(&core.dir).map_err(|error| {
+        core.log(&format!("Chrome extension setup failed: {error}"));
+        format!("Could not prepare the Chrome extension. {error}")
+    })
+}
+
+#[tauri::command(async)]
 fn activity_rules_load(core: State<Arc<Core>>) -> Result<serde_json::Value, String> {
     activity_rules::load_rules(&core.dir).map_err(|e| {
         core.log(&format!("activity rules load error: {e}"));
@@ -1028,7 +1041,7 @@ fn main() {
             intention_commands::intention_state, intention_commands::intention_parse,
             intention_commands::intention_parse_local, intention_commands::intention_start,
             intention_commands::intention_edit, intention_commands::intention_extend,
-            intention_commands::intention_end])
+            intention_commands::intention_end, browser_setup_chrome])
         .setup(move |app| {
             let setup_core = Arc::new(Core::open_profile(setup_dir.clone(), dry, now_ms()));
             app.manage(setup_core.clone());

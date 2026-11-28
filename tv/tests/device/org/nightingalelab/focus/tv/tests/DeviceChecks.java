@@ -7,6 +7,8 @@ import android.os.*;
 import android.view.accessibility.*;
 import java.util.*;
 import org.json.*;
+import org.nightingalelab.focus.habits.HabitStore;
+import org.nightingalelab.focus.habits.Habits;
 import org.nightingalelab.focus.tv.*;
 
 /** Installed temporarily; signed instrumentation has no exported production command channel. */
@@ -136,7 +138,7 @@ public final class DeviceChecks extends Instrumentation {
   }
 
   private void seedScreenshot() {
-    if (!Build.FINGERPRINT.contains("generic") && !Build.MODEL.contains("sdk")) {
+    if (!screenshotEmulator()) {
       throw new AssertionError("Emulator only");
     }
     long day = 86_400_000L, minute = 60_000L;
@@ -146,6 +148,32 @@ public final class DeviceChecks extends Instrumentation {
     seedSpan(today - day + 12 * 60 * minute, 21, "com.google.android.youtube.tv");
     seedSpan(today - 3 * day + 12 * 60 * minute, 46, "com.netflix.ninja");
     seedSpan(today - 5 * day + 10 * 60 * minute, 18, "com.google.android.youtube.tv");
+  }
+
+  private void seedStoreScreenshot() {
+    if (!screenshotEmulator()) {
+      throw new AssertionError("Emulator only");
+    }
+    long now = System.currentTimeMillis();
+    long today = Store.dayStart(now);
+    seedSpan(today + 9 * 60 * 60_000L, 15, "com.google.android.youtube.tv");
+    Rules blocked = new Rules();
+    blocked.blocked = true;
+    store.saveRule(FIXTURE, blocked);
+    int day = Habits.day(now);
+    HabitStore habits = HabitStore.get(getTargetContext());
+    habits.save(null, "Read 20 pages", 1, 0, 19 * 60, 15, false);
+    habits.updateWallet(wallet -> {
+      wallet.start(day - 1);
+      return null;
+    });
+  }
+
+  private static boolean screenshotEmulator() {
+    String model = Build.MODEL.toLowerCase(Locale.ROOT);
+    String hardware = Build.HARDWARE.toLowerCase(Locale.ROOT);
+    return Build.FINGERPRINT.contains("generic") || model.contains("sdk")
+        || hardware.equals("ranchu") || hardware.equals("goldfish");
   }
 
   private void seedSpan(long start, int minutes, String pkg) {
@@ -164,7 +192,12 @@ public final class DeviceChecks extends Instrumentation {
     try {
       store = Store.get(getTargetContext());
       if (screenshot) {
-        seedScreenshot();
+        if ("store".equals(args.getString("flow"))) {
+          AppCatalog.invalidate();
+          seedStoreScreenshot();
+        } else {
+          seedScreenshot();
+        }
         result.put("passed", true);
         return;
       }
@@ -221,24 +254,10 @@ public final class DeviceChecks extends Instrumentation {
         check(true, "fixture_blocked");
         checkpoint("fixture_blocked");
         sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_DPAD_CENTER);
-        SystemClock.sleep(1000);
-        check(editable(ownRoot()) != null, "remote_select_opens_pause_form");
-        click("Allow for 5 minutes");
-        SystemClock.sleep(500);
-        check(store.pauseDeadline(FIXTURE) == 0, "empty_reason_rejected");
-        AccessibilityNodeInfo input = editable(ownRoot());
-        if (input == null) throw new AssertionError("Reason field missing");
-        Bundle text = new Bundle();
-        text.putCharSequence(
-            AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-            "Synthetic TV installation test");
-        if (!input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, text))
-          throw new AssertionError("Reason input failed");
-        click("Allow for 5 minutes");
-        waitFor(() -> store.pauseDeadline(FIXTURE) > 0, "UI pause not saved", 5000);
-        check(
-            store.pauseDeadline(FIXTURE) - SystemClock.elapsedRealtime() > 290000,
-            "duration_selected_by_ui");
+        waitFor(() -> !BlockActivity.visible, "Done with TV default action failed", 5000);
+        check(true, "remote_select_returns_home");
+        store.pause(FIXTURE, 300_000L, "Synthetic TV installation test");
+        open(FIXTURE);
         waitFor(
             () -> FIXTURE.equals(RestrictionService.timerPackage), "Corner countdown absent", 8000);
         check(true, "corner_countdown_with_fixture_foreground");
@@ -271,7 +290,7 @@ public final class DeviceChecks extends Instrumentation {
           waitFor(() -> blocked(YOUTUBE), "YouTube not blocked", 10000);
           check(true, "real_youtube_launch_blocked");
           checkpoint("youtube_blocked");
-          click("Home");
+          click("Done with TV");
           waitFor(() -> !BlockActivity.visible, "Home recovery failed", 5000);
           check(true, "home_recovery");
         } else result.put("real_youtube_launch_blocked", "not installed");

@@ -306,6 +306,7 @@ public final class ActivityClassifier {
     if (cat == null) return GROUP_UNKNOWN;
     switch (cat.toLowerCase(Locale.ROOT)) {
       case "building":
+      case "business":
       case "writing":
       case "designing":
         return GROUP_CREATING;
@@ -548,6 +549,7 @@ public final class ActivityClassifier {
     String id;
     switch (c.category == null ? "" : c.category) {
       case "building": id = "coding"; break;
+      case "business": id = "business"; break;
       case "writing": id = "writing"; break;
       case "reading":
       case "learning": id = c.category; break;

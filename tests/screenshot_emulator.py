@@ -75,7 +75,7 @@ def create_avd(home, sdk, image, tv):
 
 
 def capture(scenario, sdk, image, work, output):
-    tv = scenario == "tv"
+    tv = scenario in {"tv", "tv-store"}
     target = "tv" if tv else "android"
     adb_path = sdk / "platform-tools" / "adb"
     emulator_path = sdk / "emulator" / "emulator"
@@ -147,7 +147,7 @@ def capture(scenario, sdk, image, work, output):
 
 
 def capture_views(scenario, adb, apks, output):
-    tv = scenario == "tv"
+    tv = scenario in {"tv", "tv-store"}
     package = "org.nightingalelab.focus.tv" if tv else "org.nightingalelab.focus.phone"
 
     def shell(*args):
@@ -160,25 +160,51 @@ def capture_views(scenario, adb, apks, output):
         return ET.fromstring(shell("cat", remote)).iter("node")
 
     def wait_for_view(label, selected=False):
+        visible = []
+        current = []
         for _ in range(6):
             try:
-                nodes = dump()
+                nodes = list(dump())
             except (subprocess.CalledProcessError, ET.ParseError):
                 continue
+            current = [
+                f"{node.get('package', '')}: {node.get('text', '')} [{node.get('content-desc', '')}]"
+                for node in nodes if node.get("text") or node.get("content-desc")
+            ]
+            visible = [
+                f"{node.get('text', '')} [{node.get('content-desc', '')}]"
+                for node in nodes if node.get("package") == package
+                and (node.get("text") or node.get("content-desc"))
+            ]
             if any(
-                node.get("package") == package and label in node.get("text", "")
+                node.get("package") == package
+                and label in (node.get("text", "") + " " + node.get("content-desc", ""))
                 and (not selected or node.get("selected") == "true") for node in nodes
             ):
                 return
-        raise RuntimeError(f"Focus view did not appear: {label}")
+        raise RuntimeError(
+            f"Focus view did not appear: {label}; visible Focus nodes: {visible[:60]}; "
+            f"all visible UI nodes: {current[:80]}"
+        )
 
     def tap(label):
         node = next((node for node in dump() if node.get("package") == package
-                     and label in node.get("text", "") and node.get("clickable") == "true"), None)
+                     and label in (node.get("text", "") + " " + node.get("content-desc", ""))
+                     and node.get("clickable") == "true"), None)
         if node is None:
             raise RuntimeError(f"Focus control did not appear: {label}")
         left, top, right, bottom = map(int, re.findall(r"\d+", node.get("bounds")))
         shell("input", "tap", str((left + right) // 2), str((top + bottom) // 2))
+
+    def tap_system(label):
+        node = next((node for node in dump() if node.get("package") == "android"
+                     and label in (node.get("text", "") + " " + node.get("content-desc", ""))
+                     and node.get("clickable") == "true"), None)
+        if node is None:
+            return False
+        left, top, right, bottom = map(int, re.findall(r"\d+", node.get("bounds")))
+        shell("input", "tap", str((left + right) // 2), str((top + bottom) // 2))
+        return True
 
     def shot(name, label, selected=False):
         wait_for_view(label, selected)
@@ -198,29 +224,52 @@ def capture_views(scenario, adb, apks, output):
         raise RuntimeError("Failed to set the fictional fixture date")
     shell("wm", "dismiss-keyguard")
     app, test = ("focus-tv.apk", "test-device.apk") if tv else ("focus-phone.apk", "test-phone.apk")
-    for apk in (app, test):
+    install = [app, test]
+    if scenario == "tv-store":
+        install.append("test-fixture.apk")
+    for apk in install:
         adb("install", str(apks / apk), timeout=180)
     shell("appops", "set", package, "GET_USAGE_STATS", "allow")
     if int(shell("getprop", "ro.build.version.sdk")) >= 33:
-        # Leave guest notifications denied and suppress the first-run permission prompt.
-        shell("pm", "set-permission-flags", package, "android.permission.POST_NOTIFICATIONS",
-              "user-set", "user-fixed")
+        # Keep the synthetic walkthrough on the app screen instead of Android's permission prompt.
+        shell("pm", "grant", package, "android.permission.POST_NOTIFICATIONS")
 
-    mode = "seed_store_showcase" if scenario == "phone-store" else "seed_showcase"
-    selector = ("phase", "seed-screenshot", "DeviceChecks") if tv else ("mode", mode, "PhoneDeviceChecks")
-    key, mode, runner = selector
-    result = adb("shell", "am", "instrument", "-w", "-e", key, mode,
-                 f"{package}.tests/.{runner}", timeout=180)
+    runner = "DeviceChecks" if tv else "PhoneDeviceChecks"
+    if tv:
+        result = adb("shell", "am", "instrument", "-w", "-e", "phase", "seed-screenshot",
+                     "-e", "flow", "store" if scenario == "tv-store" else "today",
+                     f"{package}.tests/.{runner}", timeout=180)
+    else:
+        mode = {
+            "phone-store-zero": "seed_store_zero",
+            "phone-store": "seed_store_showcase",
+        }.get(scenario, "seed_showcase")
+        result = adb("shell", "am", "instrument", "-w", "-e", "mode", mode,
+                     f"{package}.tests/.{runner}", timeout=180)
     if "INSTRUMENTATION_CODE: -1" not in result:
         raise RuntimeError(f"Fictional seed failed\n{result}")
     activity = f"{package}/.MainActivity"
     if tv:
-        shell("am", "start", "-W", "-n", activity)
-        shot("tv-today.png", "Today", selected=True)
-        # Today receives initial D-pad focus in the production TV activity.
-        shell("input", "keyevent", "KEYCODE_DPAD_RIGHT")
-        shell("input", "keyevent", "KEYCODE_DPAD_CENTER")
-        shot("tv-week.png", "Week", selected=True)
+        if scenario == "tv-store":
+            shell("settings", "put", "secure", "enabled_accessibility_services",
+                  f"{package}/.RestrictionService")
+            shell("settings", "put", "secure", "accessibility_enabled", "1")
+            shell("am", "start", "-W", "-n", f"{package}.fixture/.FixtureActivity")
+            # AOSP surfaces a one-time immersive-mode confirmation on first full-screen launch.
+            tap_system("Got it")
+            shot("tv-blocked-app.png", "Done with TV")
+            shell("am", "start", "-W", "-n", activity)
+            shot("tv-home.png", "Control & Settings")
+            tap("Control & Settings")
+            shot("tv-control.png", "Focus Control")
+        else:
+            shell("am", "start", "-W", "-n", activity)
+            tap("Activity")
+            shot("tv-today.png", "Today", selected=True)
+            # Today receives initial D-pad focus in Activity view.
+            shell("input", "keyevent", "KEYCODE_DPAD_RIGHT")
+            shell("input", "keyevent", "KEYCODE_DPAD_CENTER")
+            shot("tv-week.png", "Week", selected=True)
     elif scenario == "phone-store":
         shell("am", "start", "-W", "-n", activity, "--es", "page", "today")
         shot("phone-store-today.png", "65 coins")
@@ -232,6 +281,11 @@ def capture_views(scenario, adb, apks, output):
         shot("phone-store-receipt.png", "15 minutes added")
         tap("Done")
         shot("phone-store-bought.png", "50 coins")
+    elif scenario == "phone-store-zero":
+        shell("am", "start", "-W", "-n", activity, "--es", "page", "today")
+        shot("phone-today-zero-coins.png", "0 coins")
+        tap("0 coins")
+        shot("phone-store-zero-coins.png", "Store")
     else:
         shell("am", "start", "-W", "-n", activity, "--es", "page", "today")
         shot("phone-today.png", "Today")

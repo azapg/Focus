@@ -12,9 +12,135 @@ import java.util.*;
 public final class Ui {
   public static final int BG = Color.BLACK,
       FG = 0xfffafafa,
+      SUB = 0xffb8b8c2,
       MUTED = 0xff8a8a8a,
       SECONDARY = 0xff161619,
-      BORDER = 0xff262629;
+      BORDER = 0xff262629,
+      GLASS = 0x16ffffff,
+      GLASS_HI = 0x24ffffff,
+      GLASS_BORDER = 0x1effffff,
+      SHEET_BG = 0xf216161a,
+      ORANGE = 0xfff59e0b,
+      RED = 0xffef4444;
+
+  public static GradientDrawable tvBackground() {
+    GradientDrawable bg = new GradientDrawable(
+        GradientDrawable.Orientation.TOP_BOTTOM,
+        new int[] {0xff141418, 0xff050507, 0xff000000});
+    return bg;
+  }
+
+  public static void applyFocusLift(View v, float scale) {
+    final View.OnFocusChangeListener previous = v.getOnFocusChangeListener();
+    v.setOnFocusChangeListener(
+        (view, focused) -> {
+          if (previous != null) previous.onFocusChange(view, focused);
+          view.animate()
+              .scaleX(focused ? scale : 1f)
+              .scaleY(focused ? scale : 1f)
+              .translationZ(focused ? dp(view.getContext(), 8) : 0f)
+              .setDuration(140)
+              .start();
+        });
+  }
+
+  public static Button glassButton(Context c, String label, Runnable action) {
+    Button b = new Button(c);
+    b.setText(label);
+    b.setTextSize(15);
+    b.setTypeface(c.getResources().getFont(R.font.geist_regular));
+    b.setAllCaps(false);
+    b.setMinHeight(dp(c, 46));
+    b.setMinimumHeight(dp(c, 46));
+    b.setMinWidth(0);
+    b.setPadding(dp(c, 22), dp(c, 8), dp(c, 22), dp(c, 8));
+    StateListDrawable bg = new StateListDrawable();
+    bg.addState(new int[] {android.R.attr.state_focused}, shape(FG, FG, 999, c));
+    bg.addState(new int[] {android.R.attr.state_pressed}, shape(FG, FG, 999, c));
+    bg.addState(new int[] {}, shape(GLASS_HI, GLASS_BORDER, 999, c));
+    b.setBackground(bg);
+    b.setTextColor(
+        new ColorStateList(
+            new int[][] {
+              new int[] {android.R.attr.state_focused},
+              new int[] {android.R.attr.state_pressed},
+              new int[] {}
+            },
+            new int[] {BG, BG, FG}));
+    b.setOnClickListener(v -> action.run());
+    b.setFocusable(true);
+    applyFocusLift(b, 1.03f);
+    return b;
+  }
+
+  public static Button dockTab(Context c, String label, boolean selected, Runnable action) {
+    Button b = new Button(c);
+    b.setText(label);
+    b.setTextSize(14);
+    b.setTypeface(c.getResources().getFont(R.font.geist_regular));
+    b.setAllCaps(false);
+    b.setMinHeight(dp(c, 38));
+    b.setMinimumHeight(dp(c, 38));
+    b.setMinWidth(0);
+    b.setPadding(dp(c, 16), dp(c, 6), dp(c, 16), dp(c, 6));
+    StateListDrawable bg = new StateListDrawable();
+    bg.addState(new int[] {android.R.attr.state_focused}, shape(FG, FG, 999, c));
+    bg.addState(new int[] {android.R.attr.state_pressed}, shape(FG, FG, 999, c));
+    bg.addState(new int[] {android.R.attr.state_selected}, shape(0x22ffffff, 0, 999, c));
+    bg.addState(new int[] {}, shape(0x00000000, 0, 999, c));
+    b.setBackground(bg);
+    b.setSelected(selected);
+    b.setTextColor(
+        new ColorStateList(
+            new int[][] {
+              new int[] {android.R.attr.state_focused},
+              new int[] {android.R.attr.state_pressed},
+              new int[] {android.R.attr.state_selected},
+              new int[] {}
+            },
+            new int[] {BG, BG, FG, SUB}));
+    b.setOnClickListener(v -> action.run());
+    b.setFocusable(true);
+    applyFocusLift(b, 1.03f);
+    return b;
+  }
+
+  public static LinearLayout controlTile(
+      Context c, String title, String value, int valueColor, boolean active, Runnable action) {
+    LinearLayout tile = column(c);
+    tile.setFocusable(true);
+    tile.setClickable(true);
+    tile.setPadding(dp(c, 14), dp(c, 12), dp(c, 14), dp(c, 12));
+    tile.setContentDescription(title + ", " + value);
+    TextView t = text(c, title, 14, FG);
+    TextView v = text(c, value, 12, valueColor);
+    t.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+    v.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+    tile.addView(t);
+    gap(tile, 3);
+    tile.addView(v);
+    StateListDrawable bg = new StateListDrawable();
+    bg.addState(new int[] {android.R.attr.state_focused}, shape(FG, FG, 14, c));
+    bg.addState(new int[] {android.R.attr.state_pressed}, shape(FG, FG, 14, c));
+    bg.addState(new int[] {}, shape(active ? GLASS_HI : GLASS, active ? 0x44ffffff : GLASS_BORDER, 14, c));
+    tile.setBackground(bg);
+    final int focusedValueColor =
+        valueColor == RED ? 0xffb91c1c : valueColor == ORANGE ? 0xffb45309 : 0xff444444;
+    tile.setOnFocusChangeListener(
+        (view, focused) -> {
+          t.setTextColor(focused ? BG : FG);
+          v.setTextColor(focused ? focusedValueColor : valueColor);
+          view.animate()
+              .scaleX(focused ? 1.03f : 1f)
+              .scaleY(focused ? 1.03f : 1f)
+              .translationZ(focused ? dp(c, 8) : 0f)
+              .setDuration(140)
+              .start();
+        });
+    tile.setOnClickListener(view -> action.run());
+    buttonSemantics(tile);
+    return tile;
+  }
 
   public static int dp(Context c, float n) {
     return Math.round(n * c.getResources().getDisplayMetrics().density);
