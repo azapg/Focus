@@ -212,6 +212,16 @@ def capture_views(scenario, adb, apks, output):
         left, top, right, bottom = map(int, re.findall(r"\d+", node.get("bounds")))
         shell("input", "tap", str((left + right) // 2), str((top + bottom) // 2))
 
+    def tap_system(label):
+        node = next((node for node in dump() if node.get("package") == "android"
+                     and label in (node.get("text", "") + " " + node.get("content-desc", ""))
+                     and node.get("clickable") == "true"), None)
+        if node is None:
+            return False
+        left, top, right, bottom = map(int, re.findall(r"\d+", node.get("bounds")))
+        shell("input", "tap", str((left + right) // 2), str((top + bottom) // 2))
+        return True
+
     def shot(name, label, selected=False):
         wait_for_view(label, selected)
         image_bytes = adb("exec-out", "screencap", "-p", binary=True)
@@ -261,6 +271,8 @@ def capture_views(scenario, adb, apks, output):
                   f"{package}/.RestrictionService")
             shell("settings", "put", "secure", "accessibility_enabled", "1")
             shell("am", "start", "-W", "-n", f"{package}.fixture/.FixtureActivity")
+            # AOSP surfaces a one-time immersive-mode confirmation on first full-screen launch.
+            tap_system("Got it")
             shot("tv-blocked-app.png", "Store free time")
             shell("input", "keyevent", "KEYCODE_DPAD_CENTER")
             shot("tv-free-time-store.png", "5 min free · 15 coins")
