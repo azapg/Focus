@@ -668,8 +668,7 @@ const Panel = (() => {
       const sec = $('pTimelineSec') || $('pChart')?.parentElement;
       if (sec) sec.hidden = true;
       $('pChart').innerHTML = '';
-      const isec = $('pIntentionsSec');
-      if (isec) { isec.hidden = true; isec.innerHTML = ''; }
+      renderIntentions(sources, null, range, from, to);
       $('pAppsLbl').innerHTML = '<span class="bento-title">Screen time</span>';
       $('pApps').innerHTML = '<div class="bento-empty">No device data selected.</div>';
       const af = $('pAppsFoot'); if (af) { af.hidden = true; af.innerHTML = ''; }
@@ -689,7 +688,7 @@ const Panel = (() => {
     const fine = ActivityClassifier.summarizeFine(sources, viewFrom, viewTo, { userRules: rulesDoc, cache: fineCache });
 
     const limitCtx = renderPausesColumn(sources, allSources, viewFrom, viewTo, isMultiDay, multi, scoped);
-    const intentSum = renderIntentions(sources, fine, range, viewFrom, viewTo, { rulesDoc, fineCache });
+    const intentSum = renderIntentions(sources, fine, range, viewFrom, viewTo, { rulesDoc, fineCache, invoke });
     renderHero(fine, range, activeDay, { ...limitCtx, intentions: intentSum });
     renderTimeline(sources, range, today, days);
     renderScreenTime(fine, multi, limitCtx);

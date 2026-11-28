@@ -711,6 +711,7 @@ struct History {
     pauses: Vec<PauseRec>,
     peeks: Vec<u64>,
     intentions: Vec<focus_dns::intentions::IntentionRec>,
+    intention_notes: Vec<focus_dns::intentions::IntentionNote>,
     /// Ask-approved service windows, so approved use is not counted as drift.
     grants: Vec<pause_history::ScopedGrant>,
 }
@@ -728,9 +729,10 @@ fn history(from: u64, to: u64, core: State<Arc<Core>>, tracker: State<Arc<Tracke
     let mut peeks = focus_browser_host::peek_history::timestamps(&core.dir, from, to);
     peeks.extend(peek_panel::timestamps(&core.dir, from, to));
     let intentions = core.intentions.history(from, to, now);
+    let intention_notes = core.intentions.notes(from, to, &intentions);
     let mut grants = pause_history::scoped_grants(&text, now);
     grants.retain(|g| g.end > from && g.t < to);
-    History { now, spans: tracker.spans(from, to), pauses, peeks, intentions, grants }
+    History { now, spans: tracker.spans(from, to), pauses, peeks, intentions, intention_notes, grants }
 }
 
 /// Same as Win+L: agents keep running, screen time stops counting until you unlock.
@@ -1041,7 +1043,7 @@ fn main() {
             intention_commands::intention_state, intention_commands::intention_parse,
             intention_commands::intention_parse_local, intention_commands::intention_start,
             intention_commands::intention_edit, intention_commands::intention_extend,
-            intention_commands::intention_end, browser_setup_chrome])
+            intention_commands::intention_end, intention_commands::intention_save_note, browser_setup_chrome])
         .setup(move |app| {
             let setup_core = Arc::new(Core::open_profile(setup_dir.clone(), dry, now_ms()));
             app.manage(setup_core.clone());

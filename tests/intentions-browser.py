@@ -30,7 +30,7 @@ MOCK = r'''(() => {
       { s: at(10, 34), e: at(10, 42), app: 'Slack', label: 'Slack', source: 'window_title' },
       web(at(11, 20), at(11, 26), 'www.youtube.com', 'https://www.youtube.com/watch?v=demo-fold', 'Flatten a pizza box - YouTube', true),
       web(at(12, 10), at(12, 24), 'x.com', 'https://x.com/home', 'Home / X'),
-      web(at(12, 24), at(12, 32), 'twitch.tv', 'https://twitch.tv/demo_stream', 'demo_stream - Twitch'),
+      { s: at(12, 24), e: at(12, 32), app: 'Screen Studio', label: 'Screen Studio', source: 'window_title' },
       web(at(13, 0), at(13, 21), 'docs.google.com', 'https://docs.google.com/document/d/demo', 'Gepeto launch post - Google Docs'),
       web(at(13, 21), at(13, 30), 'x.com', 'https://x.com/home', 'Home / X'),
       { s: at(13, 30), e: at(13, 34), app: 'Slack', label: 'Slack', source: 'window_title' },
@@ -42,6 +42,7 @@ MOCK = r'''(() => {
     grants: [
       { t: at(11, 20), end: at(11, 26), services: ['youtube'] },
     ],
+    intention_notes: [],
     intentions: [
       {
         id: 'int-1', start: at(9, 10), end: at(10, 42), planned_until: at(10, 40), planned_minutes: 90,
@@ -68,6 +69,16 @@ MOCK = r'''(() => {
       invoke: async (c, args) => {
         window.__calls.push({ c, args });
         if (c === 'history') return structuredClone(window.__testHistory);
+        if (c === 'intention_save_note') {
+          if (window.__failNote) throw 'Could not save note';
+          const note = args.note;
+          const notes = window.__testHistory.intention_notes;
+          const index = notes.findIndex((item) => item.intention_id === note.intention_id
+            && (note.intention_id || item.start === note.start));
+          if (index !== -1) notes.splice(index, 1);
+          if (note.text) notes.push(note);
+          return note.text ? structuredClone(note) : null;
+        }
         if (c === 'get_state') return { paused_at: 0, paused_until: 0, now, dry_run: true, dns_configured: true };
         if (c === 'pause_judge_settings') return { enabled: true, model: 'anthropic/claude-haiku-5.5', has_gateway_key: true, has_nextdns_key: true };
         if (c === 'activity_rules_load') return { version: 1, rules: [] };
@@ -274,12 +285,58 @@ async def main(output=None):
         }""")
         await capture_panel(page, output, "intentions-stats-today.png")
 
+        # An unplanned note keeps the warning and survives the panel refresh.
+        unplanned = sec.locator('[data-intent-row="none"]')
+        add_note = unplanned.get_by_role("button", name="Add note for 12:10")
+        await add_note.click()
+        input_note = unplanned.get_by_role("textbox")
+        sample_note = "Recorded and shared a quick demo. I spent extra time on X finding the original post so I could credit it."
+        await input_note.fill(sample_note)
+        await page.evaluate("""async () => {
+          await window.Panel.render(window.__TAURI__.core.invoke, 'today');
+          window.__failNote = true;
+        }""")
+        assert await input_note.input_value() == sample_note
+        assert await input_note.evaluate("e => document.activeElement === e")
+        await capture_panel(page, output, "intentions-note-editing.png")
+        await input_note.press("Control+Enter")
+        await unplanned.get_by_role("alert").get_by_text("Couldn’t save. Try again.").wait_for()
+        assert await input_note.input_value() == sample_note
+        await page.evaluate("window.__failNote = false")
+        await unplanned.get_by_role("button", name="Save note").click()
+        await unplanned.get_by_text(sample_note, exact=True).wait_for()
+        assert (await unplanned.get_by_text("No intention", exact=True).evaluate("e => getComputedStyle(e).color")) == "rgb(245, 158, 11)"
+        assert "22m unclear" in await page.locator("[data-intent-unclear]").inner_text()
+        await capture_panel(page, output, "intentions-note-saved.png")
+        assert await page.evaluate("""() => {
+          const [note] = window.__testHistory.intention_notes;
+          return !note.intention_id && note.end - note.start === 22 * 60000;
+        }""")
+
+        planned = sec.locator(".irow").filter(has_text="FairGrade rubric PR")
+        await planned.get_by_role("button", name="Add note for 09:10").click()
+        await planned.get_by_role("textbox").fill("Grouped the <draft> feedback.")
+        await planned.get_by_role("button", name="Save note").click()
+        await planned.get_by_text("Grouped the <draft> feedback.", exact=True).wait_for()
+        assert await page.evaluate("window.__testHistory.intention_notes.some(n => n.intention_id === 'int-1')")
+
         await page.locator("[data-r=week]").click()
         await page.wait_for_timeout(150)
         assert await sec.is_hidden()
+        await page.locator("[data-r=today]").click()
+        await unplanned.get_by_text(sample_note, exact=True).wait_for()
+        await unplanned.get_by_role("button", name="Edit note").click()
+        await input_note.fill("Discard this edit.")
+        await input_note.press("Escape")
+        await unplanned.get_by_text(sample_note, exact=True).wait_for()
+        await unplanned.get_by_role("button", name="Edit note").click()
+        await unplanned.get_by_role("button", name="Remove").click()
+        await add_note.wait_for()
+        assert await unplanned.get_by_text(sample_note, exact=True).count() == 0
+        assert await page.evaluate("window.__testHistory.intention_notes.length === 1")
 
         assert not errors, errors
-        print("PASS: desktop Intentions flows (hover, read-back, active pill, off-plan, time-up, 18m orange nag, Today stats section) verified.")
+        print("PASS: desktop Intentions flows, including adding, retrying, editing and removing a note in Today.")
 
 
 if __name__ == "__main__":

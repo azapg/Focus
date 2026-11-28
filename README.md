@@ -94,6 +94,7 @@ Everything lives in `%LOCALAPPDATA%\FocusDNS`:
 | --- | --- |
 | `pauses.jsonl` | Every pause (when, how long, the reason you gave) and when it really ended |
 | `intentions.jsonl` | Every intention you set (what, planned time, done-when, extensions, and outcome) |
+| `intention-notes.json` | Your notes on planned intentions and **No intention** blocks in desktop Today |
 | `activity\<day>.jsonl` | Screen time: which app or site was in front, and when |
 | `services.json` | Service-to-domain catalog for the pause judge |
 | `nextdns.json` | Local NextDNS profile and Windows DoH server addresses |
@@ -103,6 +104,13 @@ Everything lives in `%LOCALAPPDATA%\FocusDNS`:
 | `focusdns.log` | Everything the app did, including whether the NextDNS probe matched the configured profile |
 | `selftest.txt` | The off/on check from the last install |
 | `state.json` | The current pause, so a restart doesn't lose it |
+
+For intention analysis, read `intention-notes.json` alongside `intentions.jsonl`
+and the activity files. Match notes with an `intention_id` to the corresponding
+intention. For **No intention** notes, match activity using the `start` and `end`
+of the block when the note was saved, in Unix milliseconds. The desktop
+`history` command also returns these notes as `intention_notes`. Treat `text`
+as the user's account of what happened alongside the recorded activity.
 
 The optional `finiteAlternatives` array in `rules.json` lists approved activities.
 An omitted array uses the [bundled defaults](app/finite-breaks.json). An explicit

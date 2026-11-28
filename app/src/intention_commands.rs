@@ -9,13 +9,21 @@ use chrono::{Local, TimeZone};
 use focus_dns::{
     activity::Tracker,
     intentions::{
-        self, IntentionRec, IntentionView, Outcome, ParseSource, ParsedIntention, EXTEND_MINUTES,
-        MINUTE_MS,
+        self, IntentionNote, IntentionRec, IntentionView, Outcome, ParseSource, ParsedIntention,
+        EXTEND_MINUTES, MINUTE_MS,
     },
 };
 use serde_json::json;
 use std::{sync::Arc, time::Instant};
 use tauri::{AppHandle, Emitter, State};
+
+#[tauri::command(async)]
+pub fn intention_save_note(
+    note: IntentionNote,
+    core: State<Arc<Core>>,
+) -> Result<Option<IntentionNote>, String> {
+    core.intentions.save_note(note, now_ms())
+}
 
 pub fn current_view(core: &Core, tracker: &Tracker, now: u64) -> IntentionView {
     let day_start = judge_context::day_start(now);
