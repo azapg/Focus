@@ -23,13 +23,16 @@ DESKTOP = {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("scenario", choices=[*DESKTOP, "desktop", "phone", "phone-store", "tv"])
+    parser.add_argument(
+        "scenario",
+        choices=[*DESKTOP, "desktop", "phone", "phone-store", "phone-store-zero", "tv", "tv-store"],
+    )
     parser.add_argument("--out", type=Path, required=True, help="New directory for the PNGs")
     parser.add_argument("--sdk", type=Path, help="SDK root for phone or TV capture")
     parser.add_argument("--image", help="Installed SDK image, relative to the SDK root")
     args = parser.parse_args()
 
-    native = args.scenario in {"phone", "phone-store", "tv"}
+    native = args.scenario in {"phone", "phone-store", "phone-store-zero", "tv", "tv-store"}
     if native and not (args.sdk and args.image):
         parser.error("phone and TV require --sdk and --image")
     if not native and (args.sdk or args.image):

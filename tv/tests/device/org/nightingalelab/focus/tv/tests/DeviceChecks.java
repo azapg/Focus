@@ -7,6 +7,8 @@ import android.os.*;
 import android.view.accessibility.*;
 import java.util.*;
 import org.json.*;
+import org.nightingalelab.focus.habits.HabitStore;
+import org.nightingalelab.focus.habits.Habits;
 import org.nightingalelab.focus.tv.*;
 
 /** Installed temporarily; signed instrumentation has no exported production command channel. */
@@ -136,7 +138,7 @@ public final class DeviceChecks extends Instrumentation {
   }
 
   private void seedScreenshot() {
-    if (!Build.FINGERPRINT.contains("generic") && !Build.MODEL.contains("sdk")) {
+    if (!screenshotEmulator()) {
       throw new AssertionError("Emulator only");
     }
     long day = 86_400_000L, minute = 60_000L;
@@ -146,6 +148,27 @@ public final class DeviceChecks extends Instrumentation {
     seedSpan(today - day + 12 * 60 * minute, 21, "com.google.android.youtube.tv");
     seedSpan(today - 3 * day + 12 * 60 * minute, 46, "com.netflix.ninja");
     seedSpan(today - 5 * day + 10 * 60 * minute, 18, "com.google.android.youtube.tv");
+  }
+
+  private void seedStoreScreenshot() {
+    if (!screenshotEmulator()) {
+      throw new AssertionError("Emulator only");
+    }
+    Rules blocked = new Rules();
+    blocked.blocked = true;
+    store.saveRule(FIXTURE, blocked);
+    int day = Habits.day(System.currentTimeMillis());
+    HabitStore.get(getTargetContext()).updateWallet(wallet -> {
+      wallet.start(day - 1);
+      return null;
+    });
+  }
+
+  private static boolean screenshotEmulator() {
+    String model = Build.MODEL.toLowerCase(Locale.ROOT);
+    String hardware = Build.HARDWARE.toLowerCase(Locale.ROOT);
+    return Build.FINGERPRINT.contains("generic") || model.contains("sdk")
+        || hardware.equals("ranchu") || hardware.equals("goldfish");
   }
 
   private void seedSpan(long start, int minutes, String pkg) {
@@ -164,7 +187,12 @@ public final class DeviceChecks extends Instrumentation {
     try {
       store = Store.get(getTargetContext());
       if (screenshot) {
-        seedScreenshot();
+        if ("store".equals(args.getString("flow"))) {
+          AppCatalog.invalidate();
+          seedStoreScreenshot();
+        } else {
+          seedScreenshot();
+        }
         result.put("passed", true);
         return;
       }
