@@ -12,7 +12,7 @@ npm --prefix "$ROOT" run build
 mkdir -p "$OUT"
 rsync -a --delete --exclude target --exclude gen \
   "$ROOT/.cargo" "$ROOT/app" "$ROOT/ui-dist" "$ROOT/scripts" "$ROOT/browser-host" "$ROOT/devices" \
-  "$ROOT/telemetry" "$ROOT/extension" "$ROOT/tests" "$OUT/"
+  "$ROOT/telemetry" "$ROOT/extension" "$ROOT/tests" "$ROOT/shared" "$OUT/"
 install -D "$ROOT/ui/activity-classifier.js" "$OUT/ui/activity-classifier.js"
 (cd /mnt/c && /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command \
   "\$env:FOCUS_BUILD_ID = '$BUILD_ID'; \$env:FOCUS_COMMIT_SHA = '$COMMIT_SHA'; \$env:FOCUS_UPDATER_REPO = '$UPDATER_REPO'; Set-Location '$(wslpath -w "$OUT/app")'; cargo build --release --manifest-path ../browser-host/Cargo.toml 2>&1 | % { \"\$_\" }; if (\$LASTEXITCODE -ne 0) { exit \$LASTEXITCODE }; \$env:FOCUS_PEEK_WORKER = (Resolve-Path '../browser-host/target/release/focus-browser-host.exe').Path; cargo build --release 2>&1 | % { \"\$_\" }; exit \$LASTEXITCODE" </dev/null)

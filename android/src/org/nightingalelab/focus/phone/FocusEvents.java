@@ -107,8 +107,8 @@ public final class FocusEvents {
     String text = (String) value;
     switch (key) {
       case "failure_detail":
-        return java.util.Arrays.stream(GatewayRetry.Kind.values())
-            .anyMatch(kind -> kind.name().toLowerCase(java.util.Locale.ROOT).equals(text));
+        return Set.of("timeout", "transport", "http", "envelope", "finish_reason", "refusal",
+            "not_text", "parse", "minutes_mismatch", "counter_offer_mismatch", "cancelled").contains(text);
       case "correlation_id":
       case "peer_id": return validId(text);
       case "from_build":
@@ -116,7 +116,7 @@ public final class FocusEvents {
       case "origin": return text.equals("phone") || text.equals("laptop");
       case "route": return text.equals("laptop") || text.equals("gateway") || text.equals("local");
       case "direction": return text.equals("phone_to_laptop") || text.equals("laptop_to_phone");
-      case "decision_action": return Set.of("allow_services", "full_pause", "counter_offer", "deny", "fallback", "peek").contains(text);
+      case "decision_action": return Set.of("allow_services", "allow_domains", "full_pause", "counter_offer", "deny", "fallback", "peek").contains(text);
       case "firewall_profiles": return text.equals("domain_private");
       case "network_category": return Set.of("public", "private", "domain", "mixed", "unknown").contains(text);
       case "intention_outcome": return Set.of("done", "partly", "no", "cleared", "replaced").contains(text);

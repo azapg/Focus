@@ -13,6 +13,5 @@
   "laptop_overall_ms": 9000,
   "phone_read_ms": 9700,
   "phone_overall_ms": 15000,
-  "phone_fallback_ms": 3000,
   "min_retry_window_ms": 250
 }

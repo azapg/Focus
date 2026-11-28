@@ -54,20 +54,11 @@ public final class PhoneAskChecks {
       hub.ingestSyncedPeer(pushed, reciprocal, null, "phone");
       DeviceHub.PairedDevice peer = hub.findById(laptop);
       peer.online = true; // Simulate a previously working connection going down.
-      AtomicBoolean gatewayCalled = new AtomicBoolean();
-      PhonePauseJudge judge = new PhonePauseJudge(context, (model, request) -> {
-        gatewayCalled.set(true);
-        JSONArray actions = request.getJSONObject("response_format").getJSONObject("json_schema")
-            .getJSONObject("schema").getJSONObject("properties").getJSONObject("action").getJSONArray("enum");
-        check(!actions.toString().contains("allow_services") && !actions.toString().contains("peek"),
-            "Gateway schema offered an unavailable action");
-        return new JSONObject().put("action", "allow_services").put("services", new JSONArray().put("discord"))
-            .put("minutes", 3).put("message", "Check one message.").put("counter_offer", JSONObject.NULL).toString();
-      });
       String correlation = FocusEvents.newId();
-      PhonePauseJudge.Decision reply = judge.ask("Check one Discord message", null, null, correlation);
-      check(gatewayCalled.get() && reply.is("fallback") && GATEWAY_INVALID_REPLY.equals(reply.cause),
-          "Unexpected scoped reply must fail closed after a LAN outage");
+      PhonePauseJudge.Decision reply = new PhonePauseJudge(context)
+          .ask("Check one Discord message", null, null, correlation);
+      check(reply.is("fallback") && reply.laptop == null && LAPTOP_UNREACHABLE.equals(reply.cause),
+          "An unreachable laptop must not produce an Ask approval");
       String updatedAddress = "192.168.1.4:47833";
       reciprocal.put("address", updatedAddress);
       hub.ingestSyncedPeer(new JSONObject(pushed.toString()).put("snapshot_revision", 2), reciprocal, null, "phone");
@@ -75,101 +66,63 @@ public final class PhoneAskChecks {
       check(hub.isAddressPaired(updatedAddress), "The laptop's new address must not require another pairing");
       await(() -> Arrays.stream(FocusEvents.export(context).split("\n")).anyMatch(
           line -> line.contains(correlation) && line.contains("\"decision_action\":\"fallback\"")), 3000);
-      String events = FocusEvents.export(context);
-      check(events.contains(correlation) && events.contains(LAN_UNREACHABLE)
-          && events.contains(GATEWAY_INVALID_REPLY) && events.contains("\"decision_action\":\"fallback\"")
-          && !events.contains("Discord message"), "Missing or unsafe Ask events");
+      check(!FocusEvents.export(context).contains("Discord message"), "Ask diagnostics must omit the prompt");
+      report.put("unreachable_ask_grants_nothing", true);
+
+      DeviceHub.PairedDevice other = new DeviceHub.PairedDevice("another-laptop", "laptop",
+          "Other test laptop", "127.0.0.1:2", "1".repeat(64), "1".repeat(64));
+      hub.seedPreviewDataForTest(Arrays.asList(other, peer));
+      check(hub.askLaptop() == peer, "Adding another laptop must not change the Ask owner");
       CountDownLatch laptopStarted = new CountDownLatch(1);
       CountDownLatch releaseLaptop = new CountDownLatch(1);
       CountDownLatch laptopFinished = new CountDownLatch(1);
-      PhonePauseJudge late = new PhonePauseJudge(context, (model, request) ->
-          "{\"action\":\"deny\",\"minutes\":0,\"services\":[],"
-              + "\"message\":\"Direct Gateway answer.\",\"counter_offer\":null}",
-          new PhonePauseJudge.LaptopWire() {
-            @Override public DeviceHub.LaptopRoute resolve(DeviceHub hub, List<DeviceHub.PairedDevice> candidates,
-                long deadline, String correlation) {
-              return new DeviceHub.LaptopRoute(peer, peer.fingerprint, peer.token, peer.address, 0, deadline);
-            }
+      PhonePauseJudge late = new PhonePauseJudge(context, new PhonePauseJudge.LaptopWire() {
+        @Override public DeviceHub.LaptopRoute resolve(DeviceHub devices, List<DeviceHub.PairedDevice> candidates,
+            long deadline, String correlation) {
+          check(candidates.equals(Collections.singletonList(peer)), "Only the pinned laptop may receive Ask");
+          return new DeviceHub.LaptopRoute(peer, peer.fingerprint, peer.token, peer.address, 0, deadline);
+        }
 
-            @Override public PhonePauseJudge.Decision complete(DeviceHub.LaptopRoute route, String text,
-                PausePolicy.CheckIn checkIn, int cap, String correlation, long deadline) {
-              laptopStarted.countDown();
-              long until = SystemClock.elapsedRealtime() + 5000;
-              while (releaseLaptop.getCount() > 0 && SystemClock.elapsedRealtime() < until) {
-                try { releaseLaptop.await(50, TimeUnit.MILLISECONDS); }
-                catch (InterruptedException ignored) {} // A laptop can finish after the caller gave up.
-              }
-              laptopFinished.countDown();
-              return new PhonePauseJudge.Decision("late-laptop-ticket", "full_pause",
-                  Collections.emptyList(), 3, "Late laptop answer.", "", "", peer);
-            }
-          });
-      String lateId = FocusEvents.newId();
-      PhonePauseJudge.Decision winner;
+        @Override public PhonePauseJudge.Decision complete(DeviceHub.LaptopRoute route, String text,
+            PausePolicy.CheckIn checkIn, int cap, boolean forLaptop, String correlation, long deadline) {
+          laptopStarted.countDown();
+          long until = SystemClock.elapsedRealtime() + 5000;
+          while (releaseLaptop.getCount() > 0 && SystemClock.elapsedRealtime() < until) {
+            try { releaseLaptop.await(50, TimeUnit.MILLISECONDS); }
+            catch (InterruptedException ignored) {} // The laptop can finish after the caller gives up.
+          }
+          laptopFinished.countDown();
+          return new PhonePauseJudge.Decision("late-laptop-ticket", "full_pause",
+              Collections.emptyList(), 3, "Late laptop answer.", "", "", peer);
+        }
+      });
       try {
         long started = SystemClock.elapsedRealtime();
-        winner = late.askUntil("Check one message", null, null, lateId,
-            started, started + AskPolicy.PHONE_FALLBACK_MS + 500);
+        PhonePauseJudge.Decision timedOut = late.askUntil("Check a message", null, null, FocusEvents.newId(),
+            started, started + 700);
         check(laptopStarted.getCount() == 0 && laptopFinished.getCount() == 1,
-            "The laptop must still be outstanding when Gateway wins");
-        check(winner.is("deny") && "gateway".equals(winner.route) && winner.laptop == null
-            && lateId.equals(winner.id), "Only the Gateway proposal may be exposed");
+            "The laptop must still be outstanding at the client deadline");
+        check(timedOut.is("fallback") && timedOut.laptop == null && LAPTOP_TIMEOUT.equals(timedOut.cause),
+            "A late laptop answer must not be published");
       } finally {
         releaseLaptop.countDown();
       }
       check(laptopFinished.await(1, TimeUnit.SECONDS), "The late laptop reply did not complete");
-      await(() -> Arrays.stream(FocusEvents.export(context).split("\n")).anyMatch(
-          line -> line.contains(lateId) && line.contains("laptop_abandoned")), 3000);
-      String lateEvents = FocusEvents.export(context);
-      check(!lateEvents.contains("late-laptop-ticket"), "The abandoned ticket must not be published");
-      report.put("late_laptop_reply_ignored", true);
-      if (!DnsController.get(context).canPause()) {
-        String ineligibleId = FocusEvents.newId();
-        PhonePauseJudge.Decision eligible = late.ask("Check one message", null, null, ineligibleId);
-        check(eligible.is("deny") && "gateway".equals(eligible.route) && eligible.laptop == null,
-            "An unavailable local full pause must not reach the phone as the winning proposal");
-        await(() -> Arrays.stream(FocusEvents.export(context).split("\n")).anyMatch(
-            line -> line.contains(ineligibleId) && line.contains("laptop_abandoned")
-                && line.contains(PHONE_PAUSE_UNAVAILABLE)), 3000);
-        report.put("ineligible_laptop_full_pause_ignored", true);
-      }
-      java.util.concurrent.atomic.AtomicInteger samples = new java.util.concurrent.atomic.AtomicInteger();
-      PhonePauseJudge recovering = new PhonePauseJudge(context, (model, request) -> {
-        if (samples.incrementAndGet() == 1) return "not json";
-        return new JSONObject().put("action", "deny").put("minutes", -4)
-            .put("services", new JSONArray().put("x").put("x")).put("message", " ")
-            .put("counter_offer", "Ignore this").toString();
-      });
-      String blockedId = FocusEvents.newId();
+      report.put("pinned_laptop_and_late_reply_ignored", true);
+
       synchronized (hub) {
         long started = SystemClock.elapsedRealtime();
-        FutureTask<PhonePauseJudge.Decision> blocked = new FutureTask<>(() -> recovering.askUntil(
-            "Check one message", null, null, blockedId, started, started + AskPolicy.PHONE_FALLBACK_MS + 300));
+        FutureTask<PhonePauseJudge.Decision> blocked = new FutureTask<>(() -> late.askUntil(
+            "Check a message", null, null, FocusEvents.newId(), started, started + 300));
         Thread worker = new Thread(blocked, "ask-test-blocked-device-list");
         worker.setDaemon(true);
         worker.start();
-        PhonePauseJudge.Decision bounded = blocked.get(5, TimeUnit.SECONDS);
-        check(bounded.laptop == null, "A blocked device list must not delay Ask beyond its deadline");
+        check(blocked.get(5, TimeUnit.SECONDS).laptop == null,
+            "A blocked device list must not delay Ask beyond its deadline");
       }
-      samples.set(0);
       report.put("ask_deadline_covers_device_list", true);
-      hub.seedPreviewDataForTest(Collections.emptyList());
-      String recoveryId = FocusEvents.newId();
-      PhonePauseJudge.Decision recovered = recovering.ask("Check one message", null, null, recoveryId);
-      check(samples.get() == 2 && recovered.is("deny") && recovered.minutes == 0
-          && recovered.services.isEmpty() && recovered.alternative.isEmpty()
-          && !recovered.message.isEmpty(), "Invalid-then-valid Ask must normalize without granting access");
-      check(recoveryId.equals(recovered.id), "Direct Gateway must expose one stable decision ID");
-      JSONObject longReply = new JSONObject().put("action", "full_pause")
-          .put("minutes", 3).put("services", new JSONArray().put("x"))
-          .put("message", "x".repeat(501)).put("counter_offer", " ");
-      PhonePauseJudge.normalizeGatewayDecision(longReply);
-      check(longReply.getInt("minutes") == 3 && longReply.getJSONArray("services").length() == 0
-          && longReply.getString("message").length() == 500 && longReply.isNull("counter_offer"),
-          "Normalization must preserve a positive duration and discard extraneous details");
-      report.put("invalid_gateway_retry_and_normalization", true);
-      report.put("offline_laptop_push_and_invalid_gateway", true);
     } finally {
+      context.getSharedPreferences("focus-ask", Context.MODE_PRIVATE).edit().clear().commit();
       hub.seedPreviewDataForTest(previous);
     }
 
@@ -211,8 +164,7 @@ public final class PhoneAskChecks {
     for (String cause : Arrays.asList(LAPTOP_UNREACHABLE, LAPTOP_TIMEOUT, LAPTOP_TLS_MISMATCH, LAPTOP_UNAUTHORIZED,
         LAPTOP_JUDGE_DISABLED, LAPTOP_UNSUPPORTED, LAPTOP_REJECTED, LAPTOP_INVALID_REPLY, NO_LAPTOP_ANSWER,
         SCOPE_KEY_MISSING, SCOPE_PROFILE_MISMATCH, DNS_DISABLED, DNS_PAUSED, PRIVATE_DNS_INACTIVE, CAP_EXCEEDED,
-        DECISION_EXPIRED, APPLY_TIMEOUT, GATEWAY_NO_KEY, GATEWAY_KEYSTORE, GATEWAY_HTTP_4XX, GATEWAY_HTTP_5XX,
-        GATEWAY_TIMEOUT, GATEWAY_REFUSED, GATEWAY_INVALID_REPLY)) {
+        DECISION_EXPIRED, APPLY_TIMEOUT, ASK_LAPTOP_REQUIRED, GATEWAY_REFUSED, GATEWAY_INVALID_REPLY)) {
       check(messages.add(PhonePauseJudge.causeMessage(cause)), "Duplicate message for " + cause);
     }
     report.put("ask_cause_messages", true);
@@ -455,21 +407,9 @@ public final class PhoneAskChecks {
       check(dns.canPause(), "The emulator needs secure settings and exact alarm permissions");
       check(dns.configured() && dns.activePrivateDnsNetwork() == null,
           "The synthetic profile must be configured but unvalidated, which blocks Peek");
-      PhonePauseJudge approved = new PhonePauseJudge(context, (model, request) ->
-          "{\"action\":\"full_pause\",\"services\":[],\"minutes\":20,"
-              + "\"message\":\"Read the message.\",\"counter_offer\":null}");
-      PhonePauseJudge.Decision decision = approved.ask("Check one Discord message", null, null, FocusEvents.newId());
-      check(decision.is("full_pause") && decision.minutes == 5 && dns.deadline() == 0,
-          "Gateway proposal must keep the five-minute cap and await approval");
       instrumentation.runOnMainSync(() -> {
-        try {
-          Field judgeField = JudgeSheetDialog.class.getDeclaredField("judge");
-          judgeField.setAccessible(true);
-          judgeField.set(sheet, new PhonePauseJudge(context, (model, request) -> {
-            throw new IOException("Offline");
-          }));
-          show.invoke(sheet);
-        } catch (Exception error) { throw new AssertionError(error); }
+        try { show.invoke(sheet); }
+        catch (Exception error) { throw new AssertionError(error); }
       });
       instrumentation.waitForIdleSync();
       screenshot(instrumentation, context, "ask-before-answer.png");
@@ -482,21 +422,72 @@ public final class PhoneAskChecks {
         reason.setText("Check a club message");
         askButton.performClick();
       });
-      await(() -> hold.isShown(), 12_000);
-      await(() -> hold.isEnabled(), 22_000);
-      screenshot(instrumentation, context, "ask-offline-hold.png");
-      instrumentation.runOnMainSync(() -> {
-        touch(hold, MotionEvent.ACTION_DOWN);
-        touch(hold, MotionEvent.ACTION_UP);
+      Button retry = field(sheet, "retryButton", Button.class);
+      await(() -> retry.isShown(), 4000);
+      check("Retry".contentEquals(retry.getText()) && !hold.isShown() && dns.deadline() == 0,
+          "Offline Ask must offer Retry with protection still on");
+      report.put("offline_ask_offers_retry_without_pause", true);
+      instrumentation.runOnMainSync(dialog::dismiss);
+
+      DeviceHub.PairedDevice owner = new DeviceHub.PairedDevice("test-full-pause-owner", "laptop",
+          "Test Ask laptop", "127.0.0.1:2", "1".repeat(64), "1".repeat(64));
+      hub.seedPreviewDataForTest(Collections.singletonList(owner));
+      check(hub.selectAskLaptop(owner), "Synthetic owner must be selectable");
+      PhonePauseJudge approved = new PhonePauseJudge(context, new PhonePauseJudge.LaptopWire() {
+        @Override public DeviceHub.LaptopRoute resolve(DeviceHub hub, List<DeviceHub.PairedDevice> candidates,
+            long deadline, String correlation) {
+          return new DeviceHub.LaptopRoute(owner, owner.fingerprint, owner.token, owner.address, 0, deadline);
+        }
+
+        @Override public PhonePauseJudge.Decision complete(DeviceHub.LaptopRoute route, String text,
+            PausePolicy.CheckIn checkIn, int cap, boolean forLaptop, String correlation, long deadline)
+            throws JSONException {
+          check(!forLaptop, "The approval must target the phone");
+          PhonePauseJudge.Decision reply = PhonePauseJudge.parse(new JSONObject()
+              .put("action", "full_pause").put("minutes", 20).put("services", new JSONArray())
+              .put("message", "Read the message.").put("counter_offer", JSONObject.NULL),
+              "phone-full-pause", "", owner, cap, Collections.singletonList("full_pause"));
+          reply.correlationId = correlation;
+          reply.route = "laptop";
+          return reply;
+        }
+
+        @Override public JSONObject command(DeviceHub hub, DeviceHub.PairedDevice laptop,
+            JSONObject body, int readMs, String correlation) {
+          throw new AssertionError("A phone-local full pause must never send a Windows apply command");
+        }
       });
-      SystemClock.sleep(3200);
-      check(dns.deadline() == 0, "Releasing early must not apply the pause");
-      instrumentation.runOnMainSync(() -> touch(hold, MotionEvent.ACTION_DOWN));
+      PhonePauseJudge.Decision decision = approved.ask("Check one Discord message", null, null, FocusEvents.newId());
+      check(decision.is("full_pause") && decision.minutes == 5 && dns.deadline() == 0,
+          "Laptop proposal must keep the phone cap and await approval");
+      verifyLostScopeReply(context, hub, owner, report);
+      instrumentation.runOnMainSync(() -> {
+        try {
+          JudgeSheetDialog normal = constructor.newInstance(activity, null, (Runnable) () -> {});
+          Field judgeField = JudgeSheetDialog.class.getDeclaredField("judge");
+          judgeField.setAccessible(true);
+          judgeField.set(normal, approved);
+          created.set(normal);
+          show.invoke(normal);
+          field(normal, "request", EditText.class).setText("Check another club message");
+          field(normal, "ask", Button.class).performClick();
+        } catch (Exception error) {
+          throw new AssertionError(error);
+        }
+      });
+      Button approvedHold = field(created.get(), "primary", Button.class);
+      await(approvedHold::isShown, 4000);
+      instrumentation.runOnMainSync(() -> {
+        try { field(created.get(), "afterPlan", EditText.class).setText("Return to the essay"); }
+        catch (Exception error) { throw new AssertionError(error); }
+      });
+      await(approvedHold::isEnabled, 22_000);
+      instrumentation.runOnMainSync(() -> touch(approvedHold, MotionEvent.ACTION_DOWN));
       await(() -> dns.deadline() > 0, 5000);
-      check(dns.remainingMs() > 30_000 && dns.remainingMs() <= 60_000,
-          "Offline fallback pause should grant 1 minute after a 3-second hold");
       NotificationManager nm = context.getSystemService(NotificationManager.class);
       Notification phonePause = checkTimer(nm, "Phone DNS off", "Turn on now");
+      report.put("approved_ask_full_pause_timer", true);
+
       DeviceHub.PairedDevice laptop = new DeviceHub.PairedDevice("test-overlapping-laptop", "laptop",
           "Test laptop", "", "", "");
       hub.seedPreviewDataForTest(Collections.singletonList(laptop));
@@ -516,41 +507,77 @@ public final class PhoneAskChecks {
       hub.forget(laptop.id);
       await(() -> timer(nm, "X open") == null, 5000);
       report.put("scoped_and_phone_pause_notifications_coexist", true);
-      await(() -> FocusEvents.export(context).contains("\"manual_override\":true"), 5000);
-      report.put("manual_pause_offline_with_wait_plan_and_hold", true);
-      report.put("manual_ask_pause_timer", true);
-
-      instrumentation.runOnMainSync(() -> {
-        try {
-          JudgeSheetDialog normal = constructor.newInstance(activity, null, (Runnable) () -> {});
-          Field judgeField = JudgeSheetDialog.class.getDeclaredField("judge");
-          judgeField.setAccessible(true);
-          judgeField.set(normal, approved);
-          created.set(normal);
-          show.invoke(normal);
-          field(normal, "request", EditText.class).setText("Check another club message");
-          field(normal, "ask", Button.class).performClick();
-        } catch (Exception error) {
-          throw new AssertionError(error);
-        }
-      });
-      Button approvedHold = field(created.get(), "primary", Button.class);
-      instrumentation.runOnMainSync(() -> {
-        try { field(created.get(), "afterPlan", EditText.class).setText("Return to the essay"); }
-        catch (Exception error) { throw new AssertionError(error); }
-      });
-      await(() -> approvedHold.isShown() && approvedHold.isEnabled(), 22_000);
-      instrumentation.runOnMainSync(() -> touch(approvedHold, MotionEvent.ACTION_DOWN));
-      await(() -> dns.deadline() > 0, 5000);
-      checkTimer(nm, "Phone DNS off", "Turn on now");
-      report.put("approved_ask_full_pause_timer", true);
     } finally {
       if (dns.deadline() > 0) dns.resume();
       if (dns.enabled()) dns.disconnect();
+      context.getSharedPreferences("focus-ask", Context.MODE_PRIVATE).edit().clear().commit();
       hub.seedPreviewDataForTest(previous);
       hub.refreshScopedNotification(false);
       instrumentation.runOnMainSync(() -> { dialog.dismiss(); activity.finish(); });
     }
+  }
+
+  private static void verifyLostScopeReply(Context context, DeviceHub hub, DeviceHub.PairedDevice owner,
+      JSONObject report) throws Exception {
+    java.util.concurrent.atomic.AtomicInteger writes = new java.util.concurrent.atomic.AtomicInteger();
+    java.util.concurrent.atomic.AtomicInteger reads = new java.util.concurrent.atomic.AtomicInteger();
+    java.util.concurrent.atomic.AtomicInteger partialStatus = new java.util.concurrent.atomic.AtomicInteger();
+    PhonePauseJudge judge = new PhonePauseJudge(context, new PhonePauseJudge.LaptopWire() {
+      @Override public PhonePauseJudge.Decision complete(DeviceHub.LaptopRoute route, String text,
+          PausePolicy.CheckIn checkIn, int cap, boolean forLaptop, String correlation, long deadline) {
+        throw new AssertionError("Checking Start must never make another Ask");
+      }
+
+      @Override public JSONObject command(DeviceHub hub, DeviceHub.PairedDevice laptop, JSONObject body,
+          int readMs, String correlation) throws Exception {
+        if ("apply_decision".equals(body.optString("action"))) {
+          writes.incrementAndGet();
+          if ("partial-scope".equals(body.getJSONObject("input").optString("id"))) {
+            throw new LanClient.CommandException(409, "Setup interrupted");
+          }
+          throw new java.io.EOFException("Drop the Start reply");
+        }
+        check("scoped_access_status".equals(body.optString("action")), "Recovery must use a read-only check");
+        if ("partial-scope".equals(body.optString("id"))) {
+          int phase = partialStatus.get();
+          if (phase == 0) throw new IOException("Status connection unavailable");
+          return new JSONObject().put("status", phase == 1 ? "restoring" : "failed")
+              .put("scoped_timer", new JSONObject().put("now", System.currentTimeMillis())
+                  .put("snapshot_revision", phase + 1)
+                  .put("dns", new JSONObject().put("scoped_restoring", phase == 1)));
+        }
+        check("lost-scope".equals(body.optString("id")), "Recovery must check the same grant ID");
+        if (reads.incrementAndGet() == 1) return new JSONObject().put("status", "unknown");
+        long now = System.currentTimeMillis();
+        return new JSONObject().put("status", "active").put("scoped_timer", new JSONObject()
+            .put("now", now).put("snapshot_revision", 1)
+            .put("dns", new JSONObject().put("scoped_until", now + 60_000)
+                .put("scoped_grant", new JSONObject().put("id", "lost-scope").put("duration_ms", 60_000))
+                .put("scoped_services", new JSONArray().put("discord"))));
+      }
+    });
+    PhonePauseJudge.Decision decision = new PhonePauseJudge.Decision("lost-scope", "allow_services",
+        Collections.singletonList("discord"), 1, "Send one message.", "", "aaaaaa", owner);
+    decision.correlationId = FocusEvents.newId();
+    check(judge.open(decision, false) == PhonePauseJudge.ScopeStatus.UNKNOWN,
+        "An unknown status must not be treated as a failed or successful Start");
+    check(judge.scopeStatus(decision) == PhonePauseJudge.ScopeStatus.ACTIVE
+        && hub.hasActiveScopedGrant(owner, decision.id) && writes.get() == 1 && reads.get() == 2,
+        "Checking after a lost reply must recover the one original grant ID");
+    report.put("lost_start_recovers_original_grant_without_second_apply", true);
+    PhonePauseJudge.Decision partial = new PhonePauseJudge.Decision("partial-scope", "allow_services",
+        Collections.singletonList("github"), 1, "Check the review.", "", "aaaaaa", owner);
+    partial.correlationId = FocusEvents.newId();
+    check(judge.open(partial, false) == PhonePauseJudge.ScopeStatus.UNKNOWN,
+        "A rejected Start can still have left changes when status is unreachable");
+    partialStatus.set(1);
+    check(judge.scopeStatus(partial) == PhonePauseJudge.ScopeStatus.RESTORING && writes.get() == 2,
+        "A later status check must report pending cleanup without resending Start");
+    check(hub.scopedRestorationPending(), "A restoration status must update the shared phone state");
+    partialStatus.set(2);
+    check(judge.scopeStatus(partial) == PhonePauseJudge.ScopeStatus.FAILED && !hub.scopedRestorationPending(),
+        "A terminal failure must clear the restoration warning");
+    report.put("unknown_partial_start_can_confirm_restoration_pending", true);
   }
 
   private static Notification checkTimer(NotificationManager nm, String title, String action) throws Exception {

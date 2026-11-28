@@ -61,6 +61,28 @@ pub struct GrantTimer {
     pub duration_ms: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct GrantReceipt {
+    pub id: String,
+    pub until: u64,
+    pub opened: bool,
+}
+
+impl Lease {
+    pub fn active_id(&self, id: &str, now: u64) -> bool {
+        self.started.is_some() && !self.closing && self.until > now
+            && self.timer.as_ref().is_some_and(|timer| timer.id == id)
+    }
+
+    pub fn receipt(&self) -> Option<GrantReceipt> {
+        Some(GrantReceipt {
+            id: self.timer.as_ref()?.id.clone(),
+            until: self.until,
+            opened: self.started.is_some(),
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Prior {
@@ -453,6 +475,8 @@ pub struct PendingGrant {
     pub observed: bool,
     #[serde(default)]
     pub restored: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<GrantReceipt>,
     #[serde(default)]
     pub(crate) trace: Option<PauseTrace>,
 }
@@ -525,8 +549,8 @@ pub fn sweep(
     Ok(true)
 }
 
-// A pending grant may never arrive. Keep checking it without blocking other
-// domains. Once observed, durably mark it so failed restores can be retried.
+// A pending grant may never arrive. Once observed, durably mark it so failed
+// restores can be retried.
 pub fn reconcile_pending(
     domain: &str,
     mut pending: PendingGrant,
@@ -739,6 +763,7 @@ mod tests {
                         assert_eq!(domain, "test.example");
                         *state.borrow_mut() = None;
                         *pending.borrow_mut() = Some(PendingGrant {
+                            receipt: lease.receipt(),
                             profile: Some(TEST_PROFILE.into()),
                             prior,
                             observed: false,

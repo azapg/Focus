@@ -74,6 +74,7 @@ final class JudgeSheetDialog {
 
   private final HoldPillDrawable holdBackground;
   private PhonePauseJudge.Decision decision;
+  private PhonePauseJudge.ScopeStatus pendingScope;
   private PhonePauseJudge.Budget budget;
   private String transientError;
   private boolean busy;
@@ -273,20 +274,18 @@ final class JudgeSheetDialog {
     dismissButton.setOnClickListener(v -> dialog.dismiss());
     editRequestButton.setOnClickListener(v -> editRequest());
     retryButton.setOnClickListener(v -> {
-      if (isRefused()) {
+      if (pendingScope != null) openScoped();
+      else if (isRefused()) {
         dialog.dismiss();
         StoreSheet.show(activity, onApplied, () -> {});
       } else {
         ask();
       }
     });
-    headerAction.setOnClickListener(v -> {
-      if (isOfflineHold()) ask();
-      else editRequest();
-    });
+    headerAction.setOnClickListener(v -> editRequest());
 
     primary.setOnTouchListener((v, event) -> {
-      if (!needsHold()) return false;
+      if (!isFullPauseOffer()) return false;
       switch (event.getActionMasked()) {
         case MotionEvent.ACTION_DOWN: beginHold(); break;
         case MotionEvent.ACTION_MOVE:
@@ -301,7 +300,7 @@ final class JudgeSheetDialog {
       return true;
     });
     primary.setOnKeyListener((v, key, event) -> {
-      if (!needsHold() || (key != KeyEvent.KEYCODE_ENTER && key != KeyEvent.KEYCODE_DPAD_CENTER
+      if (!isFullPauseOffer() || (key != KeyEvent.KEYCODE_ENTER && key != KeyEvent.KEYCODE_DPAD_CENTER
           && key != KeyEvent.KEYCODE_SPACE)) return false;
       if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) beginHold();
       if (event.getAction() == KeyEvent.ACTION_UP) cancelHold();
@@ -328,7 +327,6 @@ final class JudgeSheetDialog {
 
   private void show() {
     dialog.show();
-    if (laptop == null) judge.warmGateway();
     Window window = dialog.getWindow();
     if (window != null) {
       window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
@@ -446,6 +444,7 @@ final class JudgeSheetDialog {
     if (busy) return;
     cancelHold();
     decision = null;
+    pendingScope = null;
     transientError = null;
     pendingAsk = null;
     afterPlan.setText("");
@@ -498,21 +497,18 @@ final class JudgeSheetDialog {
       try {
         PhonePauseJudge.Decision reply = judge.askUntil(
             reason, null, laptop, correlation, started, started + AskPolicy.PHONE_OVERALL_MS);
-        PhonePauseJudge.Budget resolvedBudget = reply.phoneBudget != null
-            ? reply.phoneBudget : (laptop == null ? judge.budget() : null);
         activity.runOnUiThread(() -> {
           if (!dialog.isShowing() || !correlation.equals(pendingAsk)) return;
           pendingAsk = null;
           busy = false;
           decision = reply;
-          budget = resolvedBudget;
+          budget = reply.phoneBudget;
           transientError = null;
           startWait();
           updateControls();
         });
       } catch (RuntimeException error) {
         judge.event("ask", "decision", GATEWAY_INVALID_REPLY, correlation, "local", started, null);
-        PhonePauseJudge.Budget fallbackBudget = laptop == null ? judge.budget() : null;
         activity.runOnUiThread(() -> {
           if (!dialog.isShowing() || !correlation.equals(pendingAsk)) return;
           pendingAsk = null;
@@ -524,7 +520,7 @@ final class JudgeSheetDialog {
           offline.route = "local";
           offline.cause = GATEWAY_INVALID_REPLY;
           decision = offline;
-          budget = fallbackBudget;
+          budget = null;
           startWait();
           updateControls();
         });
@@ -611,26 +607,16 @@ final class JudgeSheetDialog {
 
   private boolean isScopedOffer() {
     return decision != null && (decision.is("allow_services") || decision.is("allow_domains"))
-        && OK.equals(decision.scopeEligibility);
+        && pendingScope == null && OK.equals(decision.scopeEligibility);
   }
 
   private boolean isFullPauseOffer() {
-    return decision != null && decision.is("full_pause");
+    return decision != null && decision.is("full_pause") && OK.equals(decision.scopeEligibility);
   }
 
   private boolean isRefused() {
     return decision != null && (decision.is("deny")
         || (decision.is("fallback") && GATEWAY_REFUSED.equals(decision.cause)));
-  }
-
-  private boolean isOfflineHold() {
-    if (decision == null || !decision.is("fallback") || GATEWAY_REFUSED.equals(decision.cause)) return false;
-    if (laptop != null) return decision.remoteLimits != null;
-    return dns.canPause() && budget != null && budget.allowsManual(1);
-  }
-
-  private boolean needsHold() {
-    return isFullPauseOffer() || isOfflineHold();
   }
 
   private long requiredWait(PhonePauseJudge.Budget current) {
@@ -641,7 +627,6 @@ final class JudgeSheetDialog {
 
   private long holdMs(PhonePauseJudge.Budget current) {
     if (laptop != null) return PhonePauseJudge.holdForLaptop(decision);
-    if (isOfflineHold()) return 3000L;
     if (current == null) return 2000L;
     return PausePolicy.holdDurationMs(current.config, current.next);
   }
@@ -653,14 +638,13 @@ final class JudgeSheetDialog {
   }
 
   private int minutes(PhonePauseJudge.Budget current) {
-    if (isOfflineHold()) return 1;
     if (laptop != null) return decision.minutes;
     if (current == null) return Math.max(1, decision.minutes);
     return Math.min(decision.minutes, current.cap());
   }
 
   private void startWait() {
-    unlockAt = needsHold() ? SystemClock.elapsedRealtime() + requiredWait(budget) : 0;
+    unlockAt = isFullPauseOffer() ? SystemClock.elapsedRealtime() + requiredWait(budget) : 0;
   }
 
   private void updateControls() {
@@ -688,11 +672,10 @@ final class JudgeSheetDialog {
     boolean editable = !busy && holding == null;
     boolean scoped = isScopedOffer();
     boolean fullOffer = isFullPauseOffer();
-    boolean offlineHold = isOfflineHold();
-    boolean hold = needsHold();
+    boolean hold = isFullPauseOffer();
     boolean counterOffer = decision != null && decision.is("counter_offer");
     boolean refused = isRefused();
-    boolean offlineNoHold = decision != null && decision.is("fallback") && !offlineHold && !refused;
+    boolean unavailable = decision != null && decision.is("fallback") && !refused;
     boolean errorOnly = decision == null && transientError != null;
     boolean plan = hold && needsPlan(budget);
     long seconds = Math.max(0, (unlockAt - SystemClock.elapsedRealtime() + 999) / 1000);
@@ -758,17 +741,6 @@ final class JudgeSheetDialog {
       headerAction.setVisibility(View.VISIBLE);
       headerAction.setEnabled(editable);
       startButton.setVisibility(View.GONE);
-    } else if (offlineHold) {
-      cardTitle.setTextColor(Theme.WARN);
-      cardTitle.setText("Assistant unreachable");
-      String body = nonEmpty(transientError) ? transientError
-          : "Offline fallback only. Counts against your daily DNS-off limit.";
-      cardBody.setText(body);
-      cardBody.setVisibility(View.VISIBLE);
-      headerAction.setText("Retry");
-      headerAction.setVisibility(View.VISIBLE);
-      headerAction.setEnabled(editable);
-      startButton.setVisibility(View.GONE);
     } else if (counterOffer) {
       cardTitle.setTextColor(Theme.WARN);
       cardTitle.setText("Try this first");
@@ -784,13 +756,16 @@ final class JudgeSheetDialog {
       headerAction.setVisibility(View.GONE);
       startButton.setVisibility(View.GONE);
     } else {
-      // Offline without hold, ineligible scoped decision, peek unavailable, or transient error
       cardTitle.setTextColor(Theme.WARN);
-      cardTitle.setText(offlineNoHold ? "Assistant unreachable" : "Couldn\u2019t continue");
-      String msg = transientError;
+      cardTitle.setText(pendingScope == PhonePauseJudge.ScopeStatus.RESTORING ? "Restoring protection"
+          : pendingScope != null ? "Start unconfirmed"
+          : unavailable ? "Assistant unavailable" : "Couldn\u2019t continue");
+      String msg = pendingScope == PhonePauseJudge.ScopeStatus.RESTORING
+          ? "The laptop is putting the blocks back."
+          : pendingScope != null ? "Check with the laptop for the result." : transientError;
       if (!nonEmpty(msg) && decision != null) {
         if (decision.is("peek")) msg = "Peek is unavailable in this build.";
-        else if (decision.is("allow_services") || decision.is("allow_domains")) msg = PhonePauseJudge.causeMessage(decision.scopeEligibility);
+        else if (decision.is("allow_services") || decision.is("allow_domains") || decision.is("full_pause")) msg = PhonePauseJudge.causeMessage(decision.scopeEligibility);
         else msg = decision.message;
       }
       cardBody.setText(nonEmpty(msg) ? msg : "Try again.");
@@ -805,7 +780,6 @@ final class JudgeSheetDialog {
     primary.setVisibility(hold ? View.VISIBLE : View.GONE);
     if (hold) {
       boolean ready = !busy && seconds == 0 && reasonValid
-          && (!offlineHold || laptop != null || (budget != null && budget.allowsManual(1)))
           && (!plan || PausePolicy.reasonOk(afterPlan.getText().toString()));
       primary.setEnabled(ready);
       primary.setAlpha(ready || holding != null ? 1f : 0.48f);
@@ -815,8 +789,6 @@ final class JudgeSheetDialog {
       } else if (seconds > 0) {
         primary.setText("Wait " + seconds + "s");
         handler.postDelayed(tick, 250);
-      } else if (offlineHold) {
-        primary.setText("Hold " + holdSec + "s for 1 min pause");
       } else {
         primary.setText("Hold " + holdSec + "s to pause");
       }
@@ -828,11 +800,11 @@ final class JudgeSheetDialog {
       dismissButton.setEnabled(editable);
       editRequestButton.setVisibility(View.VISIBLE);
       editRequestButton.setEnabled(editable);
-      boolean canRetry = (offlineNoHold || errorOnly) && reasonValid;
+      boolean canRetry = pendingScope != null || (unavailable || errorOnly) && reasonValid;
       boolean showStore = refused && org.nightingalelab.focus.habits.HabitStore.get(activity)
           .read().wallet.active(org.nightingalelab.focus.habits.Habits.day(System.currentTimeMillis()));
       retryButton.setVisibility((canRetry || showStore) ? View.VISIBLE : View.GONE);
-      retryButton.setText(showStore ? "Store" : "Try again");
+      retryButton.setText(showStore ? "Store" : pendingScope != null ? "Check status" : "Retry");
       retryButton.setEnabled(editable);
       editRequestButton.setText((canRetry || showStore) ? "Edit" : "Edit request");
     }
@@ -843,13 +815,12 @@ final class JudgeSheetDialog {
   }
 
   private void beginHold() {
-    if (holding != null || !primary.isEnabled() || !needsHold()) return;
+    if (holding != null || !primary.isEnabled() || !isFullPauseOffer()) return;
     if (laptop != null) {
       beginLaptopHold();
       return;
     }
     final long duration = holdMs(budget);
-    final boolean offline = isOfflineHold();
     final String correlation = decision.correlationId;
     final String route = decision.route;
     final long started = SystemClock.elapsedRealtime();
@@ -861,7 +832,12 @@ final class JudgeSheetDialog {
       String cause = OK;
       try {
         PhonePauseJudge.Budget current = judge.budget();
-        if (!offline && decision.expired()) {
+        if (!judge.fromAskLaptop(decision)) {
+          cause = ASK_LAPTOP_REQUIRED;
+          showError(PhonePauseJudge.causeMessage(cause));
+          return;
+        }
+        if (decision.expired()) {
           cause = DECISION_EXPIRED;
           showError(PhonePauseJudge.causeMessage(cause));
           return;
@@ -869,12 +845,6 @@ final class JudgeSheetDialog {
         if (dns.deadline() > 0) {
           cause = DNS_PAUSED;
           showError(PhonePauseJudge.causeMessage(cause));
-          return;
-        }
-        if (offline && !current.allowsManual(1)) {
-          cause = CAP_EXCEEDED;
-          budget = current;
-          showError("Your daily pause allowance changed.");
           return;
         }
         if (requiredWait(current) > requiredWait(budget) || holdMs(current) > duration
@@ -892,7 +862,7 @@ final class JudgeSheetDialog {
         cause = DNS_APPLY_FAILED;
         showError(error.getMessage());
       } finally {
-        judge.recordFullPause(cause, correlation, route, started, offline);
+        judge.recordFullPause(cause, correlation, route, started, false);
         updateControls();
       }
     };
@@ -902,13 +872,12 @@ final class JudgeSheetDialog {
 
   private void beginLaptopHold() {
     PhonePauseJudge.Decision selected = decision;
-    boolean offline = selected.is("fallback");
     Runnable pending = () -> {};
     holding = pending;
     updateControls();
     new Thread(() -> {
       try {
-        org.json.JSONObject token = judge.beginLaptopHold(selected, false);
+        org.json.JSONObject token = judge.beginLaptopHold(selected);
         String id = token.getString("hold_id");
         long duration = token.getLong("hold_ms");
         activity.runOnUiThread(() -> {
@@ -918,7 +887,7 @@ final class JudgeSheetDialog {
           }
           laptopHoldId = id;
           holdBackground.animateFill(duration);
-          holding = () -> finishLaptopHold(selected, id, offline);
+          holding = () -> finishLaptopHold(selected, id);
           handler.postDelayed(holding, duration);
           updateControls();
         });
@@ -932,7 +901,7 @@ final class JudgeSheetDialog {
     }, "focus-laptop-hold").start();
   }
 
-  private void finishLaptopHold(PhonePauseJudge.Decision selected, String id, boolean offline) {
+  private void finishLaptopHold(PhonePauseJudge.Decision selected, String id) {
     if (!dialog.isShowing() || !dialog.getWindow().getDecorView().hasWindowFocus()) {
       cancelHold();
       return;
@@ -940,9 +909,8 @@ final class JudgeSheetDialog {
     holding = null;
     laptopHoldId = null;
     holdBackground.reset();
-    int duration = offline ? 1 : minutes(budget);
     String plan = afterPlan.getText().toString().trim();
-    runApply(() -> judge.applyLaptopHold(selected, id, false, duration, plan));
+    runApply(() -> judge.applyLaptopHold(selected, id, plan));
   }
 
   private void cancelHold() {
@@ -964,7 +932,38 @@ final class JudgeSheetDialog {
   private void openScoped() {
     if (busy || decision == null) return;
     PhonePauseJudge.Decision accepted = decision;
-    runApply(() -> judge.open(accepted, laptop != null));
+    boolean checkOnly = pendingScope != null;
+    busy = true;
+    updateControls();
+    new Thread(() -> {
+      PhonePauseJudge.ScopeStatus result;
+      String message = null;
+      try {
+        result = checkOnly ? judge.scopeStatus(accepted) : judge.open(accepted, laptop != null);
+      } catch (Exception failure) {
+        result = PhonePauseJudge.ScopeStatus.FAILED;
+        message = failure.getMessage();
+      }
+      PhonePauseJudge.ScopeStatus resolved = result;
+      String error = message;
+      activity.runOnUiThread(() -> {
+        if (!dialog.isShowing()) return;
+        busy = false;
+        switch (resolved) {
+          case ACTIVE: applied(); break;
+          case RESTORING:
+          case UNKNOWN: pendingScope = resolved; break;
+          case RESTORED:
+          case FAILED:
+            pendingScope = null;
+            decision = null;
+            transientError = resolved == PhonePauseJudge.ScopeStatus.RESTORED ? "Access already ended."
+                : nonEmpty(error) ? error : "The laptop couldn’t start access.";
+            break;
+        }
+        updateControls();
+      });
+    }, "focus-open-services").start();
   }
 
   private interface ApplyAction {

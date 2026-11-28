@@ -19,7 +19,7 @@ static WRITES: Mutex<()> = Mutex::new(());
 const EVENTS: &str = "ask pause update lan nextdns dns intention";
 const STAGES: &str = "start laptop laptop_abandoned gateway eligibility decision apply reconcile cleanup check download verify install bind firewall network connect tls auth request reachability address pause resume set edit extend end outcome nag_shown parse_fallback sync nudge time_up";
 const OUTCOMES: &str = "started ok failed skipped blocked";
-pub const CAUSES: &str = "laptop_unreachable laptop_timeout laptop_tls_mismatch laptop_unauthorized laptop_judge_disabled laptop_unsupported laptop_rejected laptop_invalid_reply gateway_no_key gateway_keystore gateway_http_4xx gateway_http_5xx gateway_cancelled gateway_transport gateway_timeout gateway_unreachable gateway_invalid_reply gateway_refused scope_key_missing scope_profile_mismatch dns_disabled dns_paused private_dns_inactive phone_pause_unavailable cap_exceeded decision_expired apply_timeout nextdns_auth nextdns_rejected nextdns_unreachable ok apk_too_large update_auth update_http update_no_asset update_invalid_manifest update_download update_verify update_no_space update_install update_cancelled lan_unreachable lan_timeout lan_tls_mismatch lan_unauthorized lan_rejected lan_invalid_reply lan_bind_failed firewall_failed dns_apply_failed no_laptop_answer stale";
+pub const CAUSES: &str = "laptop_unreachable ask_laptop_required laptop_timeout laptop_tls_mismatch laptop_unauthorized laptop_judge_disabled laptop_unsupported laptop_rejected laptop_invalid_reply gateway_no_key gateway_keystore gateway_http_4xx gateway_http_5xx gateway_cancelled gateway_transport gateway_timeout gateway_unreachable gateway_invalid_reply gateway_refused scope_key_missing scope_profile_mismatch dns_disabled dns_paused private_dns_inactive phone_pause_unavailable cap_exceeded decision_expired apply_timeout nextdns_auth nextdns_rejected nextdns_unreachable ok apk_too_large update_auth update_http update_no_asset update_invalid_manifest update_download update_verify update_no_space update_install update_cancelled lan_unreachable lan_timeout lan_tls_mismatch lan_unauthorized lan_rejected lan_invalid_reply lan_bind_failed firewall_failed dns_apply_failed no_laptop_answer stale";
 
 fn one_of(value: &Value, choices: &str) -> bool {
     value.as_str().is_some_and(|text| choices.split_ascii_whitespace().any(|choice| choice == text))
@@ -55,7 +55,7 @@ fn allowed_field(key: &str, value: &Value) -> bool {
     match key {
         "expected_bytes" | "actual_bytes" | "limit_bytes" | "http_status" | "status_class"
         | "attempt" | "port" | "service_count" | "planned_minutes" | "active_minutes"
-        | "extensions" => value.as_u64().is_some_and(|n| n <= i64::MAX as u64),
+        | "extensions" | "delay_ms" => value.as_u64().is_some_and(|n| n <= i64::MAX as u64),
         "install_status" => value.as_i64().is_some(),
         "vpn_default" | "strict_mode" | "private_dns_active" | "scope_available" | "dns_enabled"
         | "dns_paused" | "authenticated" | "manual_override" => value.is_boolean(),
@@ -64,7 +64,7 @@ fn allowed_field(key: &str, value: &Value) -> bool {
         "origin" => one_of(value, "phone laptop"),
         "route" => one_of(value, "laptop gateway local"),
         "direction" => one_of(value, "phone_to_laptop laptop_to_phone"),
-        "decision_action" => one_of(value, "allow_services full_pause counter_offer deny fallback peek"),
+        "decision_action" => one_of(value, "allow_services allow_domains full_pause counter_offer deny fallback peek"),
         "failure_detail" => one_of(value, "timeout transport http envelope finish_reason refusal not_text parse minutes_mismatch counter_offer_mismatch cancelled"),
         "firewall_profiles" => one_of(value, "domain_private"),
         "network_category" => one_of(value, "public private domain mixed unknown"),

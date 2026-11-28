@@ -282,6 +282,10 @@ fn handle_remote_laptop_command(
             Ok(None)
         }
         "judge_pause" => {
+            let target = match input.get("target") {
+                None => pause_judge::AskTarget::Laptop,
+                Some(value) => serde_json::from_value(value.clone()).map_err(invalid)?,
+            };
             let budget = crate::judge::ask_budget(input["answer_budget_ms"].as_u64(), true);
             let deadline = Instant::now() + budget;
             let (core, tracker, devices) = (core.clone(), tracker.clone(), devices.clone());
@@ -296,7 +300,7 @@ fn handle_remote_laptop_command(
                     let request = serde_json::from_value(input["request"].clone())
                         .map_err(|_| "Invalid pause judge command".to_string())?;
                     let mut decision = json!(pause_judge::judge_remote(
-                        &core, &tracker, &devices, request, deadline, input["correlation_id"].as_str(),
+                        &core, &tracker, &devices, request, deadline, input["correlation_id"].as_str(), target,
                     )?);
                     decision["scope_profile"] = json!(core.dns_profile());
                     Ok(Some(decision))
@@ -328,28 +332,57 @@ fn handle_remote_laptop_command(
             }
             Ok(Some(reply))
         }
+        "scoped_access_status" => Ok(Some(scoped_access_status(core, id()?, Instant::now())?)),
         _ => Err("Unsupported laptop control".into()),
     }
 }
 
 pub(super) fn scoped_apply_sample(core: &Core, id: &str, until: u64, started: Instant) -> Result<Option<Value>, String> {
     let saved = core.saved.lock().unwrap();
-    let Some(lease) = saved.scoped_pause.as_ref().filter(|lease|
-        lease.until == until && lease.started.is_some()
-            && lease.timer.as_ref().is_some_and(|timer| timer.id == id)
-    ) else { return Ok(None); };
-    let processing_ms = started.elapsed().as_millis() as u64;
     let now = crate::now_ms();
-    Ok(Some(json!({
+    let Some(lease) = saved.scoped_pause.as_ref().filter(|lease|
+        lease.until == until && lease.active_id(id, now)
+    ) else { return Ok(None); };
+    scoped_state_sample(core, Some(lease), false, now, started).map(Some)
+}
+
+fn scoped_state_sample(
+    core: &Core, lease: Option<&crate::nextdns::Lease>, restoring: bool, now: u64, started: Instant,
+) -> Result<Value, String> {
+    let processing_ms = started.elapsed().as_millis() as u64;
+    Ok(json!({
         "now": now,
         "snapshot_revision": core.next_event_sequence(now)?,
         "processing_ms": processing_ms,
         "dns": {
-            "scoped_until": until,
-            "scoped_grant": lease.timer,
-            "scoped_services": lease.services,
+            "scoped_until": lease.map_or(0, |lease| lease.until),
+            "scoped_grant": lease.and_then(|lease| lease.timer.as_ref()),
+            "scoped_services": lease.map_or(&[][..], |lease| lease.services.as_slice()),
+            "scoped_restoring": restoring,
         },
-    })))
+    }))
+}
+
+pub(super) fn scoped_access_status(core: &Core, id: &str, started: Instant) -> Result<Value, String> {
+    let saved = core.saved.lock().unwrap();
+    let now = crate::now_ms();
+    let lease = saved.scoped_pause.as_ref();
+    let active = lease.filter(|lease| !lease.needs_cleanup(now, false));
+    let status = if let Some(lease) = lease.filter(|lease|
+        lease.timer.as_ref().is_some_and(|timer| timer.id == id)
+    ) {
+        if lease.active_id(id, now) { "active" } else { "restoring" }
+    } else if saved.pending_grants.values().any(|pending|
+        pending.receipt.as_ref().is_some_and(|receipt| receipt.id == id)
+    ) {
+        "restoring"
+    } else if let Some(receipt) = saved.scope_receipt.as_ref().filter(|receipt| receipt.id == id) {
+        if receipt.opened { "restored" } else { "failed" }
+    } else {
+        return Ok(json!({"status": "unknown"}));
+    };
+    let sample = scoped_state_sample(core, active, saved.scope_restoring(now), now, started)?;
+    Ok(json!({"status": status, "scoped_timer": sample}))
 }
 
 pub(super) fn end_scoped_access(core: &Core, grant_id: &str) -> Result<bool, String> {
@@ -396,7 +429,7 @@ pub fn build_laptop_snapshot(
     server: Option<&LaptopServer>,
     fallback_name: &str,
 ) -> Result<Value, String> {
-    let LaptopPauseSnapshot { now, revision, active_pause, paused_until, scoped_until, scoped_grant, scoped_services, history, desktop_limit } =
+    let LaptopPauseSnapshot { now, revision, active_pause, paused_until, scoped_until, scope_restoring, scoped_grant, scoped_services, history, desktop_limit } =
         core.laptop_pause_snapshot()?;
     let range_from = now.saturating_sub(8 * 86_400_000);
     let raw_spans = tracker.spans(range_from, now);
@@ -484,6 +517,7 @@ pub fn build_laptop_snapshot(
             "status": if dns_paused { "Paused" } else { "On" },
             "pause_until": if dns_paused { paused_until } else { 0 },
             "scoped_until": scoped_until,
+            "scoped_restoring": scope_restoring,
             "scoped_grant": scoped_grant,
             "scoped_services": scoped_services,
         },

@@ -1,6 +1,7 @@
 package org.nightingalelab.focus.phone;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.*;
 import android.content.pm.PackageManager;
@@ -99,6 +100,7 @@ public final class MainActivity extends Activity {
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     Theme.applySystemBars(this);
+    AskLaptopSettings.retireGateway(this);
     MonitorService.ensure(this);
 
     root = new FrameLayout(this);
@@ -493,7 +495,20 @@ public final class MainActivity extends Activity {
   private boolean updateScopedDock() {
     DeviceHub hub = DeviceHub.get(this);
     ScopedAccessWindow access = hub.activeScopedAccess();
-    if (access == null) return false;
+    if (access == null) {
+      if (!hub.scopedRestorationPending()) return false;
+      scopedLogos.setVisibility(View.GONE);
+      scopedMeta.setVisibility(View.GONE);
+      scopedClock.setText("Restoration pending");
+      scopedClock.setTextColor(Theme.WARN);
+      scopedEnd.setText("Ask");
+      scopedEnd.setOnClickListener(v -> openPauseSheet());
+      return true;
+    }
+    scopedLogos.setVisibility(View.VISIBLE);
+    scopedMeta.setVisibility(View.VISIBLE);
+    scopedClock.setTextColor(Theme.FG);
+    scopedEnd.setText("End");
     if (!access.services.equals(scopedServices)) {
       scopedServices = access.services;
       JudgeSheetDialog.setServiceLogos(this, scopedLogos, scopedServices);
@@ -1666,10 +1681,11 @@ public final class MainActivity extends Activity {
         null,
         () -> SettingsDialogs.showProfileSheet(this, this::render)));
     protCard.addView(Theme.divider(this, 14, 14));
-    protCard.addView(settingsCardRow("Pause assistant", null,
-        PauseGatewaySettings.configured(this) ? "Gateway key saved" : "",
+    DeviceHub.PairedDevice askLaptop = DeviceHub.get(this).askLaptop();
+    protCard.addView(settingsCardRow("Ask laptop", null,
+        askLaptop == null ? "" : askLaptop.name,
         Theme.IconView.Kind.CHEVRON, null,
-        () -> PauseGatewaySettings.show(this, this::render)));
+        () -> AskLaptopSettings.show(this, this::render)));
     protCard.addView(Theme.divider(this, 14, 14));
     EmergencyShieldStore emergencyShield = new EmergencyShieldStore(this);
     long shieldCooldown = emergencyShield.offlineCooldownLeftMs(System.currentTimeMillis());
@@ -1850,6 +1866,15 @@ public final class MainActivity extends Activity {
   private void openRemotePauseSheet(DeviceHub.PairedDevice device) {
     JSONObject remoteDns = device.snapshot == null ? null : device.snapshot.optJSONObject("dns");
     if ("laptop".equals(device.kind) && remoteDns != null && remoteDns.optBoolean("pause_assistant")) {
+      DeviceHub.PairedDevice owner = DeviceHub.get(this).askLaptop();
+      if (owner == null || !owner.id.equals(device.id)) {
+        new AlertDialog.Builder(this).setTitle("Ask laptop")
+            .setMessage(owner == null ? "Choose which paired laptop handles Ask."
+                : owner.name + " handles Ask. Finish any open access before switching laptops.")
+            .setPositiveButton("Choose laptop", (dialog, which) -> AskLaptopSettings.show(this, this::render))
+            .setNegativeButton("Cancel", null).show();
+        return;
+      }
       askSheetOpen = true;
       bottomDock.setVisibility(View.INVISIBLE);
       JudgeSheetDialog.show(this, device, this::render, () -> {

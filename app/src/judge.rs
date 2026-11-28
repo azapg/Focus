@@ -13,15 +13,22 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-pub const DEFAULT_MODEL: &str = "anthropic/claude-haiku-5.5";
-pub const LUNA_MODEL: &str = "openai/gpt-6-luna";
 pub const GATEWAY_ENDPOINT: &str = "https://ai-gateway.vercel.sh/v1/chat/completions";
+pub const DEFAULT_INTENTION_MODEL: &str = "anthropic/claude-haiku-5.5";
 const MODEL_FULL_PAUSE_MAX_MINUTES: u64 = 5;
 const MAX_RESPONSE: u64 = 64 * 1024;
 const MAX_SERVICES: usize = 3;
 pub const MIN_REASON_CHARS: usize = 3;
 pub const MINUTE_MS: u64 = 60_000;
 pub const PROMPT: &str = include_str!("judge_prompt.txt");
+static WIRE: LazyLock<Value> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../shared/pause-judge-wire.json"))
+        .expect("embedded judge wire configuration")
+});
+
+pub fn model() -> &'static str {
+    WIRE["model"].as_str().expect("embedded judge model")
+}
 
 pub use crate::pause_history::CheckIn;
 
@@ -748,7 +755,6 @@ impl Gateway {
     pub fn decide(
         &self,
         key: &str,
-        model: &str,
         context: &Value,
         catalog: &Catalog,
         policy: Policy,
@@ -765,13 +771,16 @@ impl Gateway {
             actions.push("peek");
         }
         let domain_list: Vec<&str> = allowed_domains.iter().map(String::as_str).collect();
-        let domains_schema = if domain_list.is_empty() {
-            json!({ "type": "array", "items": { "type": "string" }, "description": "Always empty." })
-        } else {
-            json!({ "type": "array", "items": { "type": "string", "enum": domain_list }, "description": "One to three verified non-entertainment domains for allow_domains. Empty for other actions." })
-        };
+        let mut schema = WIRE["desktop_schema"].clone();
+        schema["properties"]["action"]["enum"] = json!(actions);
+        schema["properties"]["services"]["items"]["enum"] = json!(catalog.services());
+        if !domain_list.is_empty() {
+            let domains = &mut schema["properties"]["domains"];
+            domains["items"]["enum"] = json!(domain_list);
+            domains["description"] = WIRE["desktop_scoped_domains_description"].clone();
+        }
         let body = json!({
-            "model": model,
+            "model": model(),
             "stream": false,
             "messages": [
                 { "role": "system", "content": PROMPT },
@@ -779,23 +788,7 @@ impl Gateway {
             ],
             "response_format": {
                 "type": "json_schema",
-                "json_schema": {
-                    "name": "pause_decision",
-                    "strict": true,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "action": { "type": "string", "enum": actions, "description": "The proposed response to the request." },
-                            "services": { "type": "array", "items": { "type": "string", "enum": catalog.services() }, "description": "One to three distinct services for allow_services. Empty for other actions." },
-                            "domains": domains_schema,
-                            "minutes": { "type": "integer", "description": "Positive for allow_services, allow_domains, or full_pause. Zero for other actions." },
-                            "message": { "type": "string", "description": "A short explanation of the proposal." },
-                            "counter_offer": { "type": ["string", "null"], "description": "One concrete next step for counter_offer. Null for other actions." }
-                        },
-                        "required": ["action", "services", "domains", "minutes", "message", "counter_offer"],
-                        "additionalProperties": false
-                    }
-                }
+                "json_schema": { "name": "pause_decision", "strict": true, "schema": schema }
             }
         });
         let runtime = RUNTIME.as_ref().map_err(|failure| *failure)?;
@@ -1059,7 +1052,6 @@ mod tests {
         let started = Instant::now();
         let result = gateway.decide(
             "test-key",
-            DEFAULT_MODEL,
             &json!({"request":"Discord task"}),
             &catalog,
             policy,
@@ -1074,7 +1066,7 @@ mod tests {
         assert!(request.headers.contains("authorization: bearer test-key"));
         assert_eq!(request.line, "POST /v1/chat/completions HTTP/1.1");
         assert_eq!(request.body["messages"][0]["content"], PROMPT);
-        assert_eq!(request.body["model"], DEFAULT_MODEL);
+        assert_eq!(request.body["model"], "openai/gpt-6-luna");
         assert!(request.body.get("reasoning_effort").is_none());
         assert_eq!(request.body["response_format"]["type"], "json_schema");
         assert!(
@@ -1455,7 +1447,7 @@ mod tests {
         let parsed = gateway
             .parse_intention(
                 "test-key",
-                DEFAULT_MODEL,
+                DEFAULT_INTENTION_MODEL,
                 "cleaning the house for 8 hours, done when trash is out",
                 "2030-01-01 Tuesday 11:00 +00:00",
                 Duration::from_secs(3),

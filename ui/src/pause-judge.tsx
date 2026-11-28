@@ -2,9 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 
 type Settings = {
-  model: string;
-  default_model: string;
-  luna_model: string;
   enabled: boolean;
   has_gateway_key: boolean;
   has_nextdns_key: boolean;
@@ -65,7 +62,6 @@ function publishSettings(settings: Settings) {
 
 export function PauseJudgeSettings({ invoke }: { invoke: Invoke }) {
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [model, setModel] = useState("");
   const [gatewayKey, setGatewayKey] = useState("");
   const [nextDnsKey, setNextDnsKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -74,10 +70,7 @@ export function PauseJudgeSettings({ invoke }: { invoke: Invoke }) {
   useEffect(() => {
     let mounted = true;
     invoke("pause_judge_settings").then((value: Settings) => {
-      if (mounted) {
-        setSettings(value);
-        setModel(value.model);
-      }
+      if (mounted) setSettings(value);
     }).catch((error) => { if (mounted) setMessage(String(error)); });
     return () => { mounted = false; };
   }, [invoke]);
@@ -88,7 +81,6 @@ export function PauseJudgeSettings({ invoke }: { invoke: Invoke }) {
     try {
       const value: Settings = await invoke("pause_judge_settings_save", { update });
       setSettings(value);
-      setModel(value.model);
       setGatewayKey("");
       setNextDnsKey("");
       publishSettings(value);
@@ -106,18 +98,10 @@ export function PauseJudgeSettings({ invoke }: { invoke: Invoke }) {
           <form className="t3-row-expand space-y-3" onSubmit={(event) => {
             event.preventDefault();
             void save({
-              model,
               ...(gatewayKey.trim() ? { gateway_key: gatewayKey } : {}),
               ...(nextDnsKey.trim() ? { nextdns_key: nextDnsKey } : {}),
             });
           }}>
-            <label className="block">Vercel Gateway model
-              <Input value={model} required list="pauseModels" onChange={(e) => setModel(e.target.value)} disabled={busy} />
-              <datalist id="pauseModels">
-                <option value={settings.default_model}>Claude Haiku</option>
-                <option value={settings.luna_model}>GPT-6 Luna</option>
-              </datalist>
-            </label>
             <label className="block">Vercel Gateway API key
               <Input type="password" autoComplete="off" value={gatewayKey} onChange={(e) => setGatewayKey(e.target.value)}
                 placeholder={settings.has_gateway_key ? "Saved · enter to replace" : "Enter key"} disabled={busy} />

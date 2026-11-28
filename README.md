@@ -97,7 +97,7 @@ Everything lives in `%LOCALAPPDATA%\FocusDNS`:
 | `activity\<day>.jsonl` | Screen time: which app or site was in front, and when |
 | `services.json` | Service-to-domain catalog for the pause judge |
 | `nextdns.json` | Local NextDNS profile and Windows DoH server addresses |
-| `pause-judge.json` | Gateway model and Windows DPAPI-encrypted Gateway and NextDNS keys |
+| `pause-judge.json` | Windows DPAPI-encrypted Gateway and NextDNS keys |
 | `rules.json` | Custom app/domain categorization rules and approved finite alternatives, editable in JSON |
 | `uncategorized.json` | Summary of unmatched apps and domains with total time and sample titles, ready for agent review |
 | `focusdns.log` | Everything the app did, including whether the NextDNS probe matched the configured profile |

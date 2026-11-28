@@ -31,7 +31,8 @@ const MAX_TICKETS: usize = 48;
 #[derive(Deserialize, Serialize)]
 #[serde(default)]
 struct Settings {
-    model: String,
+    #[serde(rename = "model")]
+    intention_model: String,
     enabled: bool,
     gateway_dpapi: Option<String>,
     nextdns_dpapi: Option<String>,
@@ -42,7 +43,7 @@ struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            model: judge::DEFAULT_MODEL.into(),
+            intention_model: judge::DEFAULT_INTENTION_MODEL.into(),
             enabled: false,
             gateway_dpapi: None,
             nextdns_dpapi: None,
@@ -53,16 +54,12 @@ impl Default for Settings {
 
 #[derive(Deserialize)]
 pub struct SettingsUpdate {
-    model: Option<String>,
     gateway_key: Option<String>,
     nextdns_key: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct SettingsView {
-    model: String,
-    default_model: &'static str,
-    luna_model: &'static str,
     enabled: bool,
     has_gateway_key: bool,
     has_nextdns_key: bool,
@@ -80,9 +77,6 @@ impl Settings {
 
     fn view(&self) -> SettingsView {
         SettingsView {
-            model: self.model.clone(),
-            default_model: judge::DEFAULT_MODEL,
-            luna_model: judge::LUNA_MODEL,
             enabled: self.enabled(),
             has_gateway_key: self.gateway_dpapi.is_some(),
             has_nextdns_key: self.nextdns_dpapi.is_some(),
@@ -186,7 +180,7 @@ pub(crate) fn gateway_credentials(dir: &Path) -> Result<(String, String), (&'sta
         "gateway_no_key"
     };
     let key = settings.gateway_key().map_err(|failure| (cause, failure))?;
-    Ok((settings.model, key))
+    Ok((settings.intention_model, key))
 }
 
 fn protect_key(key: &str) -> Result<Option<String>, String> {
@@ -354,6 +348,7 @@ impl RemoteAsks {
 struct RemoteAsk {
     expires: Instant,
     request: Request,
+    target: AskTarget,
     result: Mutex<Option<Result<DecisionView, String>>>,
     ready: Condvar,
 }
@@ -389,6 +384,7 @@ fn once_remote(
     request: Request,
     deadline: Instant,
     correlation: Option<&str>,
+    target: AskTarget,
     run: impl FnOnce(Request, Option<&str>) -> Result<DecisionView, String>,
 ) -> Result<DecisionView, String> {
     let Some(correlation) = correlation.filter(|id| valid_correlation(id)) else {
@@ -398,7 +394,7 @@ fn once_remote(
         let mut asks = lock_before(&core.judge_tickets.1, deadline)?;
         asks.active.retain(|_, ask| ask.expires > Instant::now());
         if let Some(entry) = asks.active.get(correlation) {
-            if entry.request.text != request.text || entry.request.check_in != request.check_in {
+            if entry.target != target || entry.request.text != request.text || entry.request.check_in != request.check_in {
                 return Err("Ask ID already used for a different request".into());
             }
             (entry.clone(), false)
@@ -410,6 +406,7 @@ fn once_remote(
             let entry = Arc::new(RemoteAsk {
                 expires: deadline + TICKET_AGE,
                 request: request.clone(),
+                target,
                 result: Mutex::new(None),
                 ready: Condvar::new(),
             });
@@ -433,6 +430,13 @@ fn once_remote(
     result.clone().unwrap_or_else(|| Err(ASK_TIMEOUT.into()))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AskTarget {
+    Laptop,
+    Phone,
+}
+
 struct Ticket {
     created: Instant,
     request: Request,
@@ -441,6 +445,7 @@ struct Ticket {
     peek_target: Option<String>,
     hold: Option<Hold>,
     trace: PauseTrace,
+    target: AskTarget,
 }
 
 struct Hold {
@@ -476,6 +481,7 @@ pub struct DecisionView {
     refused: bool,
     manual_choices: Vec<u64>,
     friction: Friction,
+    target: AskTarget,
 }
 
 #[derive(Serialize)]
@@ -538,7 +544,7 @@ pub fn judge(
     budget: Duration,
 ) -> Result<DecisionView, String> {
     judge_using_gateway(core, tracker, devices, request, Instant::now() + budget,
-        PauseTrace::new(false, None), Gateway::shared)
+        PauseTrace::new(false, None), AskTarget::Laptop, Gateway::shared)
 }
 
 pub fn judge_remote(
@@ -548,10 +554,11 @@ pub fn judge_remote(
     request: Request,
     deadline: Instant,
     correlation: Option<&str>,
+    target: AskTarget,
 ) -> Result<DecisionView, String> {
-    once_remote(core, request, deadline, correlation, |request, correlation| {
+    once_remote(core, request, deadline, correlation, target, |request, correlation| {
         judge_using_gateway(core, tracker, devices, request, deadline,
-            PauseTrace::new(true, correlation), Gateway::shared)
+            PauseTrace::new(true, correlation), target, Gateway::shared)
     })
 }
 
@@ -562,6 +569,7 @@ fn judge_using_gateway<'a>(
     mut request: Request,
     deadline: Instant,
     trace: PauseTrace,
+    target: AskTarget,
     gateway: impl FnOnce() -> Result<&'a Gateway, Failure>,
 ) -> Result<DecisionView, String> {
     let elapsed = Instant::now();
@@ -587,9 +595,6 @@ fn judge_using_gateway<'a>(
     };
 
     let config = Settings::load(&core.dir);
-    let model = config
-        .as_ref()
-        .map_or(judge::DEFAULT_MODEL, |config| config.model.as_str());
     let mut attempts = Vec::new();
     let mut cause = "gateway_no_key";
     let result = (|| {
@@ -671,7 +676,6 @@ fn judge_using_gateway<'a>(
         );
         let decision = gateway()?.decide(
             &key,
-            model,
             &context,
             &catalog,
             recent.policy,
@@ -712,7 +716,7 @@ fn judge_using_gateway<'a>(
         "request": request.text, "check_in": request.check_in,
         "action": decision.as_ref().map_or(json!("fallback"), |d| json!(d.action)),
         "services": decision.as_ref().map_or(&[][..], |d| d.services.as_slice()),
-        "minutes": decision.as_ref().map_or(0, |d| d.minutes), "model": model,
+        "minutes": decision.as_ref().map_or(0, |d| d.minutes), "model": judge::model(),
         "latency_ms": elapsed.elapsed().as_millis() as u64, "overridden": false, "failure": failure,
         "attempts_count": attempts.len(), "attempts": attempts,
     });
@@ -737,6 +741,7 @@ fn judge_using_gateway<'a>(
             peek_target,
             hold: None,
             trace,
+            target,
         },
     );
     drop(tickets);
@@ -769,6 +774,7 @@ fn judge_using_gateway<'a>(
             recent.policy.manual_choices()
         },
         friction: recent.policy.friction(failure.is_some()),
+        target,
     })
 }
 
@@ -786,6 +792,9 @@ pub fn begin_hold(
     let policy = recent.policy;
     let mut tickets = core.judge_tickets.0.lock().unwrap();
     let ticket = ticket(&mut tickets, id)?;
+    if ticket.target == AskTarget::Phone {
+        return Err("This pause is for the phone".into());
+    }
     if override_full {
         return Err("Ask overrides are disabled. Use Emergency Shield in Settings if needed.".into());
     }
@@ -894,23 +903,41 @@ pub(crate) fn apply_with_trace(
     let mut cause = "decision_expired";
     let result = (|| {
         let mut saved = core.saved.lock().unwrap();
+        if !input.override_full && input.hold_id.is_none() && input.manual_minutes.is_none() {
+            if let Some(lease) = saved.scoped_pause.as_ref().filter(|lease| lease.active_id(&input.id, now_ms())) {
+                return Ok(Applied::AllowServices { scoped_until: lease.until });
+            }
+        }
         let recent = Recent::read(core, &saved, devices);
         let policy = recent.policy;
         let mut tickets = core.judge_tickets.0.lock().unwrap();
-        let ticket = ticket(&mut tickets, &input.id)?;
-        trace = ticket.trace.clone();
+        let (target, decision_action) = {
+            let ticket = ticket(&mut tickets, &input.id)?;
+            trace = ticket.trace.clone();
+            (ticket.target, ticket.decision.as_ref().map(|decision| decision.action))
+        };
         cause = "laptop_rejected";
-        let model_action = ticket.decision.as_ref().map(|d| d.action);
         if input.override_full {
             return Err("Ask overrides are disabled. Use Emergency Shield in Settings if needed.".into());
         }
-        let action = if ticket.fallback() {
-            Action::FullPause
+        let action = decision_action.unwrap_or(Action::FullPause);
+        if action == Action::FullPause && target == AskTarget::Phone {
+            return Err("This pause is for the phone".into());
+        }
+        // Scope Start consumes its ticket even if setup fails. Recovery only reads
+        // the journal, and cannot replay a NextDNS write under the same ID.
+        let scoped = matches!(action, Action::AllowServices | Action::AllowDomains);
+        let mut scoped_ticket;
+        let ticket = if scoped {
+            scoped_ticket = tickets.remove(&input.id).unwrap();
+            &mut scoped_ticket
         } else {
-            model_action.unwrap()
+            // Full-pause hold still uses the live ticket until it applies.
+            tickets.get_mut(&input.id).unwrap()
         };
         let mut applied_minutes = 0;
-        let mut services = &[][..];
+        let services = ticket.decision.as_ref().filter(|d| d.action == Action::AllowServices)
+            .map_or(&[][..], |d| d.services.as_slice());
         let result = match action {
             Action::FullPause => {
                 if policy.cap() == 0 && !ticket.fallback() { cause = "cap_exceeded"; }
@@ -933,53 +960,30 @@ pub(crate) fn apply_with_trace(
                     state: core.view_locked(&saved),
                 }
             }
-            Action::AllowServices => {
+            Action::AllowServices | Action::AllowDomains => {
                 let decision = ticket.decision.as_ref().unwrap();
                 applied_minutes = decision.minutes.min(10);
-                services = decision.services.as_slice();
-                let domains = Catalog::load(&core.dir)?.domains(services)?;
-                if domains != ticket.approved_domains {
-                    return Err("The services catalog changed. Ask for a new decision.".into());
+                let start = (|| {
+                    let domains = ticket.approved_domains.clone();
+                    let labels = if action == Action::AllowServices {
+                        if Catalog::load(&core.dir)?.domains(services)? != domains {
+                            return Err("The services catalog changed. Ask for a new decision.".into());
+                        }
+                        services.to_vec()
+                    } else {
+                        if domains.is_empty() || domains.iter().any(|d| judge::is_entertainment_domain(d)) {
+                            return Err("Only verified non-entertainment domains can be opened".into());
+                        }
+                        domains.clone()
+                    };
+                    cause = "dns_apply_failed";
+                    start_scope(core, &mut saved, domains, applied_minutes, &ticket.request,
+                        &input.id, &labels, &trace, &mut cause)
+                })();
+                if start.is_err() {
+                    record_scope_rejection(core, &mut saved, &input.id);
                 }
-                cause = "dns_apply_failed";
-                let until = start_scope(
-                    core,
-                    &mut saved,
-                    domains,
-                    applied_minutes,
-                    &ticket.request,
-                    &input.id,
-                    services,
-                    &trace,
-                    &mut cause,
-                )?;
-                Applied::AllowServices {
-                    scoped_until: until,
-                }
-            }
-            Action::AllowDomains => {
-                let decision = ticket.decision.as_ref().unwrap();
-                applied_minutes = decision.minutes.min(10);
-                let domains = ticket.approved_domains.clone();
-                if domains.is_empty() || domains.iter().any(|d| judge::is_entertainment_domain(d)) {
-                    return Err("Only verified non-entertainment domains can be opened".into());
-                }
-                cause = "dns_apply_failed";
-                let labels: Vec<String> = domains.clone();
-                let until = start_scope(
-                    core,
-                    &mut saved,
-                    domains,
-                    applied_minutes,
-                    &ticket.request,
-                    &input.id,
-                    &labels,
-                    &trace,
-                    &mut cause,
-                )?;
-                Applied::AllowServices {
-                    scoped_until: until,
-                }
+                Applied::AllowServices { scoped_until: start? }
             }
             Action::Peek => {
                 let url = ticket
@@ -1062,6 +1066,20 @@ fn persist_lease(core: &Core, saved: &mut Saved, value: Option<Lease>) -> Result
     commit_state(core, saved, new)
 }
 
+fn record_scope_rejection(core: &Core, saved: &mut Saved, id: &str) {
+    if saved.scoped_pause.as_ref().is_some_and(|lease| lease.timer.as_ref().is_some_and(|timer| timer.id == id))
+        || saved.pending_grants.values().any(|pending| pending.receipt.as_ref().is_some_and(|receipt| receipt.id == id))
+        || saved.scope_receipt.as_ref().is_some_and(|receipt| receipt.id == id)
+    {
+        return;
+    }
+    let mut new = saved.clone();
+    new.scope_receipt = Some(nextdns::GrantReceipt { id: id.into(), until: 0, opened: false });
+    if let Err(error) = commit_state(core, saved, new) {
+        core.log(&error);
+    }
+}
+
 pub(crate) fn load_nextdns_api(core: &Core, trace: Option<&PauseTrace>) -> Result<NextDns, String> {
     let settings = Settings::load(&core.dir)?;
     let key = settings.nextdns_key()?;
@@ -1100,13 +1118,8 @@ fn start_scope(
         *cause = "dns_paused";
         return Err("End the current pause and wait for protection to restore first".into());
     }
-    if domains
-        .iter()
-        .any(|domain| saved.pending_grants.contains_key(domain))
-    {
-        return Err(
-            "NextDNS is still reconciling a previous grant for one of these domains".into(),
-        );
+    if !saved.pending_grants.is_empty() {
+        return Err("NextDNS is still restoring a previous grant".into());
     }
     if !core.dry { core.require_dns_profile()?; }
     if !matches!(core.dns("status"), Ok(ref out) if out.contains("STATUS on")) {
@@ -1123,6 +1136,7 @@ fn start_scope(
         in_flight: None,
         trace: Some(trace.clone()),
     };
+    persist_lease(core, saved, Some(lease.clone()))?;
     let grant = (|| {
         if !core.dry {
             *cause = "scope_key_missing";
@@ -1192,7 +1206,15 @@ pub fn sweep_scope(core: &Core, saved: &mut Saved, early: bool) -> Result<bool, 
         now_ms(),
         early,
         |updated| match updated {
-            nextdns::JournalUpdate::Lease(lease) => persist_lease(core, saved, lease),
+            nextdns::JournalUpdate::Lease(Some(lease)) => persist_lease(core, saved, Some(lease)),
+            nextdns::JournalUpdate::Lease(None) => {
+                let mut new = saved.clone();
+                new.scoped_pause = None;
+                if let Some(receipt) = lease.receipt() {
+                    new.scope_receipt = Some(receipt);
+                }
+                commit_state(core, saved, new)
+            }
             nextdns::JournalUpdate::Park { domain, prior } => {
                 let mut new = Saved {
                     scoped_pause: None,
@@ -1205,6 +1227,7 @@ pub fn sweep_scope(core: &Core, saved: &mut Saved, early: bool) -> Result<bool, 
                         prior,
                         observed: false,
                         restored: false,
+                        receipt: lease.receipt(),
                         trace: lease.trace.clone(),
                     },
                 );
@@ -1227,10 +1250,15 @@ pub fn sweep_scope(core: &Core, saved: &mut Saved, early: bool) -> Result<bool, 
         || flush_cache(core),
     );
     if !matches!(cleaned, Ok(false)) {
-        core.event("nextdns", "cleanup", if cleaned.is_ok() { "ok" } else { "failed" },
-            if cleaned.is_ok() { "ok" } else { "dns_apply_failed" },
+        let mut fields = lease.trace.as_ref().map_or_else(|| json!({}), PauseTrace::fields);
+        fields["delay_ms"] = json!(now_ms().saturating_sub(lease.until));
+        let parked = lease.in_flight.as_ref().is_some_and(|domain| saved.pending_grants.contains_key(domain));
+        let (outcome, cause) = if parked { ("blocked", "dns_apply_failed") }
+            else if cleaned.is_ok() { ("ok", "ok") }
+            else { ("failed", "dns_apply_failed") };
+        core.event("nextdns", "cleanup", outcome, cause,
             focus_devices::events::elapsed(started),
-            lease.trace.as_ref().map_or_else(|| json!({}), PauseTrace::fields));
+            fields);
     }
     let cleaned = cleaned?;
     if cleaned {
@@ -1245,19 +1273,21 @@ pub fn sweep_scope(core: &Core, saved: &mut Saved, early: bool) -> Result<bool, 
     Ok(cleaned)
 }
 
-pub fn sweep_pending(core: &Core) {
+pub fn sweep_pending(core: &Core) -> bool {
     if core.dry {
-        return;
+        return false;
     }
     let pending_grants = core.saved.lock().unwrap().pending_grants.clone();
     if pending_grants.is_empty() {
-        return;
+        return false;
     }
+    let mut changed = false;
     let mut current_by_profile = BTreeMap::new();
     for (domain, pending) in pending_grants {
         let started = Instant::now();
         let trace = pending.trace.clone();
         let profile = pending.profile.clone();
+        let receipt = pending.receipt.clone();
         let current = (!pending.observed).then(|| {
             current_by_profile.entry(profile.clone()).or_insert_with(|| {
                 with_cleanup_api_outcome(core, profile.as_deref(), None, NextDns::current)
@@ -1284,6 +1314,9 @@ pub fn sweep_pending(core: &Core) {
                     }
                     None => {
                         new.pending_grants.remove(&domain);
+                        if let Some(receipt) = receipt.clone() {
+                            new.scope_receipt = Some(receipt);
+                        }
                     }
                 }
                 commit_state(core, &mut saved, new)
@@ -1292,16 +1325,23 @@ pub fn sweep_pending(core: &Core) {
             || flush_cache(core),
         );
         if !matches!(result, Ok(false)) {
+            let mut fields = trace.as_ref().map_or_else(|| json!({}), PauseTrace::fields);
+            if let Some(receipt) = &receipt {
+                fields["delay_ms"] = json!(now_ms().saturating_sub(receipt.until));
+            }
             core.event("nextdns", "reconcile", if result.is_ok() { "ok" } else { "failed" },
                 if result.is_ok() { "ok" } else { cause },
                 focus_devices::events::elapsed(started),
-                trace.as_ref().map_or_else(|| json!({}), PauseTrace::fields));
+                fields);
         }
-        if let Err(error) = result {
-            core.log(&format!("NextDNS grant reconciliation pending: {error}"));
+        match result {
+            Ok(true) => changed = true,
+            Ok(false) => {}
+            Err(error) => core.log(&format!("NextDNS grant reconciliation pending: {error}")),
         }
     }
     discard_cleanup_keys(core, &core.saved.lock().unwrap());
+    changed
 }
 
 #[tauri::command(async)]
@@ -1328,22 +1368,6 @@ pub async fn pause_judge_settings_save(
         }
         let saved = core.saved.lock().unwrap();
         let mut settings = Settings::load(&core.dir)?;
-        if let Some(model) = update.model {
-            let model = model.trim();
-            let (provider, id) = model
-                .split_once('/')
-                .ok_or("Enter a Vercel Gateway model as provider/model")?;
-            let valid = |part: &str| {
-                !part.is_empty()
-                    && part
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
-            };
-            if model.len() > 100 || !valid(provider) || !valid(id) {
-                return Err("Enter a Vercel Gateway model as provider/model".into());
-            }
-            settings.model = model.into();
-        }
         if let Some(key) = update.gateway_key {
             settings.set_gateway_key(protect_key(&key)?);
         }
@@ -1394,7 +1418,7 @@ pub async fn judge_pause(
     let deadline = Instant::now() + budget;
     let task = tauri::async_runtime::spawn_blocking(move || {
         judge_using_gateway(&core, &tracker, &devices, request, deadline,
-            PauseTrace::new(false, None), Gateway::shared)
+            PauseTrace::new(false, None), AskTarget::Laptop, Gateway::shared)
     });
     tokio::time::timeout(budget, task).await
         .map_err(|_| ASK_TIMEOUT.to_owned())?
@@ -1462,6 +1486,7 @@ mod tests {
             Request { text: "Check a post".into(), check_in: None },
             started + Duration::from_millis(45),
             PauseTrace::new(false, None),
+            AskTarget::Laptop,
             || panic!("Request should expire before calling the Gateway"),
         ).err();
         assert_eq!(error.as_deref(), Some(ASK_TIMEOUT));
@@ -1497,9 +1522,9 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(3);
         let correlation = "00000000-0000-4000-8000-000000000001";
         let ask = || once_remote(
-            core, request.clone(), deadline, Some(correlation),
+            core, request.clone(), deadline, Some(correlation), AskTarget::Laptop,
             |request, correlation| judge_using_gateway(
-                core, &tracker, &devices, request, deadline, PauseTrace::new(true, correlation), || Ok(&gateway),
+                core, &tracker, &devices, request, deadline, PauseTrace::new(true, correlation), AskTarget::Laptop, || Ok(&gateway),
             ),
         ).unwrap();
         let reply = std::thread::scope(|scope| {
@@ -1533,7 +1558,7 @@ mod tests {
 
         // Lose the in-memory cache as after expiry or a restart.
         *core.judge_tickets.1.lock().unwrap() = RemoteAsks::default();
-        let replay = once_remote(core, request, Instant::now() + Duration::from_secs(2), Some(correlation),
+        let replay = once_remote(core, request, Instant::now() + Duration::from_secs(2), Some(correlation), AskTarget::Laptop,
             |_, _| panic!("An expired Ask ID must not mint another ticket"));
         assert_eq!(replay.err().as_deref(), Some("Pause decision expired or was already used. Ask again."));
     }
@@ -1601,7 +1626,100 @@ mod tests {
             peek_target: None,
             hold: None,
             trace: PauseTrace::new(false, None),
+            target: AskTarget::Laptop,
         }
+    }
+
+    #[test]
+    fn lost_scope_reply_recovers_one_grant_across_restart_and_expiry() {
+        let fixture = crate::dns_tests::Fixture::new(|_| Ok("STATUS on".into()));
+        let core = &fixture.core;
+        let devices = Devices(Err("test".into()));
+        let mut offer = ticket_with(Some(Decision {
+            action: Action::AllowDomains,
+            domains: vec!["work.example".into()],
+            services: vec![],
+            minutes: 5,
+            message: "Open the work site".into(),
+            counter_offer: None,
+        }), 0);
+        offer.approved_domains = vec!["work.example".into()];
+        let mut replacement = ticket_with(offer.decision.clone(), 0);
+        replacement.approved_domains = offer.approved_domains.clone();
+        core.judge_tickets.0.lock().unwrap().insert("grant".into(), offer);
+        let input = || serde_json::from_value(json!({"id": "grant"})).unwrap();
+        let status = || crate::device_commands::scoped_access_status(core, "grant", Instant::now()).unwrap();
+        assert_eq!(status()["status"], "unknown");
+        let Applied::AllowServices { scoped_until } = apply(core, &devices, input()).unwrap() else { panic!("No grant"); };
+        *core.saved.lock().unwrap() = crate::load_saved(&core.dir).unwrap();
+        assert!(core.judge_tickets.0.lock().unwrap().is_empty());
+        let recovered = status();
+        assert_eq!(recovered["status"], "active");
+        assert_eq!(recovered["scoped_timer"]["dns"]["scoped_grant"]["id"], "grant");
+        assert_eq!(recovered["scoped_timer"]["dns"]["scoped_until"], scoped_until);
+        core.judge_tickets.0.lock().unwrap().insert("replacement".into(), replacement);
+        let replacement = serde_json::from_value(json!({"id": "replacement"})).unwrap();
+        assert!(apply(core, &devices, replacement).is_err());
+        *core.saved.lock().unwrap() = crate::load_saved(&core.dir).unwrap();
+        let rejected = crate::device_commands::scoped_access_status(core, "replacement", Instant::now()).unwrap();
+        assert_eq!(rejected["status"], "failed");
+        assert_eq!(rejected["scoped_timer"]["dns"]["scoped_grant"]["id"], "grant");
+        let duplicate = apply(core, &devices, input()).unwrap();
+        assert_eq!(json!(duplicate)["scoped_until"], scoped_until);
+        let history = fs::read_to_string(core.dir.join("pauses.jsonl")).unwrap();
+        assert_eq!(history.lines().count(), 2, "One scoped grant and one application");
+
+        let mut saved = core.saved.lock().unwrap();
+        saved.scoped_pause.as_mut().unwrap().until = now_ms() - 2_000;
+        assert!(saved.scope_restoring(now_ms()));
+        drop(saved);
+        let restoring = status();
+        assert_eq!(restoring["status"], "restoring");
+        assert_eq!(restoring["scoped_timer"]["dns"]["scoped_restoring"], true);
+        assert!(sweep_scope(core, &mut core.saved.lock().unwrap(), false).unwrap());
+        *core.saved.lock().unwrap() = crate::load_saved(&core.dir).unwrap();
+        assert_eq!(status()["status"], "restored");
+        assert!(apply(core, &devices, input()).is_err());
+    }
+
+    #[test]
+    fn phone_full_pause_ticket_cannot_pause_windows() {
+        let fixture = crate::dns_tests::Fixture::new(|_| panic!("A phone ticket must not touch Windows DNS"));
+        let core = &fixture.core;
+        let devices = Devices(Err("test".into()));
+        let mut phone = ticket_with(None, 60_000);
+        phone.target = AskTarget::Phone;
+        core.judge_tickets.0.lock().unwrap().insert("phone".into(), phone);
+        assert_eq!(begin_hold(core, &devices, "phone", false).err().as_deref(), Some("This pause is for the phone"));
+        let input = serde_json::from_value(json!({"id": "phone", "hold_id": "held"})).unwrap();
+        assert_eq!(apply(core, &devices, input).err().as_deref(), Some("This pause is for the phone"));
+        assert_eq!(core.saved.lock().unwrap().paused_until, 0);
+    }
+
+    #[test]
+    fn interrupted_start_keeps_its_id_and_blocks_a_replacement() {
+        let fixture = crate::dns_tests::Fixture::new(|_| panic!("Pending cleanup must block a new grant"));
+        let core = &fixture.core;
+        let mut saved = core.saved.lock().unwrap();
+        saved.scoped_pause = Some(Lease {
+            profile: Some("a1b2c3".into()),
+            until: now_ms() + MINUTE_MS,
+            started: None,
+            timer: Some(nextdns::GrantTimer { id: "first".into(), duration_ms: MINUTE_MS }),
+            services: vec!["work.example".into()],
+            changes: BTreeMap::from([("work.example".into(), nextdns::Prior::Missing)]),
+            in_flight: Some("work.example".into()),
+            closing: false,
+            trace: None,
+        });
+        assert!(sweep_scope(core, &mut saved, false).unwrap());
+        *saved = crate::load_saved(&core.dir).unwrap();
+        assert!(saved.scoped_pause.is_none() && saved.scope_restoring(now_ms()));
+        let request = Request { text: "Check the schedule".into(), check_in: None };
+        assert!(start_scope(core, &mut saved, vec!["another.example".into()], 1, &request, "second",
+            &[], &PauseTrace::new(false, None), &mut "").is_err());
+        drop(saved);
+        assert_eq!(crate::device_commands::scoped_access_status(core, "first", Instant::now()).unwrap()["status"], "restoring");
     }
 
     #[test]
@@ -1687,11 +1805,20 @@ mod tests {
 
     #[test]
     fn removing_gateway_key_keeps_manual_fallback_enabled() {
-        let mut settings: Settings =
-            serde_json::from_value(json!({"gateway_dpapi":"fixture"})).unwrap();
+        let mut settings: Settings = serde_json::from_value(json!({
+            "model": "anthropic/claude-haiku-5.5",
+            "gateway_dpapi": "fixture",
+            "nextdns_dpapi": "nextdns-fixture",
+        })).unwrap();
+        assert!(settings.view().has_gateway_key);
+        assert!(settings.view().has_nextdns_key);
         settings.set_gateway_key(None);
-        let reloaded: Settings = serde_json::from_value(json!(settings)).unwrap();
+        let saved = json!(settings);
+        assert_eq!(saved["model"], judge::DEFAULT_INTENTION_MODEL);
+        assert_eq!(judge::model(), "openai/gpt-6-luna");
+        let reloaded: Settings = serde_json::from_value(saved).unwrap();
         assert!(reloaded.enabled());
+        assert_eq!(reloaded.nextdns_dpapi.as_deref(), Some("nextdns-fixture"));
         assert_eq!(reloaded.gateway_key().unwrap_err(), Failure::Configuration);
         assert!(!Settings::default().enabled());
     }
