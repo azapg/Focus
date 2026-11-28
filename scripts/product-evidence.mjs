@@ -51,6 +51,29 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 }
 
+// Record native build inputs by content so squash merges and shallow clones
+// can verify a walkthrough without retaining the capture commit in their history.
+function nativeInputs(platform) {
+  const shared = ["shared/android", "telemetry/android/LocalTelemetry.java"];
+  return platform === "tv" ? ["tv", ...shared] : [
+    "android", ...shared, "shared/ask-retry.json", "app/src/judge_prompt.txt",
+    "app/src/services.json", "scripts/updater-repo.sh",
+  ];
+}
+
+function nativeFingerprint(revision, inputs) {
+  const trees = execFileSync("git", ["ls-tree", "-z", revision, "--", ...inputs], { cwd: root });
+  return createHash("sha256").update(trees).digest("hex");
+}
+
+const sourceFlag = process.argv.indexOf("--native-sources");
+if (sourceFlag !== -1) {
+  const revision = process.argv[sourceFlag + 1];
+  if (!revision || !/^[0-9a-f]{7,40}$/.test(revision)) throw new Error("Supply the capture commit SHA after --native-sources");
+  for (const platform of ["phone", "tv"]) console.log(platform, nativeFingerprint(revision, nativeInputs(platform)));
+  process.exit(0);
+}
+
 async function nativeWalks() {
   const output = [];
   for (const platform of ["phone", "tv"]) {
@@ -73,12 +96,9 @@ async function nativeWalks() {
     }
     let status = steps.length === 0 || !manifest.source_commit ? "missing" : "captured";
     if (status === "captured") {
-      try {
-        execFileSync("git", ["merge-base", "--is-ancestor", manifest.source_commit, "HEAD"], { cwd: root, stdio: "ignore" });
-        execFileSync("git", ["diff", "--quiet", manifest.source_commit, "HEAD", "--", "android", "shared/android", ...(platform === "tv" ? ["tv"] : [])], { cwd: root, stdio: "ignore" });
-      } catch {
-        status = "stale";
-      }
+      const inputs = nativeInputs(platform);
+      const edited = execFileSync("git", ["status", "--porcelain", "--", ...inputs], { cwd: root });
+      if (edited.length || nativeFingerprint("HEAD", inputs) !== manifest.source_fingerprint) status = "stale";
     }
     output.push({ platform, sourceCommit: manifest.source_commit, status, steps });
   }
@@ -130,11 +150,30 @@ appHtml = appHtml.replace(scripts[0][0], `<script>${sampleMode}\n${deviceFixture
 appHtml = appHtml.replace(/<link\b[^>]*rel="modulepreload"[^>]*>/g, "");
 
 const native = await nativeWalks();
+const nativeGuide = {
+  phone: {
+    route: "On Today, open the coin balance. The phone capture uses a fictional active wallet at zero coins on an AOSP emulator.",
+    links: [
+      ["Today header", "android/src/org/nightingalelab/focus/phone/MainActivity.java"],
+      ["Store sheet and wallet visibility", "android/src/org/nightingalelab/focus/phone/StoreSheet.java"],
+    ],
+  },
+  tv: {
+    route: "Open the blocked fictional app, then choose Store free time. Captured with the TV app on a landscape AOSP emulator.",
+    links: [
+      ["Blocked-app screen", "tv/src/org/nightingalelab/focus/tv/BlockActivity.java"],
+      ["Free time purchase options", "tv/src/org/nightingalelab/focus/tv/PauseForm.java"],
+    ],
+  },
+};
 const nativeMarkup = native.map((walk) => {
   const name = walk.platform === "phone" ? "Phone" : "TV";
   const status = walk.status === "captured" ? `captured from ${escapeHtml(walk.sourceCommit)}` : walk.status;
   const shots = walk.steps.map((step) => `<figure><img src="${step.image}" alt="${escapeHtml(step.title)}"><figcaption>${escapeHtml(step.title)}</figcaption></figure>`).join("");
-  return `<details class="native-evidence"><summary>${name} evidence · ${status}</summary><p><a href="../../docs/product/native/${walk.platform}/manifest.json">Open ${name} manifest</a></p>${shots}</details>`;
+  const guide = nativeGuide[walk.platform];
+  const links = [...guide.links, ["Capture scenario", "tests/screenshot_emulator.py"]]
+    .map(([label, path]) => `<a href="../../${path}">${label}</a>`).join("");
+  return `<details class="native-evidence"><summary>${name} evidence · ${status}</summary><p>${guide.route}</p><nav class="links">${links}</nav><p><a href="../../docs/product/native/${walk.platform}/manifest.json">Open ${name} manifest</a></p>${shots}</details>`;
 }).join("");
 
 const shell = `<!doctype html>
@@ -144,7 +183,7 @@ const shell = `<!doctype html>
 </style></head><body><main><header class="heading"><div><h1>Focus · Desktop preview</h1><p>Production desktop frontend · fictional activity · offline</p></div></header>
 <div class="samples" role="group" aria-label="Wallet sample"><button type="button" data-sample="zero" aria-pressed="true">Clean wallet · 0 coins</button><button type="button" data-sample="funded" aria-pressed="false">Funded sample · 65 coins</button><span>No real purchase</span></div>
 <iframe class="app-frame" id="focus-desktop-frame" title="Focus desktop Today and Store" loading="eager"></iframe>
-<section class="evidence"><details><summary>Source, build and capture evidence</summary><p>Offline fixture. The controls above switch sample balances in this page.</p><p class="fingerprint">Built Vite assets · SHA-256 <code>${buildHash}</code></p><p class="fingerprint">UI source snapshot · SHA-256 <code>${sourceHash}</code></p><p>Checked-out frontend verified. Shipped desktop package: not verified.</p><p>Today is the default Stats range. Store appears on Today while the wallet is active.</p><nav class="links"><a href="../../ui/widget.js#L45">Today range rule</a><a href="../../ui/src/devices.tsx#L546">Store visibility</a><a href="../../ui/src/wallet-store.tsx#L25">Store source</a><a href="../../tests/product-entry.py">Entry smoke test</a><a href="../../tests/wallet-store.py">Store test</a><a href="../../scripts/product-evidence.mjs">Generator</a></nav>${nativeMarkup}</details></section></main>
+<section class="evidence"><details><summary>Source, build and capture evidence</summary><p>Offline fixture. The controls above switch sample balances in this page.</p><p class="fingerprint">Built Vite assets · SHA-256 <code>${buildHash}</code></p><p class="fingerprint">UI source snapshot · SHA-256 <code>${sourceHash}</code></p><p>Checked-out frontend verified. Shipped desktop package: not verified.</p><p>Today is the default Stats range. Store appears on Today while the wallet is active.</p><nav class="links"><a href="../../ui/widget.js#L41">Today range rule</a><a href="../../ui/src/devices.tsx#L546">Today header</a><a href="../../ui/src/wallet-store.tsx#L25">Store and wallet visibility</a><a href="../../app/src/wallet.rs">Fresh-profile startup test</a><a href="../../tests/product-entry.py">Entry smoke test</a><a href="../../tests/wallet-store.py">Store test</a><a href="../../scripts/product-evidence.mjs">Generator</a></nav>${nativeMarkup}</details></section></main>
 <script>window.__FOCUS_PRODUCT_SAMPLE__=new URLSearchParams(location.search).get("wallet")==="funded"?"funded":"zero";const frame=document.getElementById("focus-desktop-frame");const appBytes=Uint8Array.from(atob("${Buffer.from(appHtml).toString("base64")}"),char=>char.charCodeAt(0));frame.srcdoc=new TextDecoder().decode(appBytes);function chooseSample(sample){window.__FOCUS_PRODUCT_SAMPLE__=sample;document.querySelectorAll("[data-sample]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.sample===sample)));frame.contentWindow?.__FOCUS_SET_SAMPLE__?.(sample)}document.addEventListener("pointerdown",event=>{if(event.target.closest("[data-sample]"))event.preventDefault()});document.querySelectorAll("[data-sample]").forEach(button=>button.addEventListener("click",()=>chooseSample(button.dataset.sample)));frame.addEventListener("load",()=>frame.contentWindow?.__FOCUS_SET_SAMPLE__?.(window.__FOCUS_PRODUCT_SAMPLE__));chooseSample(window.__FOCUS_PRODUCT_SAMPLE__);</script></body></html>`;
 const html = shell;
 if (check) {

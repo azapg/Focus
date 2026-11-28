@@ -2,6 +2,7 @@
   "schema": 1,
   "platform": "tv",
   "source_commit": "09deda290c9505254857d73480da831b7ed66ced",
+  "source_fingerprint": "d40e125b3a904833bac227121b7dc3dcc2133f7ece6a3af34f541263145fde10",
   "steps": [
     {
       "title": "Blocked app · 0 coins",

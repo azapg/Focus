@@ -2,6 +2,7 @@
   "schema": 1,
   "platform": "phone",
   "source_commit": "09deda290c9505254857d73480da831b7ed66ced",
+  "source_fingerprint": "ac3cb56998f7c71c27fc941771850ded9f856dd4e47c53bbdb2262fbd96aeaa9",
   "steps": [
     {
       "title": "Today · 0 coins",

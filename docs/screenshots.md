@@ -57,8 +57,9 @@ using a new signing key. It starts a fresh guest with an isolated ADB server,
 masks host USB devices and keeps only loopback available on the host side of the
 guest network. It installs only the freshly built APKs. The runner grants
 notification permission inside the disposable guest to suppress Android's
-first-run prompt; it does not grant Private DNS or accessibility. The phone
-screenshot build omits the Peek renderer and does not produce a release manifest.
+first-run prompt. Only the blocked-app TV scenario enables Focus’s accessibility
+service, which presents the restriction screen. The guest keeps Private DNS at its
+default. The phone screenshot build omits the Peek renderer and does not produce a release manifest.
 The phone flow shows Today, Week and the update sheet. The TV flow shows Today
 and Week, selected through the production remote-control navigation.
 Use `phone-store` with the same SDK and image arguments to capture a time-off
@@ -71,10 +72,12 @@ certified Android TV build.
 
 For the Open Focus pilot, copy the selected PNGs into
 `docs/product/native/{phone,tv}/` and add a sibling `manifest.json` with
-`schema: 1`, the platform name, the source commit used for capture, and ordered
-`steps` containing each visible title and relative PNG filename. Keep the
-captured output directory disposable; the repo-local PNGs and manifest are the
-reviewable refresh.
+`schema: 1`, the platform name, the source commit used for capture, its
+platform-specific `source_fingerprint`, and ordered `steps` containing each
+visible title and relative PNG filename. Keep the
+captured output directory disposable. To print both fingerprints, run
+`node scripts/product-evidence.mjs --native-sources <capture-commit-sha>`.
+Review the PNGs for personal data before committing them with the manifest.
 
 Choose a new output directory for each run. Successful runs publish a directory
 of PNGs. The built APKs, emulator data and profiles are discarded. Fonts,
